@@ -10,14 +10,16 @@ plugins {
     id 'io.spring.dependency-management'
     id 'maven-publish'
     id 'jacoco'
+    id 'signing'
 }
 
 group 'de.telekom.eni'
-version "${parentVersion}"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
+    withJavadocJar()
+    withSourcesJar()
 }
 
 dependencyManagement {
@@ -38,13 +40,53 @@ dependencies {
 
 publishing {
     publications {
-        mavenPublication(MavenPublication) {
+        mavenJava(MavenPublication) {
             from components.java
             groupId 'de.telekom.eni'
             artifactId 'horizon-spring-boot-starter'
-            version project.version
+            version = project.properties['version']
+
+            pom {
+                name = 'Horizon spring parent starter'
+                description = 'Spring-boot-starter for pubsub horizon java components.'
+                url = 'https://github.com/telekom/pubsub-horizon-spring-parent'
+                inceptionYear = '2022'
+
+                licenses {
+                    license {
+                        name = 'Apache-2.0'
+                        url = 'https://opensource.org/licenses/Apache-2.0'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'eni-pandora'
+                        name = 'Team Pandora'
+                        email = 'dtit_eni_hub_team_pandora@telekom.de'
+                        organization = 'Deutsche Telekom IT GmbH'
+                        organizationUrl = 'https://developer.telekom.de/'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:git://github.com/telekom/pubsub-horizon-spring-parent.git'
+                    developerConnection = 'scm:git:git://github.com/telekom/pubsub-horizon-spring-parent.git'
+                    url = 'https://github.com/telekom/pubsub-horizon-spring-parent'
+                }
+            }
         }
     }
+
+    repositories {
+        maven {
+            name = "OSSRH"
+            url = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+            credentials {
+                username = System.getenv('PUBLISH_USERNAME')
+                password = System.getenv('PUBLISH_PASSWORD')
+            }
+        }
+    }
+
 }
 
 test {
@@ -57,5 +99,19 @@ jacocoTestReport {
     reports {
         xml.required = true
         html.required = true
+    }
+}
+
+signing {
+    def signingKey = new String(Base64.decoder.decode(System.getenv('PUBLISH_GPG_PRIVATE_KEY') ?: ""))
+    def signingPassword = System.getenv('PUBLISH_GPG_PASSPHRASE')
+    useInMemoryPgpKeys(signingKey, signingPassword)
+
+    sign publishing.publications.mavenJava
+}
+
+javadoc {
+    if (JavaVersion.current().isJava9Compatible()) {
+        options.addBooleanOption('html5', true)
     }
 }
