@@ -2,7 +2,5 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-.gradle
-.idea
-build/
-bin/
+[Development][1] @dhei/teams/pandora/pandora-internal
+*

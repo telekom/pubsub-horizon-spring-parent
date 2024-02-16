@@ -1,0 +1,22 @@
+// Copyright 2024 Deutsche Telekom IT GmbH
+//
+// SPDX-License-Identifier: Apache-2.0
+
+pluginManagement {
+    plugins {
+        id 'org.springframework.boot' version "${springBootVersion}" apply false
+        id 'org.sonarqube' version "${sonarqubeVersion}"
+        id 'io.spring.dependency-management' version "${springDependencyManagementVersion}"
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'horizon-parent'
+include 'horizon-spring-boot-autoconfigure'
+include 'horizon-spring-boot-starter'
+include 'horizon-core'

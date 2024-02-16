@@ -1,0 +1,99 @@
+// Copyright 2024 Deutsche Telekom IT GmbH
+//
+// SPDX-License-Identifier: Apache-2.0
+
+import org.springframework.boot.gradle.plugin.SpringBootPlugin
+
+plugins {
+    id 'java-library'
+    id 'org.springframework.boot' apply false
+    id 'io.spring.dependency-management'
+    id 'maven-publish'
+    id 'jacoco'
+}
+
+group 'de.telekom.eni'
+version "${parentVersion}"
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+dependencyManagement {
+    imports {
+        mavenBom SpringBootPlugin.BOM_COORDINATES
+    }
+}
+
+dependencies {
+    implementation "com.fasterxml.jackson.core:jackson-databind"
+    implementation "jakarta.validation:jakarta.validation-api"
+
+    // Must be compileOnly! Otherwise there will be a conflict with 1.7.x versions of slf4j!
+    compileOnly "org.slf4j:slf4j-api"
+
+    compileOnly "org.projectlombok:lombok"
+    testCompileOnly "org.projectlombok:lombok"
+    annotationProcessor "org.projectlombok:lombok"
+    testAnnotationProcessor "org.projectlombok:lombok"
+
+    // ENI
+    api "de.telekom:json-filter:${jsonFilterVersion}"
+
+    implementation 'org.springframework.boot:spring-boot'
+    implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+
+    testImplementation "de.bwaldvogel:mongo-java-server:1.44.0"
+
+    // local dependencies
+    testImplementation project(':horizon-spring-boot-autoconfigure')
+
+    api "io.fabric8:kubernetes-client:${fabric8Version}"
+    // Hazelcast
+    api "com.hazelcast:hazelcast-all:${hazelcastVersion}"
+
+    // Observability
+    api 'io.micrometer:micrometer-tracing-bridge-brave'
+    api 'io.zipkin.reporter2:zipkin-reporter-brave'
+    api 'io.micrometer:micrometer-registry-prometheus'
+
+    api "net.logstash.logback:logstash-logback-encoder:${logstashLogbackEncoderVersion}"
+
+    api "org.apache.commons:commons-lang3"
+}
+
+publishing {
+    publications {
+        mavenPublication(MavenPublication) {
+            from components.java
+            groupId 'de.telekom.eni'
+            artifactId 'horizon-core'
+            version project.version
+        }
+    }
+}
+
+test {
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+test {
+    useJUnitPlatform()
+}

@@ -1,0 +1,13 @@
+# Copyright 2024 Deutsche Telekom IT GmbH
+#
+# SPDX-License-Identifier: Apache-2.0
+
+include:
+- project: 'dhei/teams/pandora/gitlab-ci-templates'
+  file: '/products/GradleLibrary.Pipeline.gitlab-ci.yml'
+  ref: develop
+
+variables:
+  JAVA_BUILD_IMAGE: mtr.devops.telekom.de/community/jdk:21
+  DS_JAVA_VERSION: 21
+
