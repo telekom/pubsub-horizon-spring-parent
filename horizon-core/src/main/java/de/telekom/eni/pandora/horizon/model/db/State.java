@@ -102,4 +102,6 @@ public class State implements Serializable {
         return builder;
     }
 
+    public static class StateBuilder {}
+
 }
