@@ -1,3 +1,9 @@
+<!--
+Copyright 2024 Deutsche Telekom IT GmbH
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Horizon Spring Parent
 
 This repository provides spring starter library that provides common functionality and models used by all Horizon components. 
