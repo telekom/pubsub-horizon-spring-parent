@@ -17,6 +17,12 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SubscriptionTrigger {
 
+    enum Type {
+        INCLUDE, EXCLUDE
+    }
+
+    private Type responseFilterMode;
+
     private List<String> responseFilter;
 
     private Map<String, String> selectionFilter;
