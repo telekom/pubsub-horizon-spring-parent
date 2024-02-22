@@ -17,11 +17,11 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SubscriptionTrigger {
 
-    enum Type {
+    public enum ResponseFilterMode {
         INCLUDE, EXCLUDE
     }
 
-    private Type responseFilterMode;
+    private ResponseFilterMode responseFilterMode;
 
     private List<String> responseFilter;
 
