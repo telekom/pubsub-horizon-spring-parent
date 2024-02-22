@@ -15,6 +15,10 @@ plugins {
 
 group 'de.telekom.eni'
 
+ext {
+    isReleaseVersion = !version.endsWith("SNAPSHOT")
+}
+
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
@@ -42,6 +46,11 @@ dependencies {
 
     // ENI
     api "de.telekom:json-filter:${jsonFilterVersion}"
+
+    api ("com.github.erosb:everit-json-schema:${everitJsonVersion}") {
+        // fixes logging in test scope
+        exclude group: 'commons-logging'
+    }
 
     implementation 'org.springframework.boot:spring-boot'
     implementation 'org.springframework.kafka:spring-kafka'
@@ -116,7 +125,8 @@ publishing {
     repositories {
         maven {
             name = "OSSRH"
-            url = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+            url = isReleaseVersion ? "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+                    : "https://s01.oss.sonatype.org/content/repositories/snapshots/"
             credentials {
                 username = System.getenv('PUBLISH_USERNAME')
                 password = System.getenv('PUBLISH_PASSWORD')
@@ -143,6 +153,8 @@ test {
 }
 
 signing {
+    required { isReleaseVersion && gradle.taskGraph.hasTask("publish") }
+
     def signingKey = new String(Base64.decoder.decode(System.getenv('PUBLISH_GPG_PRIVATE_KEY') ?: ""))
     def signingPassword = System.getenv('PUBLISH_GPG_PASSPHRASE')
     useInMemoryPgpKeys(signingKey, signingPassword)

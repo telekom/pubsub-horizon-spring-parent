@@ -1,2 +1,3 @@
 de.telekom.eni.pandora.horizon.autoconfigure.HorizonAutoConfiguration
 de.telekom.eni.pandora.horizon.autoconfigure.KubernetesClientConfiguration
+de.telekom.eni.pandora.horizon.autoconfigure.cache.SchemaCacheAutoConfiguration
