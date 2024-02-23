@@ -70,7 +70,7 @@ dependencies {
 
     api "io.fabric8:kubernetes-client:${fabric8Version}"
     // Hazelcast
-    api "com.hazelcast:hazelcast-all:${hazelcastVersion}"
+    api "com.hazelcast:hazelcast:${hazelcastVersion}"
 
     // Observability
     api 'io.micrometer:micrometer-tracing-bridge-brave'
