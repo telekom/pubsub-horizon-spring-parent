@@ -37,4 +37,4 @@ jobs:
           PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
           PUBLISH_GPG_PRIVATE_KEY: ${{ secrets.PUBLISH_GPG_PRIVATE_KEY }}
           PUBLISH_GPG_PASSPHRASE: ${{ secrets.PUBLISH_GPG_PASSPHRASE }}
-        run: ./gradlew -Pversion=0.0.0-SNAPSHOT-${{GITHUB_RUN_ID}} publish
+        run: ./gradlew -Pversion=0.0.0-SNAPSHOT-${{env.GITHUB_RUN_ID}} publish
