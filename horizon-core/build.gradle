@@ -162,6 +162,16 @@ signing {
     sign publishing.publications.mavenJava
 }
 
+task("printVersion") {
+    doLast {
+        println "Version: ${project.version}"
+    }
+}
+
+publish {
+    finalizedBy printVersion
+}
+
 javadoc {
     if (JavaVersion.current().isJava9Compatible()) {
         options.addBooleanOption('html5', true)
