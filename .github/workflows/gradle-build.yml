@@ -5,9 +5,13 @@
 name: Gradle Build and Test
 on:
   push:
+    branches:
+      - main
+      - develop
   pull_request:
     branches:
       - main
+      - develop
 jobs:
   gradle:
     runs-on: ubuntu-latest
@@ -39,3 +43,14 @@ jobs:
           min-coverage-overall: 60
           min-coverage-changed-files: 80
         if: github.event_name == 'pull_request'
+      - name: Execute Gradle snapshot publish
+        if: ${{ !contains(github.ref, 'main') && !contains(github.ref, 'master') && !contains(github.ref, 'develop') }}
+        env:
+          PUBLISH_USERNAME: ${{ secrets.PUBLISH_USERNAME }}
+          PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
+          PUBLISH_GPG_PRIVATE_KEY: ${{ secrets.PUBLISH_GPG_PRIVATE_KEY }}
+          PUBLISH_GPG_PASSPHRASE: ${{ secrets.PUBLISH_GPG_PASSPHRASE }}
+        run: |
+          export LOWERCASE_BRANCH=${GITHUB_REF_NAME,,}
+          export CLEAN_BRANCH=$(echo $LOWERCASE_BRANCH | sed 's/_/-/g; s/\//-/g; s/+/-/g')
+          ./gradlew -Pversion=0.0.0-${CLEAN_BRANCH}-SNAPSHOT publish
