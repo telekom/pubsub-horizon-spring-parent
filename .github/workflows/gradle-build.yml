@@ -5,9 +5,6 @@
 name: Gradle Build and Test
 on:
   push:
-    branches:
-      - main
-      - develop
   pull_request:
     branches:
       - main
@@ -44,7 +41,7 @@ jobs:
           min-coverage-changed-files: 80
         if: github.event_name == 'pull_request'
       - name: Execute Gradle snapshot publish
-        if: ${{ !contains(github.ref, 'main') && !contains(github.ref, 'master') && !contains(github.ref, 'develop') }}
+        if: ${{ github.event_name != 'pull_request' && !contains(github.ref, 'main') && !contains(github.ref, 'master') && !contains(github.ref, 'develop') }}
         env:
           PUBLISH_USERNAME: ${{ secrets.PUBLISH_USERNAME }}
           PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
