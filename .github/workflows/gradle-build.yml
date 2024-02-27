@@ -41,7 +41,7 @@ jobs:
           min-coverage-changed-files: 80
         if: github.event_name == 'pull_request'
       - name: Execute Gradle snapshot publish
-        if: ${{ github.event_name != 'pull_request' && !contains(github.ref, 'main') && !contains(github.ref, 'master') && !contains(github.ref, 'develop') }}
+        if: ${{ github.event_name != 'pull_request' }}
         env:
           PUBLISH_USERNAME: ${{ secrets.PUBLISH_USERNAME }}
           PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
@@ -49,5 +49,5 @@ jobs:
           PUBLISH_GPG_PASSPHRASE: ${{ secrets.PUBLISH_GPG_PASSPHRASE }}
         run: |
           export LOWERCASE_BRANCH=${GITHUB_REF_NAME,,}
-          export CLEAN_BRANCH=$(echo $LOWERCASE_BRANCH | sed 's/_/-/g; s/\//-/g; s/+/-/g')
+          export CLEAN_BRANCH=$(echo $LOWERCASE_BRANCH | sed 's/_/-/g; s/\//-/g; s/+/-/g; s/\./-/g')
           ./gradlew -Pversion=0.0.0-${CLEAN_BRANCH}-SNAPSHOT publish
