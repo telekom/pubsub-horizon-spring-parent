@@ -42,6 +42,9 @@ public class KafkaProperties {
     @Value("${acks:1}")
     private String acks;
 
+    @Value("${maxRequestSize:1048576}")
+    private String maxRequestSize;
+
     private Compression compression = new Compression();
 
 }
