@@ -4,9 +4,22 @@ Copyright 2024 Deutsche Telekom IT GmbH
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Horizon Spring Parent
+<p align="center">
+  <h1 align="center">Horizon Spring Parent</h1>
+</p>
 
-This repository provides spring starter library that provides common functionality and models used by all Horizon components. 
+<p align="center">
+  Parent Spring library required to build Horizon components.
+</p>
+
+<p align="center">
+  <a href="#building-the-library">Building the library</a> •
+  <a href="#using-the-library">Using the library</a> 
+</p>
+
+## Overview
+
+This repository provides spring starter library that provides common functionality and models used by all [Horizon](https://github.com/telekom/pubsub-horizon) components. 
 Basically it is a spring-boot-starter which provides some autoconfigurations for common tasks across the spring-boot components.
 
 * HorizonAutoConfiguration:
@@ -20,7 +33,7 @@ Basically it is a spring-boot-starter which provides some autoconfigurations for
 Additionally, the horizon-spring-parent contains a core project with different classes and interfaces as well as constants 
 for topics in the area of caching (hazelcast), kafka, kubernetes, metrics, tracing and logging.
 
-## How to build
+## Building the library
 
 This project uses gradle as build tool.
 
@@ -29,7 +42,7 @@ To build the project, run the following command:
 ./gradlew clean build
 ```
 
-## How to use
+## Using the library
 
 Add the following to your `build.gradle`:  
 ```
@@ -106,6 +119,10 @@ pandora:
   system. This is useful to identify the service in the tracing system. The actual component name in the trace is also marked 
   in the span as tag `component`. All pubsub components use the value `horizon`.
 
+## Contributing
+
+We're committed to open source, so we welcome and encourage everyone to join its developer community and contribute, whether it's through code or feedback.  
+By participating in this project, you agree to abide by its [Code of Conduct](./CODE_OF_CONDUCT.md) at all times.
 
 ## Code of Conduct
 
