@@ -5,10 +5,12 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.GlobalSerializerConfig;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.spi.properties.ClusterProperty;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
+import de.telekom.eni.pandora.horizon.cache.serdes.GenericJacksonSerdes;
 import de.telekom.eni.pandora.horizon.cache.service.CacheService;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
 import jakarta.annotation.PreDestroy;
@@ -54,6 +56,10 @@ public class CacheAutoConfiguration {
         } else {
             config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(true).addMember("localhost");
         }
+
+        GlobalSerializerConfig gsc = new GlobalSerializerConfig();
+        gsc.setImplementation(new GenericJacksonSerdes()).setOverrideJavaSerialization(true);
+        config.getSerializationConfig().setGlobalSerializerConfig(gsc);
 
         return Hazelcast.getOrCreateHazelcastInstance(config);
     }

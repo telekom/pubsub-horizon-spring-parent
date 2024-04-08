@@ -6,12 +6,12 @@ package de.telekom.eni.pandora.horizon.kafka.event;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import de.telekom.eni.pandora.horizon.tracing.Constants;
 import de.telekom.eni.pandora.horizon.model.event.IdentifiableMessage;
 import de.telekom.eni.pandora.horizon.model.event.MessageType;
 import de.telekom.eni.pandora.horizon.model.event.StatusMessage;
 import de.telekom.eni.pandora.horizon.model.event.SubscriptionEventMessage;
 import de.telekom.eni.pandora.horizon.model.meta.HorizonComponentId;
+import de.telekom.eni.pandora.horizon.tracing.Constants;
 import de.telekom.eni.pandora.horizon.tracing.HorizonTracer;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
