@@ -4,6 +4,8 @@
 
 package de.telekom.eni.pandora.horizon.model.meta;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import de.telekom.eni.pandora.horizon.model.common.Cacheable;
 import lombok.Getter;
 import lombok.Setter;
@@ -35,7 +37,12 @@ public class CircuitBreakerMessage extends Cacheable {
 	private CircuitBreakerHealthCheck lastHealthCheck;
 	private String assignedPodId;
 
-	public CircuitBreakerMessage(String subscriptionId, CircuitBreakerStatus circuitBreakerStatus, String callbackUrl, String environment) {
+	@JsonCreator
+	public CircuitBreakerMessage(
+			@JsonProperty("subscriptionId") String subscriptionId,
+			@JsonProperty("circuitBreakerStatus") CircuitBreakerStatus circuitBreakerStatus,
+			@JsonProperty("callbackUrl") String callbackUrl,
+			@JsonProperty("environment") String environment) {
 		super(subscriptionId);
 		this.subscriptionId = subscriptionId;
 		this.subscriberId = ""; // TODO: Set in DUDE and put in constructor
