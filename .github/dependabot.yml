@@ -4,8 +4,26 @@
 
 version: 2
 updates:
-  - package-ecosystem: "gradle" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "gradle"
+    directory: "/horizon-core"
+    schedule:
+      interval: "weekly"
+    reviewers: 
+      - telekom/pubsub-horizon
+  - package-ecosystem: "gradle"
+    directory: "/horizon-spring-boot-autoconfigure"
+    schedule:
+      interval: "weekly"
+    reviewers: 
+      - telekom/pubsub-horizon
+  - package-ecosystem: "gradle"
+    directory: "/horizon-spring-boot-starter"
+    schedule:
+      interval: "weekly"
+    reviewers: 
+      - telekom/pubsub-horizon
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: "weekly"
     reviewers: 
