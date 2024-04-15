@@ -8,7 +8,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import de.telekom.eni.pandora.horizon.exception.CouldNotConstructKubernetesClientException;
-import de.telekom.eni.pandora.horizon.kubernetes.InformerStoreInitHandler;
 import de.telekom.eni.pandora.horizon.kubernetes.KubernetesClientWrapper;
 import de.telekom.eni.pandora.horizon.kubernetes.PodResourceListener;
 import de.telekom.eni.pandora.horizon.kubernetes.SubscriptionResourceListener;
@@ -29,6 +28,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -36,6 +36,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Base64;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @ConditionalOnProperty(value = "kubernetes.enabled")
@@ -219,21 +220,14 @@ public class KubernetesClientConfiguration {
 	}
 
 	@Bean
-	public InformerStoreInitHandler cacheInitHandler(KubernetesClient kubernetesClient) {
-		return new InformerStoreInitHandler(new KubernetesClientWrapper(kubernetesClient));
+	public SubscriptionResourceListener subscriptionResourceListener(KubernetesClient kubernetesClient, ResourceEventHandler<SubscriptionResource> eventHandler, ApplicationEventPublisher applicationEventPublisher) {
+		return new SubscriptionResourceListener(new KubernetesClientWrapper(kubernetesClient), eventHandler, resyncPeriodInMs, namespace, applicationEventPublisher);
 	}
 
 	@Bean
-	public SubscriptionResourceListener subscriptionResourceListener(KubernetesClient kubernetesClient, ResourceEventHandler<SubscriptionResource> eventHandler, InformerStoreInitHandler informerStoreInitHandler) {
-    	var listener = new SubscriptionResourceListener(kubernetesClient, eventHandler, informerStoreInitHandler, resyncPeriodInMs, namespace);
-    	listener.init();
-    	return listener;
-	}
+	public PodResourceListener podResourceListener(KubernetesClient kubernetesClient, ResourceEventHandler<Pod> podEventHandler, ApplicationEventPublisher applicationEventPublisher) {
+		var labels = StringUtils.isNotBlank(appName) ? Map.of("app", appName) : null;
 
-	@Bean
-	public PodResourceListener podResourceListener(KubernetesClient kubernetesClient, ResourceEventHandler<Pod> podEventHandler) {
-		var listener = new PodResourceListener(kubernetesClient, podEventHandler, resyncPeriodInMs, podsNamespace, appName);
-		listener.init();
-		return listener;
+		return new PodResourceListener(new KubernetesClientWrapper(kubernetesClient), podEventHandler, resyncPeriodInMs, podsNamespace, labels, applicationEventPublisher);
 	}
 }

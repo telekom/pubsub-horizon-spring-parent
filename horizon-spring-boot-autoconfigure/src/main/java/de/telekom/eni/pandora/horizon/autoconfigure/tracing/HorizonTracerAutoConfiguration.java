@@ -6,9 +6,9 @@ package de.telekom.eni.pandora.horizon.autoconfigure.tracing;
 
 import brave.Tracing;
 import brave.TracingCustomizer;
+import de.telekom.eni.pandora.horizon.tracing.HorizonTracer;
 import de.telekom.eni.pandora.horizon.tracing.PandoraTracer;
 import de.telekom.eni.pandora.horizon.tracing.TracingProperties;
-import de.telekom.eni.pandora.horizon.tracing.HorizonTracer;
 import jakarta.servlet.Filter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.autoconfigure.tracing.BraveAutoConfiguration;
