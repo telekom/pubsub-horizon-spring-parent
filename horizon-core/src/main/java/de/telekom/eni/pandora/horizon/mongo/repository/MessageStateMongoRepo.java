@@ -36,8 +36,6 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     Slice<MessageStateMongoDocument> findStatusFailedWithCallbackExceptionAsc();
     @Query(value = "{ \"error.type\": \"de.telekom.horizon.dude.exception.CallbackUrlNotFoundException\" , \"status\": { \"$eq\": \"FAILED\" } }", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findStatusFailedWithCallbackExceptionAsc(Pageable pageable);
-    @Query(value = "{ \"error.type\": \"de.telekom.horizon.dude.exception.CallbackUrlNotFoundException\" , \"status\": { \"$eq\": \"FAILED\" } }", sort = "{timestamp: 1}")
-    Slice<MessageStateMongoDocument> findByFailedWithCallbackExceptionAndSubscriptionIdsAndTimestampLessThanEqual(Status status, List<String> subscriptionIds, Date upperTimestampThreshold, Pageable pageable);
 
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: ?2}", sort = "{timestamp: 1}")
     List<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId);
