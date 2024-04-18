@@ -55,7 +55,7 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     Slice<MessageStateMongoDocument> findByStatusInPlusCallbackUrlNotFoundExceptionAsc(List<Status> status, List<String> subscriptionIds, Date timestampOlderThan, Pageable pageable);
 
     @Query(value = "{$or:[{\"status\":{ $eq: \"WAITING\"}},{\"error.type\":\"de.telekom.horizon.dude.exception.CallbackUrlNotFoundException\"}], status:{ $in: ?0 }, subscriptionId:{ $in: ?1 }, modified: { $lte: ?2 }}", sort = "{timestamp: 1}")
-    Slice<MessageStateMongoDocument> findByStatusWaitingOrFailedWithCallbackExceptionAndSubscriptionIdsAndTimestampLessThanEqual(List<Status> status, List<String> subscriptionIds, Date upperTimestampThreshold, Pageable pageable);
+    Slice<MessageStateMongoDocument> findByStatusWaitingOrWithCallbackExceptionAndSubscriptionIdsAndTimestampLessThanEqual(List<Status> status, List<String> subscriptionIds, Date upperTimestampThreshold, Pageable pageable);
 
     List<MessageStateMongoDocument> findByMultiplexedFrom(String multiplexedFromId);
 
