@@ -67,7 +67,7 @@ public class MessageStateMongoDocumentTest {
 
     @BeforeAll
     static void initContainer() {
-//        mongoDBContainer.start();
+        //mongoDBContainer.start();
 
         testPartition = 123;
         testDeliveryType = DeliveryType.CALLBACK;

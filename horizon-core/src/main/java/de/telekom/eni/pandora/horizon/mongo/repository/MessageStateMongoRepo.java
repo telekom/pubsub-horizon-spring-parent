@@ -32,16 +32,13 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     Slice<MessageStateMongoDocument> findByDeliveryTypeAndStatusAndModifiedLessThanEqual(DeliveryType deliveryType, Status status, Date upperTimestampThreshold);
     Slice<MessageStateMongoDocument> findByDeliveryTypeAndStatusAndModifiedLessThanEqual(DeliveryType deliveryType, Status status, Date upperTimestampThreshold, Pageable pageable);
 
-
     @Query(value = "{ \"error.type\": \"de.telekom.horizon.dude.exception.CallbackUrlNotFoundException\" , \"status\": { \"$eq\": \"FAILED\" } }", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findStatusFailedWithCallbackExceptionAsc();
     @Query(value = "{ \"error.type\": \"de.telekom.horizon.dude.exception.CallbackUrlNotFoundException\" , \"status\": { \"$eq\": \"FAILED\" } }", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findStatusFailedWithCallbackExceptionAsc(Pageable pageable);
 
-
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: ?2}", sort = "{timestamp: 1}")
     List<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId);
-
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: ?2}", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Pageable pageable);
 
@@ -57,6 +54,8 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     @Query(value = "{$or:[{\"error.type\":{ $exists: false}},{\"error.type\":\"de.telekom.horizon.dude.exception.CallbackUrlNotFoundException\"}], status:{ $in: ?0 }, subscriptionId:{ $in: ?1 }, modified: { $lte: ?2 } }", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findByStatusInPlusCallbackUrlNotFoundExceptionAsc(List<Status> status, List<String> subscriptionIds, Date timestampOlderThan, Pageable pageable);
 
+    @Query(value = "{$or:[{\"status\":{ $eq: \"WAITING\"}},{\"error.type\":\"de.telekom.horizon.dude.exception.CallbackUrlNotFoundException\"}], status:{ $in: ?0 }, subscriptionId:{ $in: ?1 }, modified: { $lte: ?2 }}", sort = "{timestamp: 1}")
+    Slice<MessageStateMongoDocument> findByStatusWaitingOrWithCallbackExceptionAndSubscriptionIdsAndTimestampLessThanEqual(List<Status> status, List<String> subscriptionIds, Date upperTimestampThreshold, Pageable pageable);
 
     List<MessageStateMongoDocument> findByMultiplexedFrom(String multiplexedFromId);
 
