@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
+import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,40 +33,45 @@ public class JsonCacheService<T> {
         this.mapper = mapper;
     }
 
-    public Optional<T> getByKey(String key) {
+    public Optional<T> getByKey(String key) throws JsonCacheException {
         var value = map.get(key);
         if (value != null) {
             try {
                 var mappedValue = mapper.readValue(value.getValue(), mapClass);
                 return of(mappedValue);
             } catch (JsonProcessingException e) {
-                log.error("Could not map {} from hazelcast map {} to {}", key, map.getName(), mapClass.getName());
+                var msg = String.format("Could not map %s from hazelcast map %s to %s", key, map.getName(), mapClass.getName());
+                throw new JsonCacheException(msg, e);
             }
         }
         return empty();
     }
 
-    public List<T> getQuery(Query query) {
+    public List<T> getQuery(Query query) throws JsonCacheException {
         var values = map.values(query.toSqlPredicate());
-        return values.stream().map(
-                value -> {
-                    try {
-                        return mapper.readValue(value.getValue(), mapClass);
-                    } catch (JsonProcessingException e) {
-                        log.error("Could not map json {} from hazelcast map {} to {}", value.getValue(), map.getName(), mapClass.getName());
-                    }
-                    return null;
-                }
-        ).filter(Objects::nonNull).toList();
+        var mappedValues = new ArrayList<T>();
+
+        for (var value : values) {
+            try {
+                var mappedValue = mapper.readValue(value.getValue(), mapClass);
+                mappedValues.add(mappedValue);
+            } catch (JsonProcessingException e) {
+                var msg = String.format("Could not map json %s from hazelcast map %s to %s", value.getValue(), map.getName(), mapClass.getName());
+                throw new JsonCacheException(msg, e);
+            }
+        }
+
+        return mappedValues;
     }
 
-    public void set(String key, Object value) {
+    public void set(String key, Object value) throws JsonCacheException {
         try {
             var jsonValue = mapper.writeValueAsString(value);
             var hazelcastValue = new HazelcastJsonValue(jsonValue);
             map.set(key, hazelcastValue);
         } catch (JsonProcessingException e) {
-            log.error("Could not set value of {} in hazelcast map {}: {}", key, map.getName(), e.getMessage());
+            var msg = String.format("Could not set value of %s in hazelcast map %s: %s", key, map.getName(), e.getMessage());
+            throw new JsonCacheException(msg, e);
         }
     }
 
