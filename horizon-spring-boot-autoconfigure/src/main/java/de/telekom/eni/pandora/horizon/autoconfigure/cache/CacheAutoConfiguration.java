@@ -20,6 +20,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 
 @Slf4j
 @Configuration
@@ -36,6 +37,7 @@ public class CacheAutoConfiguration {
         Hazelcast.shutdownAll(); // Because we set SHUTDOWNHOOK_ENABLED to false, we need to explicitly call shutdown
     }
 
+    @Primary
     @Bean
     public HazelcastInstance hazelcastInstance(CacheProperties cacheProperties) {
         log.debug("Initialized new hazelcast instance");
@@ -46,7 +48,7 @@ public class CacheAutoConfiguration {
         config.setInstanceName(DEFAULT_HAZELCAST_INSTANCE_NAME);
         config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
 
-        if(cacheProperties != null && StringUtils.isNotBlank(cacheProperties.getKubernetesServiceDns()) ) {
+        if (cacheProperties != null && StringUtils.isNotBlank(cacheProperties.getKubernetesServiceDns())) {
             var kubernetesConfig = config.getNetworkConfig().getJoin().getKubernetesConfig().setEnabled(true);
 
             kubernetesConfig.setProperty("service-dns", cacheProperties.getKubernetesServiceDns());
