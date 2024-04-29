@@ -9,10 +9,7 @@ import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 import static java.util.Optional.empty;
 import static java.util.Optional.of;
@@ -49,19 +46,12 @@ public class JsonCacheService<T> {
 
     public List<T> getQuery(Query query) throws JsonCacheException {
         var values = map.values(query.toSqlPredicate());
-        var mappedValues = new ArrayList<T>();
+        return mapAll(values);
+    }
 
-        for (var value : values) {
-            try {
-                var mappedValue = mapper.readValue(value.getValue(), mapClass);
-                mappedValues.add(mappedValue);
-            } catch (JsonProcessingException e) {
-                var msg = String.format("Could not map json %s from hazelcast map %s to %s", value.getValue(), map.getName(), mapClass.getName());
-                throw new JsonCacheException(msg, e);
-            }
-        }
-
-        return mappedValues;
+    public List<T> getAll() throws JsonCacheException {
+        var values = map.values();
+        return mapAll(values);
     }
 
     public void set(String key, Object value) throws JsonCacheException {
@@ -77,6 +67,22 @@ public class JsonCacheService<T> {
 
     public void remove(String key) {
         map.remove(key);
+    }
+
+    private List<T> mapAll(Collection<HazelcastJsonValue> values) throws JsonCacheException {
+        var mappedValues = new ArrayList<T>();
+
+        for (var value : values) {
+            try {
+                var mappedValue = mapper.readValue(value.getValue(), mapClass);
+                mappedValues.add(mappedValue);
+            } catch (JsonProcessingException e) {
+                var msg = String.format("Could not map json %s from hazelcast map %s to %s", value.getValue(), map.getName(), mapClass.getName());
+                throw new JsonCacheException(msg, e);
+            }
+        }
+
+        return mappedValues;
     }
 
 }
