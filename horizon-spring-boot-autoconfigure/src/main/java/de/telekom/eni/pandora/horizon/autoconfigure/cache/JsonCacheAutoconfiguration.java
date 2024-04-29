@@ -11,7 +11,9 @@ import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
+@Configuration
 public class JsonCacheAutoconfiguration {
 
     private static final String SUBSCRIPTION_RESOURCE_V1 = "subscriptions.subscriber.horizon.telekom.de.v1";
