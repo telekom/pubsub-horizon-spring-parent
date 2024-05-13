@@ -8,6 +8,9 @@ import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @Getter
 @Setter
 @ConfigurationProperties("horizon.cache")
@@ -20,6 +23,8 @@ public class CacheProperties {
     private boolean enabled = false;
 
     private DeDuplicationProperties deDuplication = new DeDuplicationProperties();
+
+    private Map<String, String> attributes = new HashMap<>();
 
     @Getter
     @Setter

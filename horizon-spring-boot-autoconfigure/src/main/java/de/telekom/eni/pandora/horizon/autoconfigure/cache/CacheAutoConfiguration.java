@@ -5,6 +5,7 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.MemberAttributeConfig;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.spi.properties.ClusterProperty;
@@ -42,6 +43,10 @@ public class CacheAutoConfiguration {
     public HazelcastInstance hazelcastInstance(CacheProperties cacheProperties) {
         log.debug("Initialized new hazelcast instance");
         var config = new Config();
+
+        var attributeConfig = new MemberAttributeConfig();
+        cacheProperties.getAttributes().forEach(attributeConfig::setAttribute);
+        config.setMemberAttributeConfig(attributeConfig);
 
         config.setProperty(ClusterProperty.SHUTDOWNHOOK_ENABLED.getName(), "false");
         config.setProperty(ClusterProperty.SHUTDOWNHOOK_POLICY.getName(), "GRACEFUL");
