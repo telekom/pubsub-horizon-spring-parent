@@ -6,7 +6,7 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
-import de.telekom.eni.pandora.horizon.cache.service.JsonCacheServiceEntryListener;
+import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
@@ -32,7 +32,7 @@ public class JsonCacheAutoconfiguration {
         mapper.registerModule(module);
 
         IMap<String, HazelcastJsonValue> map = hazelcastInstance.getMap(SUBSCRIPTION_RESOURCE_V1);
-        map.addEntryListener(new JsonCacheServiceEntryListener<>(SubscriptionResource.class, mapper, applicationEventPublisher), true);
+        map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
         return new JsonCacheService<>(SubscriptionResource.class, map, mapper);
     }
 
