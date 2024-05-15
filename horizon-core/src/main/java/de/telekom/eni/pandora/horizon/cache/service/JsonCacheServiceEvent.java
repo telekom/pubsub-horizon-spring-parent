@@ -9,7 +9,10 @@ import lombok.Setter;
 @Getter
 @Setter
 @AllArgsConstructor
-public class JsonCacheServiceEvent {
+public class JsonCacheServiceEvent<T> {
+    private T newValue;
+
+    private T oldValue;
 
     private EntryEvent<String, HazelcastJsonValue> entryEvent;
 }

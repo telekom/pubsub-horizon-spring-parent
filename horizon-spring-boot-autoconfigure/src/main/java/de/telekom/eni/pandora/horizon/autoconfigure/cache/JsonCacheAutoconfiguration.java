@@ -32,7 +32,7 @@ public class JsonCacheAutoconfiguration {
         mapper.registerModule(module);
 
         IMap<String, HazelcastJsonValue> map = hazelcastInstance.getMap(SUBSCRIPTION_RESOURCE_V1);
-        map.addEntryListener(new JsonCacheServiceEntryListener(applicationEventPublisher), true);
+        map.addEntryListener(new JsonCacheServiceEntryListener<>(SubscriptionResource.class, mapper, applicationEventPublisher), true);
         return new JsonCacheService<>(SubscriptionResource.class, map, mapper);
     }
 
