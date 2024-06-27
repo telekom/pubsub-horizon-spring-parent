@@ -51,6 +51,8 @@ public class Subscription implements Serializable {
 
     private boolean circuitBreakerOptOut;
 
+    private List<Integer> retryableStatusCodes;
+
     private String eventRetentionTime;
 
     public String getKey() {
