@@ -6,7 +6,9 @@ package de.telekom.eni.pandora.horizon.model.meta;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import de.telekom.eni.pandora.horizon.model.common.Cacheable;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.io.Serial;
@@ -33,6 +35,10 @@ public class CircuitBreakerMessage extends Cacheable {
     private Date lastRepublished;
 
     private int republishingCount;
+
+    public CircuitBreakerMessage() {
+        super();
+    }
 
     public CircuitBreakerMessage(String subscriptionId, String subscriberId, Date lastModified, String originMessageId, CircuitBreakerStatus status, Date lastRepublished, int republishingCount) {
         super(subscriptionId);
