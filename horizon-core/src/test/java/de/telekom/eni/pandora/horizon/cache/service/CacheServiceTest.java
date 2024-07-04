@@ -12,6 +12,8 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.time.Instant;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,6 +47,8 @@ class CacheServiceTest {
     @DisplayName("Get from cache")
     @Order(2)
     void get() {
+        System.out.println(cacheService.getValues().toString());
+
         Optional<CircuitBreakerMessage> subscription = cacheService.get(dummy.getSubscriptionId());
         assertTrue(subscription.isPresent());
         assertEquals(dummy.getSubscriptionId(), subscription.get().getSubscriptionId());
@@ -55,7 +59,7 @@ class CacheServiceTest {
     @Order(3)
     void update() {
         assertDoesNotThrow(() -> {
-            dummy.setCallbackUrl("https://example.com/callback-2");
+            dummy.setStatus(CircuitBreakerStatus.CLOSED);
             cacheService.update(dummy);
         });
     }
@@ -66,7 +70,7 @@ class CacheServiceTest {
     void verify() {
         Optional<CircuitBreakerMessage> subscription = cacheService.get(dummy.getSubscriptionId());
         assertTrue(subscription.isPresent());
-        assertEquals(dummy.getCallbackUrl(), subscription.get().getCallbackUrl());
+        assertEquals(CircuitBreakerStatus.CLOSED, subscription.get().getStatus());
     }
 
     @Test
@@ -108,6 +112,8 @@ class CacheServiceTest {
     }
 
     static CircuitBreakerMessage createDummy() {
-        return new CircuitBreakerMessage("subscription-id", CircuitBreakerStatus.OPEN, "callback-url", "environment");
+        var lastModified = Date.from(Instant.now());
+        return new CircuitBreakerMessage("subscriptionId", "subscriberId", lastModified, "originMessageId", CircuitBreakerStatus.OPEN, lastModified, 0);
     }
+
 }

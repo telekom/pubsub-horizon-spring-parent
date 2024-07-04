@@ -6,16 +6,15 @@ package de.telekom.eni.pandora.horizon.model.meta;
 
 import lombok.Getter;
 
+@Getter
 public enum CircuitBreakerStatus {
 
-	OPEN("OPEN"),
-	CHECKING("CHECKING"),
-	REPUBLISHING("REPUBLISHING");
+    OPEN("OPEN"),
+    CLOSED("CLOSED");
 
-	@Getter
-	private final String value;
+    private final String value;
 
-	CircuitBreakerStatus(String value) {
-		this.value = value;
-	}
+    CircuitBreakerStatus(String value) {
+        this.value = value;
+    }
 }

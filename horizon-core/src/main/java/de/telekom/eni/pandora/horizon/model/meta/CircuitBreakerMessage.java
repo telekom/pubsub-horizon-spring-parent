@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.model.meta;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import de.telekom.eni.pandora.horizon.model.common.Cacheable;
 import lombok.Getter;
 import lombok.Setter;
@@ -14,53 +15,49 @@ import java.util.Date;
 
 @Getter
 @Setter
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class CircuitBreakerMessage extends Cacheable {
-	@Serial
-	private static final long serialVersionUID = 600L;
+    @Serial
+    private static final long serialVersionUID = 1000L;
 
-	private String subscriptionId;
-	private String subscriberId;
+    private String subscriptionId;
 
-	private CircuitBreakerStatus status;
+    private String subscriberId;
 
-	private String environment;
+    private Date lastModified;
 
-	private String callbackUrl; // TODO: Think if we really need the callbackUrl
+    private String originMessageId;
 
-	private Date timestamp;
+    private CircuitBreakerStatus status;
 
-	/**
-	 * Can be null
-	 */
-	private CircuitBreakerHealthCheck lastHealthCheck;
-	private String assignedPodId;
+    private Date lastRepublished;
 
-	public CircuitBreakerMessage(String subscriptionId, CircuitBreakerStatus circuitBreakerStatus, String callbackUrl, String environment) {
-		super(subscriptionId);
-		this.subscriptionId = subscriptionId;
-		this.subscriberId = ""; // TODO: Set in DUDE and put in constructor
-		this.status = circuitBreakerStatus;
-		this.environment = environment;
-		this.callbackUrl = callbackUrl;
+    private int republishingCount;
 
-		this.timestamp = Date.from(Instant.now());
-		this.lastHealthCheck = null;
-		this.assignedPodId = "";
-	}
+    public CircuitBreakerMessage(String subscriptionId, String subscriberId, Date lastModified, String originMessageId, CircuitBreakerStatus status, Date lastRepublished, int republishingCount) {
+        super(subscriptionId);
+        this.subscriptionId = subscriptionId;
+        this.subscriberId = subscriberId;
+        this.lastModified = lastModified;
+        this.originMessageId = originMessageId;
+        this.status = status;
+        this.lastRepublished = lastRepublished;
+        this.republishingCount = republishingCount;
+    }
 
-	@Override
-	protected String getType() {
-		return "circuit-breaker";
-	}
+    @Override
+    protected String getType() {
+        return "circuit-breaker";
+    }
 
-	@Override
-	public int compareTo(Cacheable cachable) {
-		if(cachable instanceof CircuitBreakerMessage circuitBreakerMessage) {
-			// -1 -> move to left (beginning), 0 -> keep, 1 -> move to right (end)
-			// sorted by timestamp millis, smallest first -> oldest timestamp first
-			return getTimestamp().compareTo(circuitBreakerMessage.getTimestamp());
-		}
+    @Override
+    public int compareTo(Cacheable cachable) {
+        if (cachable instanceof CircuitBreakerMessage circuitBreakerMessage) {
+            // -1 -> move to left (beginning), 0 -> keep, 1 -> move to right (end)
+            // sorted by timestamp millis, smallest first -> oldest timestamp first
+            return getLastModified().compareTo(circuitBreakerMessage.getLastModified());
+        }
 
-		return super.compareTo(cachable);
-	}
+        return super.compareTo(cachable);
+    }
 }
