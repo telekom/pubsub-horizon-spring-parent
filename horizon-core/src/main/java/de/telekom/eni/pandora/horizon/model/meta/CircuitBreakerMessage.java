@@ -30,6 +30,8 @@ public class CircuitBreakerMessage extends Cacheable {
 
     private CircuitBreakerStatus status;
 
+    private String environment;
+
     private Date lastRepublished;
 
     private int republishingCount;
@@ -38,12 +40,13 @@ public class CircuitBreakerMessage extends Cacheable {
         super();
     }
 
-    public CircuitBreakerMessage(String subscriptionId, Date lastModified, String originMessageId, CircuitBreakerStatus status, Date lastRepublished, int republishingCount) {
+    public CircuitBreakerMessage(String subscriptionId, Date lastModified, String originMessageId, CircuitBreakerStatus status, String environment, Date lastRepublished, int republishingCount) {
         super(subscriptionId);
         this.subscriptionId = subscriptionId;
         this.lastModified = lastModified;
         this.originMessageId = originMessageId;
         this.status = status;
+        this.environment = environment;
         this.lastRepublished = lastRepublished;
         this.republishingCount = republishingCount;
     }

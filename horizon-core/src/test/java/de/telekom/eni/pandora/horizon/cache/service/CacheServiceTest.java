@@ -113,7 +113,7 @@ class CacheServiceTest {
 
     static CircuitBreakerMessage createDummy() {
         var lastModified = Date.from(Instant.now());
-        return new CircuitBreakerMessage("subscriptionId", lastModified, "originMessageId", CircuitBreakerStatus.OPEN, lastModified, 0);
+        return new CircuitBreakerMessage("subscriptionId", lastModified, "originMessageId", CircuitBreakerStatus.OPEN, "test", lastModified, 0);
     }
 
 }
