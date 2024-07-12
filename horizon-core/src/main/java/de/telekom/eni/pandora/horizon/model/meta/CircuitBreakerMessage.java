@@ -18,9 +18,7 @@ import java.util.Date;
 @Getter
 @Setter
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CircuitBreakerMessage extends Cacheable {
-    @Serial
-    private static final long serialVersionUID = 1000L;
+public class CircuitBreakerMessage {
 
     private String subscriptionId;
 
@@ -41,7 +39,6 @@ public class CircuitBreakerMessage extends Cacheable {
     }
 
     public CircuitBreakerMessage(String subscriptionId, Date lastModified, String originMessageId, CircuitBreakerStatus status, String environment, Date lastRepublished, int republishingCount) {
-        super(subscriptionId);
         this.subscriptionId = subscriptionId;
         this.lastModified = lastModified;
         this.originMessageId = originMessageId;
@@ -51,19 +48,4 @@ public class CircuitBreakerMessage extends Cacheable {
         this.republishingCount = republishingCount;
     }
 
-    @Override
-    protected String getType() {
-        return "circuit-breaker";
-    }
-
-    @Override
-    public int compareTo(Cacheable cachable) {
-        if (cachable instanceof CircuitBreakerMessage circuitBreakerMessage) {
-            // -1 -> move to left (beginning), 0 -> keep, 1 -> move to right (end)
-            // sorted by timestamp millis, smallest first -> oldest timestamp first
-            return getLastModified().compareTo(circuitBreakerMessage.getLastModified());
-        }
-
-        return super.compareTo(cachable);
-    }
 }
