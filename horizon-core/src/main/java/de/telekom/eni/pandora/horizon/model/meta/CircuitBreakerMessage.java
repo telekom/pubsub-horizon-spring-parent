@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.model.meta;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import de.telekom.eni.pandora.horizon.model.common.Cacheable;
 import lombok.AllArgsConstructor;
@@ -22,6 +23,7 @@ public class CircuitBreakerMessage {
 
     private String subscriptionId;
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ss.SSSX", timezone = "UTC")
     private Date lastModified;
 
     private String originMessageId;
@@ -30,6 +32,7 @@ public class CircuitBreakerMessage {
 
     private String environment;
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ss.SSSX", timezone = "UTC")
     private Date lastRepublished;
 
     private int republishingCount;
