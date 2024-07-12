@@ -1,15 +1,13 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
-import com.fasterxml.jackson.databind.util.ISO8601DateFormat;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
-import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
 import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
+import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
 import de.telekom.jsonfilter.operator.Operator;
@@ -19,9 +17,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.format.annotation.DateTimeFormat;
-
-import java.time.format.DateTimeFormatter;
 
 @Configuration
 @ConditionalOnProperty(value = "horizon.cache.enabled")

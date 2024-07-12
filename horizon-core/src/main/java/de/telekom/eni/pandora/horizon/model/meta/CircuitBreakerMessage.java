@@ -23,7 +23,9 @@ public class CircuitBreakerMessage {
 
     private String subscriptionId;
 
-    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ss.SSSX", timezone = "UTC")
+    private String eventType;
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ssX", timezone = "UTC")
     private Date lastModified;
 
     private String originMessageId;
@@ -32,7 +34,7 @@ public class CircuitBreakerMessage {
 
     private String environment;
 
-    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ss.SSSX", timezone = "UTC")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ssX", timezone = "UTC")
     private Date lastRepublished;
 
     private int republishingCount;
@@ -41,8 +43,9 @@ public class CircuitBreakerMessage {
         super();
     }
 
-    public CircuitBreakerMessage(String subscriptionId, Date lastModified, String originMessageId, CircuitBreakerStatus status, String environment, Date lastRepublished, int republishingCount) {
+    public CircuitBreakerMessage(String subscriptionId, String eventType, Date lastModified, String originMessageId, CircuitBreakerStatus status, String environment, Date lastRepublished, int republishingCount) {
         this.subscriptionId = subscriptionId;
+        this.eventType = eventType;
         this.lastModified = lastModified;
         this.originMessageId = originMessageId;
         this.status = status;
