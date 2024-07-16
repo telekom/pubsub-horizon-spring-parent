@@ -14,6 +14,7 @@ import lombok.Setter;
 
 import java.io.Serial;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 
 @Getter
@@ -25,7 +26,7 @@ public class CircuitBreakerMessage {
 
     private String eventType;
 
-    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ss.SSSXX", timezone = "UTC")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ssX", timezone = "UTC")
     private Date lastModified;
 
     private String originMessageId;
@@ -34,7 +35,7 @@ public class CircuitBreakerMessage {
 
     private String environment;
 
-    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ss.SSSXX", timezone = "UTC")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ssX", timezone = "UTC")
     private Date lastRepublished;
 
     private int republishingCount;
@@ -46,11 +47,11 @@ public class CircuitBreakerMessage {
     public CircuitBreakerMessage(String subscriptionId, String eventType, Date lastModified, String originMessageId, CircuitBreakerStatus status, String environment, Date lastRepublished, int republishingCount) {
         this.subscriptionId = subscriptionId;
         this.eventType = eventType;
-        this.lastModified = lastModified;
+        this.lastModified = lastModified != null ? Date.from(lastModified.toInstant().truncatedTo(ChronoUnit.SECONDS)) : null;
         this.originMessageId = originMessageId;
         this.status = status;
         this.environment = environment;
-        this.lastRepublished = lastRepublished;
+        this.lastRepublished = lastRepublished != null ? Date.from(lastRepublished.toInstant().truncatedTo(ChronoUnit.SECONDS)) : null;
         this.republishingCount = republishingCount;
     }
 
