@@ -36,23 +36,23 @@ public class CircuitBreakerMessage {
     private String environment;
 
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'hh:mm:ssX", timezone = "UTC")
-    private Date lastRepublished;
+    private Date lastOpened;
 
-    private int republishingCount;
+    private int loopCounter;
 
     public CircuitBreakerMessage() {
         super();
     }
 
-    public CircuitBreakerMessage(String subscriptionId, String eventType, Date lastModified, String originMessageId, CircuitBreakerStatus status, String environment, Date lastRepublished, int republishingCount) {
+    public CircuitBreakerMessage(String subscriptionId, String eventType, Date lastModified, String originMessageId, CircuitBreakerStatus status, String environment, Date lastOpened, int loopCounter) {
         this.subscriptionId = subscriptionId;
         this.eventType = eventType;
         this.lastModified = lastModified != null ? Date.from(lastModified.toInstant().truncatedTo(ChronoUnit.SECONDS)) : null;
         this.originMessageId = originMessageId;
         this.status = status;
         this.environment = environment;
-        this.lastRepublished = lastRepublished != null ? Date.from(lastRepublished.toInstant().truncatedTo(ChronoUnit.SECONDS)) : null;
-        this.republishingCount = republishingCount;
+        this.lastOpened = lastOpened != null ? Date.from(lastOpened.toInstant().truncatedTo(ChronoUnit.SECONDS)) : null;
+        this.loopCounter = loopCounter;
     }
 
 }
