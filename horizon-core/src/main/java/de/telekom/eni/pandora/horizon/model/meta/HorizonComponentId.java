@@ -42,12 +42,12 @@ public enum HorizonComponentId {
             return HorizonComponentId.valueOf(groupId);
         } catch (Exception exception) {
             return switch (groupId.toLowerCase()) {
-                case "plunger" -> PLUNGER;
-                case "multiplexer" -> MULTIPLEXER;
-                case "dude" -> DUDE;
-                case "producer" -> PRODUCER;
+                case "plunger", "polaris" -> PLUNGER;
+                case "multiplexer", "galaxy" -> MULTIPLEXER;
+                case "dude", "comet" -> DUDE;
+                case "producer", "starlight" -> PRODUCER;
                 case "voyager" -> VOYAGER;
-                case "tasse" -> TASSE;
+                case "tasse", "pulsar" -> TASSE;
                 default -> UNSET;
             };
         }

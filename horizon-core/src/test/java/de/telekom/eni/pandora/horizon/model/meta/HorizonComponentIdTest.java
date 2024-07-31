@@ -6,7 +6,7 @@ package de.telekom.eni.pandora.horizon.model.meta;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class HorizonComponentIdTest {
 
