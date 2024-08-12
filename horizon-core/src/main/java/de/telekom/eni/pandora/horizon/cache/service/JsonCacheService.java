@@ -41,6 +41,7 @@ public class JsonCacheService<T> {
         var value = map.get(key);
         if (value != null) {
             try {
+                log.debug("Raw JSON value for key {}: {}", key, value.getValue());
                 var mappedValue = mapper.readValue(value.getValue(), mapClass);
                 return of(mappedValue);
             } catch (JsonProcessingException e) {

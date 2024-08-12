@@ -6,8 +6,7 @@ package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.CacheAutoConfiguration;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
-import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
-import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerStatus;
+import de.telekom.eni.pandora.horizon.utils.CacheServiceDummy;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,7 +24,7 @@ class CacheServiceTest {
     @Autowired
     private CacheService cacheService;
 
-    private static CircuitBreakerMessage dummy;
+    private static CacheServiceDummy dummy;
 
     @BeforeAll
     static void setup() {
@@ -45,9 +44,11 @@ class CacheServiceTest {
     @DisplayName("Get from cache")
     @Order(2)
     void get() {
-        Optional<CircuitBreakerMessage> subscription = cacheService.get(dummy.getSubscriptionId());
-        assertTrue(subscription.isPresent());
-        assertEquals(dummy.getSubscriptionId(), subscription.get().getSubscriptionId());
+        System.out.println(cacheService.getValues().toString());
+
+        Optional<CacheServiceDummy> retrievedDummy = cacheService.get(dummy.getKey());
+        assertTrue(retrievedDummy.isPresent());
+        assertEquals(dummy.getKey(), retrievedDummy.get().getKey());
     }
 
     @Test
@@ -55,7 +56,7 @@ class CacheServiceTest {
     @Order(3)
     void update() {
         assertDoesNotThrow(() -> {
-            dummy.setCallbackUrl("https://example.com/callback-2");
+            dummy.setValue("fizzbuzz");
             cacheService.update(dummy);
         });
     }
@@ -64,31 +65,31 @@ class CacheServiceTest {
     @DisplayName("Verify cache update")
     @Order(4)
     void verify() {
-        Optional<CircuitBreakerMessage> subscription = cacheService.get(dummy.getSubscriptionId());
+        Optional<CacheServiceDummy> subscription = cacheService.get(dummy.getKey());
         assertTrue(subscription.isPresent());
-        assertEquals(dummy.getCallbackUrl(), subscription.get().getCallbackUrl());
+        assertEquals(dummy.getKey(), subscription.get().getKey());
     }
 
     @Test
     @DisplayName("Perform SQL query")
     @Order(5)
     void executeQuery() {
-        var query = Query.builder(CircuitBreakerMessage.class).addMatchers("subscriptionId", dummy.getSubscriptionId()).build();
-        var expectedQuery = format("subscriptionId = %s", dummy.getSubscriptionId());
+        var query = Query.builder(CacheServiceDummy.class).addMatchers("value", dummy.getValue()).build();
+        var expectedQuery = format("value = %s", dummy.getValue());
         assertEquals(expectedQuery, query.toString());
 
-        List<CircuitBreakerMessage> result = cacheService.getWithQuery(query);
+        List<CacheServiceDummy> result = cacheService.getWithQuery(query);
         assertFalse(result.isEmpty());
-        assertEquals(dummy.getSubscriptionId(), result.get(0).getSubscriptionId());
+        assertEquals(dummy.getKey(), result.getFirst().getKey());
     }
 
     @Test
     @DisplayName("Remove chache entry")
     @Order(6)
     void remove() {
-        cacheService.remove(dummy.getSubscriptionId());
+        cacheService.remove(dummy.getKey());
 
-        Optional<CircuitBreakerMessage> subscription = cacheService.get(dummy.getSubscriptionId());
+        Optional<CacheServiceDummy> subscription = cacheService.get(dummy.getKey());
         assertFalse(subscription.isPresent());
     }
 
@@ -107,7 +108,8 @@ class CacheServiceTest {
         assertTrue(list.isEmpty());
     }
 
-    static CircuitBreakerMessage createDummy() {
-        return new CircuitBreakerMessage("subscription-id", CircuitBreakerStatus.OPEN, "callback-url", "environment");
+    static CacheServiceDummy createDummy() {
+        return new CacheServiceDummy("foo", "bar");
     }
+
 }
