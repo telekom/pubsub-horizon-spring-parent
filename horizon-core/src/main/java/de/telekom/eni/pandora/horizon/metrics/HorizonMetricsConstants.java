@@ -9,6 +9,7 @@ public class HorizonMetricsConstants {
     public static final String METRIC_PUBLISHED_EVENTS = "published_events";
     public static final String METRIC_MULTIPLEXED_EVENTS = "multiplexed_events";
     public static final String METRIC_SUBSCRIPTION_COUNT = "subscription_count";
+    public static final String METRIC_SENT_SSE_EVENTS = "sent_sse_events";
     public static final String METRIC_OPEN_SSE_CONNECTIONS = "open_sse_connections";
     public static final String METRIC_OPEN_CIRCUIT_BREAKERS = "open_circuit_breakers";
     public static final String METRIC_CALLBACK_HTTP_CODE_COUNT = "callback_http_code_count";
