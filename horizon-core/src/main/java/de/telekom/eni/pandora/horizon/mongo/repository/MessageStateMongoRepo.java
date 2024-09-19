@@ -12,7 +12,6 @@ import org.springframework.data.domain.Slice;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 
-import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 
@@ -44,9 +43,9 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     Slice<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Pageable pageable);
 
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: ?2, timestamp: { $gte: ?3, $lte: ?4 }}", sort = "{timestamp: 1}")
-    List<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAndTimestampBetweenAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Instant redeliveryFrom, Instant redeliveryTo);
+    List<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAndTimestampBetweenAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Date redeliveryFrom, Date redeliveryTo);
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: ?2, timestamp: { $gte: ?3, $lte: ?4 }}", sort = "{timestamp: 1}")
-    Slice<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAndTimestampBetweenAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Instant redeliveryFrom, Instant redeliveryTo, Pageable pageable);
+    Slice<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAndTimestampBetweenAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Date redeliveryFrom, Date redeliveryTo, Pageable pageable);
 
 
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: {$in:  ?2}}", sort = "{timestamp: 1}")
