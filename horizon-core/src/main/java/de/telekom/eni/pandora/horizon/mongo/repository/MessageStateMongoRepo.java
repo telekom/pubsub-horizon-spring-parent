@@ -44,9 +44,9 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     Slice<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Pageable pageable);
 
     @Query(value = "{'_id':  {$gt:  ?0}, deliveryType: ?1}", sort = "{timestamp: 1}")
-    List<MessageStateMongoDocument> findByDeliveryTypeAndAfterObjectIdAsc(DeliveryType deliveryType, ObjectId objectId);
+    List<MessageStateMongoDocument> findByDeliveryTypeAndAfterObjectIdAsc(ObjectId objectId, DeliveryType deliveryType);
     @Query(value = "{'_id':  {$gt:  ?0}, deliveryType: ?1}", sort = "{timestamp: 1}")
-    Slice<MessageStateMongoDocument> findByDeliveryTypeAndAfterObjectIdAsc(DeliveryType deliveryType, ObjectId objectId, Pageable pageable);
+    Slice<MessageStateMongoDocument> findByDeliveryTypeAndAfterObjectIdAsc(ObjectId objectId, DeliveryType deliveryType, Pageable pageable);
 
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: {$in:  ?2}}", sort = "{timestamp: 1}")
     List<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdsAsc(List<Status> status, DeliveryType deliveryType, List<String> subscriptionIds);
