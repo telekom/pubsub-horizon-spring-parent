@@ -43,9 +43,9 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: ?2}", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Pageable pageable);
 
-    @Query(value = "{deliveryType: ?0, subscriptionId: {$in:  ?1}, timestamp: { $gt: ?0 }}", sort = "{timestamp: 1}")
+    @Query(value = "{deliveryType: ?0, subscriptionId: ?1, timestamp: { $gt: ?0 }}", sort = "{timestamp: 1}")
     List<MessageStateMongoDocument> findByDeliveryTypeAndSubscriptionAndTimestampGreaterThanAsc(DeliveryType deliveryType, String subscriptionId, Date timestamp);
-    @Query(value = "{deliveryType: ?0, subscriptionId: {$in:  ?1}, timestamp: { $gt: ?0 }}", sort = "{timestamp: 1}")
+    @Query(value = "{deliveryType: ?0, subscriptionId: ?1, timestamp: { $gt: ?0 }}", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findByDeliveryTypeAndSubscriptionAndTimestampGreaterThanAsc(DeliveryType deliveryType, String subscriptionId, Date timestamp, Pageable pageable);
 
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: {$in:  ?2}}", sort = "{timestamp: 1}")
