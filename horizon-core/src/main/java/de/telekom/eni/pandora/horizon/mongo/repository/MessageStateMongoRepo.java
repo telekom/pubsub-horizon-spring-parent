@@ -7,6 +7,7 @@ package de.telekom.eni.pandora.horizon.mongo.repository;
 import de.telekom.eni.pandora.horizon.model.event.DeliveryType;
 import de.telekom.eni.pandora.horizon.model.event.Status;
 import de.telekom.eni.pandora.horizon.mongo.model.MessageStateMongoDocument;
+import org.bson.types.ObjectId;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.mongodb.repository.MongoRepository;
@@ -41,6 +42,11 @@ public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongo
     List<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId);
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: ?2}", sort = "{timestamp: 1}")
     Slice<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(List<Status> status, DeliveryType deliveryType, String subscriptionId, Pageable pageable);
+
+    @Query(value = "{deliveryType: ?0, subscriptionId: ?1, timestamp: { $gt: ?2 }}", sort = "{timestamp: 1}")
+    List<MessageStateMongoDocument> findByDeliveryTypeAndSubscriptionIdAndTimestampGreaterThanAsc(DeliveryType deliveryType, String subscriptionId, Date timestamp);
+    @Query(value = "{deliveryType: ?0, subscriptionId: ?1, timestamp: { $gt: ?2 }}", sort = "{timestamp: 1}")
+    Slice<MessageStateMongoDocument> findByDeliveryTypeAndSubscriptionIdAndTimestampGreaterThanAsc(DeliveryType deliveryType, String subscriptionId, Date timestamp, Pageable pageable);
 
     @Query(value = "{status: {$in:  ?0}, deliveryType: ?1, subscriptionId: {$in:  ?2}}", sort = "{timestamp: 1}")
     List<MessageStateMongoDocument> findByStatusInAndDeliveryTypeAndSubscriptionIdsAsc(List<Status> status, DeliveryType deliveryType, List<String> subscriptionIds);
