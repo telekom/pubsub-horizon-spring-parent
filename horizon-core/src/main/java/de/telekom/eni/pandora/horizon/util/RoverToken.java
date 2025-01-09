@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package de.telekom.eni.pandora.horizon.kubernetes.util;
+package de.telekom.eni.pandora.horizon.util;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;

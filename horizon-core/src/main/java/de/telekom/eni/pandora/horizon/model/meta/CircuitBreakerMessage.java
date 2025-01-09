@@ -6,14 +6,9 @@ package de.telekom.eni.pandora.horizon.model.meta;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import de.telekom.eni.pandora.horizon.model.common.Cacheable;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.io.Serial;
-import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 

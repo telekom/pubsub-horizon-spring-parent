@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.util;
 
-import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
+import de.telekom.eni.pandora.horizon.model.subscription.Subscription;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
