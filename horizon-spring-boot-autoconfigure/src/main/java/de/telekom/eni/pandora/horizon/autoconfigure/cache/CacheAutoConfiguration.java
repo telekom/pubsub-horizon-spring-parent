@@ -4,11 +4,9 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
-import com.hazelcast.config.Config;
-import com.hazelcast.config.MemberAttributeConfig;
-import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.spi.properties.ClusterProperty;
+import com.hazelcast.client.HazelcastClient;
+import com.hazelcast.client.config.ClientConfig;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.CacheService;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
@@ -30,39 +28,30 @@ import org.springframework.context.annotation.Primary;
 @EnableConfigurationProperties({CacheProperties.class})
 public class CacheAutoConfiguration {
 
-    private static final String DEFAULT_HAZELCAST_INSTANCE_NAME = "horizon";
+    private static final String DEFAULT_HAZELCAST_CLUSTER_NAME = "dev";
 
-    @PreDestroy()
-    public void shutdown() {
-        log.info("Shutdown all hazelcast instances");
-        Hazelcast.shutdownAll(); // Because we set SHUTDOWNHOOK_ENABLED to false, we need to explicitly call shutdown
+
+    @PreDestroy
+    public void shutdown(HazelcastInstance hazelcastInstance) {
+        log.info("Shutting down Hazelcast client instance");
+        hazelcastInstance.shutdown();
     }
 
     @Primary
     @Bean
     public HazelcastInstance hazelcastInstance(CacheProperties cacheProperties) {
-        log.debug("Initialized new hazelcast instance");
-        var config = new Config();
+        log.debug("Initializing new hazelcast client");
 
-        var attributeConfig = new MemberAttributeConfig();
-        cacheProperties.getAttributes().forEach(attributeConfig::setAttribute);
-        config.setMemberAttributeConfig(attributeConfig);
-
-        config.setProperty(ClusterProperty.SHUTDOWNHOOK_ENABLED.getName(), "false");
-        config.setProperty(ClusterProperty.SHUTDOWNHOOK_POLICY.getName(), "GRACEFUL");
-        config.setInstanceName(DEFAULT_HAZELCAST_INSTANCE_NAME);
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        ClientConfig config = new ClientConfig();
+        config.setClusterName(DEFAULT_HAZELCAST_CLUSTER_NAME);
 
         if (cacheProperties != null && StringUtils.isNotBlank(cacheProperties.getKubernetesServiceDns())) {
-            var kubernetesConfig = config.getNetworkConfig().getJoin().getKubernetesConfig().setEnabled(true);
-
-            kubernetesConfig.setProperty("service-dns", cacheProperties.getKubernetesServiceDns());
-            kubernetesConfig.setProperty("service-port", "5701");
+            config.getNetworkConfig().addAddress(cacheProperties.getKubernetesServiceDns());
         } else {
-            config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(true).addMember("localhost");
+            config.getNetworkConfig().addAddress("localhost:5701");
         }
 
-        return Hazelcast.getOrCreateHazelcastInstance(config);
+        return HazelcastClient.newHazelcastClient(config);
     }
 
     @Bean

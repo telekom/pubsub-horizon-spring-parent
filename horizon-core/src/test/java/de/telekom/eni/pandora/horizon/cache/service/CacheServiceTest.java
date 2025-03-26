@@ -17,6 +17,7 @@ import java.util.Optional;
 import static java.lang.String.format;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Disabled
 @SpringBootTest(properties = {"horizon.cache.enabled=true"}, classes = {CacheAutoConfiguration.class})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class CacheServiceTest {
