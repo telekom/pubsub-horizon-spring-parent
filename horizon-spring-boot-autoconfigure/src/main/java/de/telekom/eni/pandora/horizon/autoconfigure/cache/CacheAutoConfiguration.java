@@ -31,11 +31,11 @@ public class CacheAutoConfiguration {
     private static final String DEFAULT_HAZELCAST_CLUSTER_NAME = "dev";
 
 
-    @PreDestroy
-    public void shutdown(HazelcastInstance hazelcastInstance) {
-        log.info("Shutting down Hazelcast client instance");
-        hazelcastInstance.shutdown();
-    }
+//    @PreDestroy
+//    public void shutdown(HazelcastInstance hazelcastInstance) {
+//        log.info("Shutting down Hazelcast client instance");
+//        hazelcastInstance.shutdown();
+//    }
 
     @Primary
     @Bean
