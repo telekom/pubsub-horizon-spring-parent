@@ -10,7 +10,6 @@ import com.hazelcast.client.config.ClientConfig;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.CacheService;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -29,13 +28,6 @@ import org.springframework.context.annotation.Primary;
 public class CacheAutoConfiguration {
 
     private static final String DEFAULT_HAZELCAST_CLUSTER_NAME = "dev";
-
-
-//    @PreDestroy
-//    public void shutdown(HazelcastInstance hazelcastInstance) {
-//        log.info("Shutting down Hazelcast client instance");
-//        hazelcastInstance.shutdown();
-//    }
 
     @Primary
     @Bean
