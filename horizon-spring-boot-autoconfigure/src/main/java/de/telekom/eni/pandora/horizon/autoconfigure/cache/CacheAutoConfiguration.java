@@ -34,11 +34,11 @@ public class CacheAutoConfiguration {
     @Value("${spring.application.name}")
     private String applicationName;
 
-    @PreDestroy()
-    public void shutdown() {
-        log.info("Shutdown hazelcast client");
-        HazelcastClient.shutdownAll();
-    }
+//    @PreDestroy()
+//    public void shutdown() {
+//        log.info("Shutdown hazelcast client");
+//        HazelcastClient.shutdownAll();
+//    }
 
 
     @Primary
