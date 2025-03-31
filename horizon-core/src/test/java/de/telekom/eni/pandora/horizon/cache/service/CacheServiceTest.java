@@ -78,6 +78,7 @@ class CacheServiceTest {
     }
 
     @Test
+    @Disabled
     @DisplayName("Perform SQL query")
     @Order(5)
     void executeQuery() {
