@@ -4,14 +4,18 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
+import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.client.HazelcastClient;
 import com.hazelcast.client.config.ClientConfig;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.CacheService;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.hazelcast.HazelcastAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -28,6 +32,22 @@ import org.springframework.context.annotation.Primary;
 public class CacheAutoConfiguration {
 
     private static final String DEFAULT_HAZELCAST_CLUSTER_NAME = "dev";
+    private final HazelcastInstance hazelcastInstance;
+
+    @Value("${spring.application.name}")
+    private String applicationName;
+
+    public CacheAutoConfiguration(HazelcastInstance hazelcastInstance) {
+        this.hazelcastInstance = hazelcastInstance;
+    }
+
+    @PreDestroy()
+    public void shutdown() {
+        log.info("Shutdown hazelcast client");
+        if (hazelcastInstance != null) {
+            HazelcastClient.shutdown(hazelcastInstance);
+        }
+    }
 
     @Primary
     @Bean
@@ -41,6 +61,10 @@ public class CacheAutoConfiguration {
             config.getNetworkConfig().addAddress(cacheProperties.getKubernetesServiceDns());
         } else {
             config.getNetworkConfig().addAddress("localhost:5701");
+        }
+
+        if (applicationName != null) {
+            config.setInstanceName(applicationName);
         }
 
         return HazelcastClient.newHazelcastClient(config);
