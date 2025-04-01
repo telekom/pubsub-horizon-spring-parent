@@ -24,6 +24,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
+import java.util.UUID;
+
 @Slf4j
 @Configuration
 @ConditionalOnProperty(value = "horizon.cache.enabled")
@@ -59,8 +61,9 @@ public class CacheAutoConfiguration {
         }
 
         if (applicationName != null) {
-            config.setInstanceName(applicationName);
+            config.setInstanceName(applicationName + "-" + (UUID.randomUUID()));
         }
+
         hazelcastInstance = HazelcastClient.newHazelcastClient(config);
 
         return hazelcastInstance;
