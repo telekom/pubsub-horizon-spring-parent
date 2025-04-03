@@ -10,6 +10,7 @@ import lombok.Getter;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
+
 public class HazelcastTestInstance implements BeforeAllCallback, ExtensionContext.Store.CloseableResource {
 
     @Getter

@@ -39,6 +39,9 @@ public class CacheAutoConfiguration {
     @Value("${spring.application.name}")
     private String applicationName;
 
+    @Value("${POD_NAME}")
+    private String podName;
+
     @PreDestroy()
     public void shutdown() {
         log.info("Shutdown hazelcast client");
@@ -60,8 +63,16 @@ public class CacheAutoConfiguration {
             config.getNetworkConfig().addAddress("localhost:5701");
         }
 
-        if (applicationName != null) {
-            config.setInstanceName(applicationName + "-" + (UUID.randomUUID()));
+        if (podName != null) {
+            config.setInstanceName(podName);
+        }
+        else {
+            if (!StringUtils.isBlank(applicationName)) {
+                String formattedAppName = applicationName.toLowerCase().replace(" ", "-");
+                config.setInstanceName(formattedAppName + "-" + (UUID.randomUUID()));
+            } else {
+                config.setInstanceName("horizon-" + (UUID.randomUUID()));
+            }
         }
 
         hazelcastInstance = HazelcastClient.newHazelcastClient(config);
