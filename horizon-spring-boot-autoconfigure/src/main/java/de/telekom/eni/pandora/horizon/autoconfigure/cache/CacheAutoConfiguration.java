@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
-import com.hazelcast.core.Hazelcast;
+import com.hazelcast.client.config.ConnectionRetryConfig;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.client.HazelcastClient;
 import com.hazelcast.client.config.ClientConfig;
@@ -14,7 +14,6 @@ import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.hazelcast.HazelcastAutoConfiguration;
@@ -36,9 +35,6 @@ public class CacheAutoConfiguration {
     private static final String DEFAULT_HAZELCAST_CLUSTER_NAME = "dev";
     private HazelcastInstance hazelcastInstance;
 
-    @Value("${spring.application.name}")
-    private String applicationName;
-
     @Value("${POD_NAME:horizon}")
     private String podName;
 
@@ -48,13 +44,14 @@ public class CacheAutoConfiguration {
         HazelcastClient.shutdown(hazelcastInstance);
     }
 
-
     @Primary
     @Bean
     public HazelcastInstance hazelcastInstance(CacheProperties cacheProperties) {
         log.debug("Initializing new hazelcast client");
 
         ClientConfig config = new ClientConfig();
+
+        // Set cluster name, network configuration and instance name
         config.setClusterName(DEFAULT_HAZELCAST_CLUSTER_NAME);
 
         if (cacheProperties != null && StringUtils.isNotBlank(cacheProperties.getKubernetesServiceDns())) {
@@ -67,6 +64,16 @@ public class CacheAutoConfiguration {
             podName = "horizon-" + UUID.randomUUID().toString();
         }
         config.setInstanceName(podName);
+
+        // Set connection timeout
+        config.getNetworkConfig().setConnectionTimeout(5000);  // default 5000ms
+
+        // Set retry configuration
+        ConnectionRetryConfig retryConfig = config.getConnectionStrategyConfig().getConnectionRetryConfig();
+        retryConfig.setInitialBackoffMillis(1000)   // default 1000ms
+                .setMaxBackoffMillis(1000)  // no increasing backoff, default 30000ms
+                .setMultiplier(1.0) // no increasing backoff, default 1.05
+                .setClusterConnectTimeoutMillis(-1); // Retry indefinitely, default -1
 
         hazelcastInstance = HazelcastClient.newHazelcastClient(config);
 
