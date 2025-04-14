@@ -74,7 +74,7 @@ public class CacheAutoConfiguration {
         retryConfig.setInitialBackoffMillis(1000)   // default 1000ms
                 .setMaxBackoffMillis(1000)  // no increasing backoff, default 30000ms
                 .setMultiplier(1.0) // no increasing backoff, default 1.05
-                .setClusterConnectTimeoutMillis(-1); // Retry indefinitely, default -1
+                .setClusterConnectTimeoutMillis(10000); // Retry indefinitely, default -1
 
         hazelcastInstance = HazelcastClient.newHazelcastClient(config);
 
