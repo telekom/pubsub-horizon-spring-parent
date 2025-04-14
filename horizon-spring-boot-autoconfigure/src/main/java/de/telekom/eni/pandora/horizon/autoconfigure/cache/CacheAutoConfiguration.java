@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
+import com.hazelcast.client.config.ClientConnectionStrategyConfig;
 import com.hazelcast.client.config.ConnectionRetryConfig;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.client.HazelcastClient;
@@ -68,13 +69,14 @@ public class CacheAutoConfiguration {
         // Set connection timeout
         config.getNetworkConfig().setConnectionTimeout(5000);  // default 5000ms
         config.setProperty("hazelcast.operation.call.timeout.millis","5000");
+        config.getConnectionStrategyConfig().setReconnectMode(ClientConnectionStrategyConfig.ReconnectMode.ASYNC);
 
         // Set retry configuration
         ConnectionRetryConfig retryConfig = config.getConnectionStrategyConfig().getConnectionRetryConfig();
         retryConfig.setInitialBackoffMillis(1000)   // default 1000ms
                 .setMaxBackoffMillis(1000)  // no increasing backoff, default 30000ms
                 .setMultiplier(1.0) // no increasing backoff, default 1.05
-                .setClusterConnectTimeoutMillis(10000); // Retry indefinitely, default -1
+                .setClusterConnectTimeoutMillis(-1); // Retry indefinitely, default -1
 
         hazelcastInstance = HazelcastClient.newHazelcastClient(config);
 
