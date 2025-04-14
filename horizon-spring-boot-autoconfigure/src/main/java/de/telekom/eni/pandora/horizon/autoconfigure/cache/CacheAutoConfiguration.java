@@ -68,8 +68,6 @@ public class CacheAutoConfiguration {
 
         // Set connection timeout
         config.getNetworkConfig().setConnectionTimeout(5000);  // default 5000ms
-        config.setProperty("hazelcast.operation.call.timeout.millis","5000");
-        config.getConnectionStrategyConfig().setReconnectMode(ClientConnectionStrategyConfig.ReconnectMode.ASYNC);
 
         // Set retry configuration
         ConnectionRetryConfig retryConfig = config.getConnectionStrategyConfig().getConnectionRetryConfig();
