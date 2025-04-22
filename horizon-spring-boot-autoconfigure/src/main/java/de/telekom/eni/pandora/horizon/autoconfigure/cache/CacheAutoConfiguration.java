@@ -26,6 +26,8 @@ import org.springframework.context.annotation.Primary;
 
 import java.util.UUID;
 
+import static com.hazelcast.client.config.ClientConnectionStrategyConfig.ReconnectMode.ASYNC;
+
 @Slf4j
 @Configuration
 @ConditionalOnProperty(value = "horizon.cache.enabled")
@@ -51,7 +53,6 @@ public class CacheAutoConfiguration {
         log.debug("Initializing new hazelcast client");
 
         ClientConfig config = new ClientConfig();
-
         // Set cluster name, network configuration and instance name
         config.setClusterName(DEFAULT_HAZELCAST_CLUSTER_NAME);
 
@@ -69,13 +70,16 @@ public class CacheAutoConfiguration {
         // Set connection timeout
         config.getNetworkConfig().setConnectionTimeout(5000);  // default 5000ms
 
+        // Set connection strategy
+        config.getConnectionStrategyConfig()
+                .setAsyncStart(true) // creates the client without waiting for a connection to the cluster
+                .setReconnectMode(ASYNC); //non blocking reconnection enabling HazelcastClientOfflineException
         // Set retry configuration
         ConnectionRetryConfig retryConfig = config.getConnectionStrategyConfig().getConnectionRetryConfig();
         retryConfig.setInitialBackoffMillis(1000)   // default 1000ms
                 .setMaxBackoffMillis(1000)  // no increasing backoff, default 30000ms
                 .setMultiplier(1.0) // no increasing backoff, default 1.05
                 .setClusterConnectTimeoutMillis(-1); // Retry indefinitely, default -1
-
         hazelcastInstance = HazelcastClient.newHazelcastClient(config);
 
         return hazelcastInstance;
