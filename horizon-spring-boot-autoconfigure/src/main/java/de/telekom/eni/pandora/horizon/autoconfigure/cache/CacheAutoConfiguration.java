@@ -80,6 +80,9 @@ public class CacheAutoConfiguration {
                 .setMaxBackoffMillis(1000)  // no increasing backoff, default 30000ms
                 .setMultiplier(1.0) // no increasing backoff, default 1.05
                 .setClusterConnectTimeoutMillis(-1); // Retry indefinitely, default -1
+
+        // debug log for hazelcast client config options
+        log.debug("Hazelcast client config: {}", config);
         hazelcastInstance = HazelcastClient.newHazelcastClient(config);
 
         return hazelcastInstance;
