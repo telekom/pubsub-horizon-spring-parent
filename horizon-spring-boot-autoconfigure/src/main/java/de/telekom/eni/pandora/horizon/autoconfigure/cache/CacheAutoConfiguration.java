@@ -50,7 +50,7 @@ public class CacheAutoConfiguration {
     @Primary
     @Bean
     public HazelcastInstance hazelcastInstance(CacheProperties cacheProperties) {
-        log.debug("Initializing new hazelcast client");
+        log.info("Initializing new hazelcast client");
 
         ClientConfig config = new ClientConfig();
         // Set cluster name, network configuration and instance name
