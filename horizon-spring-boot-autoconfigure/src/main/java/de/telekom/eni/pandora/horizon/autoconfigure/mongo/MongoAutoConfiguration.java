@@ -10,6 +10,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
+import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -49,4 +50,11 @@ public class MongoAutoConfiguration {
         MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoTemplate);
         return mongoRepositoryFactory.getRepository(MessageStateMongoRepo.class);
     }
+
+    @Bean
+    public SubscriptionsMongoRepo getSubscriptionsRepo(MongoTemplate mongoTemplate) {
+        MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoTemplate);
+        return mongoRepositoryFactory.getRepository(SubscriptionsMongoRepo.class);
+    }
+
 }

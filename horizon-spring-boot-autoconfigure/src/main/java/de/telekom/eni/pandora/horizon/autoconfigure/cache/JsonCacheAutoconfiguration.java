@@ -14,6 +14,7 @@ import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBr
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
+import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
@@ -33,7 +34,7 @@ public class JsonCacheAutoconfiguration {
     private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
 
     @Bean
-    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher) {
+    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo) {
         var module = new SimpleModule();
         module.addSerializer(Operator.class, new OperatorSerializer());
         module.addDeserializer(Operator.class, new OperatorDeserializer());
@@ -43,7 +44,7 @@ public class JsonCacheAutoconfiguration {
 
         IMap<String, HazelcastJsonValue> map = hazelcastInstance.getMap(SUBSCRIPTION_RESOURCE_V1);
         map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
-        return new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1);
+        return new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1, subscriptionsMongoRepo );
     }
 
     @Bean
@@ -53,7 +54,7 @@ public class JsonCacheAutoconfiguration {
         var mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
 
-        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP);
+        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP, null);
     }
 
 }
