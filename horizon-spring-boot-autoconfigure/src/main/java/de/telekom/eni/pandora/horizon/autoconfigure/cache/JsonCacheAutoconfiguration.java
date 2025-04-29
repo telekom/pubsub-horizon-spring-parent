@@ -43,7 +43,7 @@ public class JsonCacheAutoconfiguration {
 
         IMap<String, HazelcastJsonValue> map = hazelcastInstance.getMap(SUBSCRIPTION_RESOURCE_V1);
         map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
-        return new JsonCacheService<>(SubscriptionResource.class, map, mapper);
+        return new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1);
     }
 
     @Bean
@@ -53,7 +53,7 @@ public class JsonCacheAutoconfiguration {
         var mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
 
-        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper);
+        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP);
     }
 
 }

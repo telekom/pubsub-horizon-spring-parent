@@ -6,6 +6,7 @@ package de.telekom.eni.pandora.horizon.cache.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
@@ -27,14 +28,20 @@ public class JsonCacheService<T> {
     private final Class<T> mapClass;
 
     @Getter
-    private final IMap<String, HazelcastJsonValue> map;
+    private IMap<String, HazelcastJsonValue> map;
 
     private final ObjectMapper mapper;
 
-    public JsonCacheService(Class<T> mapClass, IMap<String, HazelcastJsonValue> map, ObjectMapper mapper) {
+    private final HazelcastInstance hazelcastInstance;
+
+    private final String cacheMapName;
+
+    public JsonCacheService(Class<T> mapClass, IMap<String, HazelcastJsonValue> map, ObjectMapper mapper, HazelcastInstance hazelcastInstance, String cacheMapName) {
         this.mapClass = mapClass;
         this.map = map;
         this.mapper = mapper;
+        this.hazelcastInstance = hazelcastInstance;
+        this.cacheMapName = cacheMapName;
     }
 
     public Optional<T> getByKey(String key) throws JsonCacheException {
@@ -53,7 +60,18 @@ public class JsonCacheService<T> {
     }
 
     public List<T> getQuery(Query query) throws JsonCacheException {
-        var values = map.values(query.toSqlPredicate());
+        IMap<String, HazelcastJsonValue> map = getCacheMap();
+        Collection<HazelcastJsonValue> values;
+
+        if (map != null) {
+            log.info("Hazelcast map is available...");
+            values = map.values(query.toSqlPredicate());
+        }
+        else {
+            log.info("Hazelcast map is not available...");
+            return new ArrayList<>();
+        }
+
         return mapAll(values);
     }
 
@@ -93,4 +111,15 @@ public class JsonCacheService<T> {
         return mappedValues;
     }
 
+
+    private IMap<String, HazelcastJsonValue> getCacheMap() {
+            try {
+                map = hazelcastInstance.getMap(cacheMapName);
+                HazelcastJsonValue value = map.get("key");
+            } catch (Exception e) {
+                log.warn("Using MongoDB ... " + e.getMessage());
+                map = null; // stay null to retry later
+            }
+        return map;
+    }
 }
