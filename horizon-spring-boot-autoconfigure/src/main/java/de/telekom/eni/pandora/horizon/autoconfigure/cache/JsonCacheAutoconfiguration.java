@@ -18,11 +18,13 @@ import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+@Slf4j
 @Configuration
 @ConditionalOnProperty(value = "horizon.cache.enabled")
 public class JsonCacheAutoconfiguration {
@@ -42,19 +44,34 @@ public class JsonCacheAutoconfiguration {
         var mapper = new ObjectMapper();
         mapper.registerModule(module);
 
-        IMap<String, HazelcastJsonValue> map = hazelcastInstance.getMap(SUBSCRIPTION_RESOURCE_V1);
-        map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
-        return new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1, subscriptionsMongoRepo );
+        IMap<String, HazelcastJsonValue> map = null;
+
+        try {
+            map = hazelcastInstance.getMap(SUBSCRIPTION_RESOURCE_V1);
+            map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
+        }
+        catch (Exception e) {
+            log.error("Hazelcast map {} is not available", SUBSCRIPTION_RESOURCE_V1);
+        }
+
+        return new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1, subscriptionsMongoRepo, applicationEventPublisher);
     }
 
     @Bean
     public JsonCacheService<CircuitBreakerMessage> circuitBreakerCache(HazelcastInstance hazelcastInstance) {
-        IMap<String, HazelcastJsonValue> map = hazelcastInstance.getMap(CIRCUITBREAKER_MAP);
+        IMap<String, HazelcastJsonValue> map = null;
+
+        try {
+            map = hazelcastInstance.getMap(CIRCUITBREAKER_MAP);
+        }
+        catch (Exception e) {
+            log.error("Hazelcast map {} is not available", CIRCUITBREAKER_MAP);
+        }
 
         var mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
 
-        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP, null);
+        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP, null, null);
     }
 
 }
