@@ -4,10 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.mongo.model;
 
-import de.telekom.eni.pandora.horizon.model.db.Coordinates;
-import de.telekom.eni.pandora.horizon.model.db.PartialEvent;
-import de.telekom.eni.pandora.horizon.model.db.State;
-import de.telekom.eni.pandora.horizon.model.db.StateError;
+import de.telekom.eni.pandora.horizon.model.db.*;
 import de.telekom.eni.pandora.horizon.model.event.DeliveryType;
 import de.telekom.eni.pandora.horizon.model.event.Status;
 import de.telekom.eni.pandora.horizon.model.meta.EventRetentionTime;
@@ -20,14 +17,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-@Document(collection = "status")
-public class SubscriptionMongoDocument extends State {
+@Document(collection = "eventSubscriptions")
+public class SubscriptionMongoDocument extends Subscription {
     @MongoId
     private String id;
 
-    public SubscriptionMongoDocument(String uuid, Coordinates coordinates, Status status, String environment, DeliveryType deliveryType, String subscriptionId, PartialEvent partialEvent, Map<String, String> properties, String multiplexedFrom, EventRetentionTime eventRetentionTime, Date timestamp, Date modified, StateError error, List<String> appliedScopes, EvaluationResult scopeEvaluationResult, EvaluationResult consumerEvaluationResult) {
-        super(uuid, coordinates, status, environment, deliveryType, subscriptionId, partialEvent, properties, multiplexedFrom, eventRetentionTime, Objects.requireNonNullElse(eventRetentionTime, EventRetentionTime.DEFAULT).getTopic(), timestamp, modified, error, appliedScopes, scopeEvaluationResult, consumerEvaluationResult);
-    }
+
+
+    public SubscriptionMongoDocument(String uuid,String subscriptionId, String deliveryType, String publisherId, String subscriberId, String type, String callback){
+        super(uuid, subscriptionId, deliveryType, publisherId, subscriberId, type, callback);
+    };
 
     public SubscriptionMongoDocument() {
     }

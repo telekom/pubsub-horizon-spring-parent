@@ -18,7 +18,9 @@ import java.util.List;
 
 
 public interface SubscriptionsMongoRepo extends MongoRepository<SubscriptionMongoDocument, String> {
-    List<SubscriptionMongoDocument> findByEventType(String eventType);
-
+    //List<SubscriptionMongoDocument> findByEventType(String eventType);
+    List<SubscriptionMongoDocument> findByType(String type);
 }
+
+
 

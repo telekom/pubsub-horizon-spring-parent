@@ -35,7 +35,7 @@ class JsonCacheServiceTest {
         this.hazelcastInstance = hazelcastInstance;
 
         IMap<String, HazelcastJsonValue> dummyMap = hazelcastInstance.getMap("dummyMap");
-        this.cache = new JsonCacheService<>(CacheDummy.class, dummyMap, new ObjectMapper(), hazelcastInstance, "dummyMap");
+        this.cache = new JsonCacheService<>(CacheDummy.class, dummyMap, new ObjectMapper(), hazelcastInstance, "dummyMap", null);
     }
 
     @Test

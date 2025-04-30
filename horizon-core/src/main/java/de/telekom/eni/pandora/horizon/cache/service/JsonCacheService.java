@@ -6,20 +6,15 @@ package de.telekom.eni.pandora.horizon.cache.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hazelcast.core.HazelcastException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
-import de.telekom.eni.pandora.horizon.mongo.model.MessageStateMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
-import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -42,8 +37,7 @@ public class JsonCacheService<T> {
 
     private final String cacheMapName;
 
-    @Autowired
-    private SubscriptionsMongoRepo subscriptionsMongoRepo;
+    private final SubscriptionsMongoRepo subscriptionsMongoRepo;
 
     public JsonCacheService(Class<T> mapClass, IMap<String, HazelcastJsonValue> map, ObjectMapper mapper, HazelcastInstance hazelcastInstance, String cacheMapName, SubscriptionsMongoRepo subscriptionsMongoRepo) {
         this.mapClass = mapClass;
@@ -76,15 +70,16 @@ public class JsonCacheService<T> {
         if (map != null) {
             log.info("Hazelcast map is available...");
             values = map.values(query.toSqlPredicate()); //list of subscription resources
+            log.info("Hazelcast map returned values: {}", values);
         }
         else {
             log.info("Hazelcast map is not available...");
 
 
-            List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByEventType(query.getEventType());
+            List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByType(query.getEventType());
 
-            log.info("Hazelcast map has {} subscriptions...", docs.size());
-            log.info("Hazelcast map has subscriptions... {}", docs);
+            log.info("Mongo has {} subscriptions...", docs.size());
+            log.info("Mongo has subscriptions... {}", docs);
 
 //            if (docs != null) {
 //                if (map != null) {
@@ -99,7 +94,7 @@ public class JsonCacheService<T> {
             }
 
 
-        return null;
+        return mapAll(values);
     }
 
     public List<T> getAll() throws JsonCacheException {
@@ -134,9 +129,25 @@ public class JsonCacheService<T> {
                 throw new JsonCacheException(msg, e);
             }
         }
-
+        log.info("Hazelcast mappedValues...:  {}", mappedValues);
         return mappedValues;
     }
+
+//    private List<T> mapAllMongo(List<SubscriptionMongoDocument> values) throws JsonCacheException {
+//        var mappedValues = new ArrayList<T>();
+//
+//        for (var value : values) {
+//            try {
+//                var mappedValue = mapper.readValue(value.getCoordinates()getValue(), mapClass);
+//                mappedValues.add(mappedValue);
+//            } catch (JsonProcessingException e) {
+//                var msg = String.format("Could not map json %s from hazelcast map %s to %s", value.getValue(), map.getName(), mapClass.getName());
+//                throw new JsonCacheException(msg, e);
+//            }
+//        }
+//
+//        return mappedValues;
+//    }
 
 
     private IMap<String, HazelcastJsonValue> getCacheMap() {
