@@ -96,13 +96,17 @@ public class JsonCacheService<T> {
         if (map != null) {
             values = map.values(query.toSqlPredicate()); //list of subscription resources
             result = mapAll(values);
+            log.debug("Hazelcast Query result: {}", result);
         }
         else {
             log.error("Hazelcast map is not available, using MongoDB instead");
 
             List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByType(query.getEventType());
             result = mapMongoSubscriptions(docs);
+            log.debug("MongoDB Query result: {}", result);
+
         }
+
 
         return result;
     }
@@ -152,7 +156,6 @@ public class JsonCacheService<T> {
                 throw new JsonCacheException(msg, e);
             }
         }
-        log.info("Hazelcast mappedValues...:  {}", mappedValues);
         return mappedValues;
     }
 
