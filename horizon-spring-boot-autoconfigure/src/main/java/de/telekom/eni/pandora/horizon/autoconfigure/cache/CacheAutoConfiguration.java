@@ -4,11 +4,10 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
-import com.hazelcast.client.config.ClientConnectionStrategyConfig;
-import com.hazelcast.client.config.ConnectionRetryConfig;
-import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.client.HazelcastClient;
 import com.hazelcast.client.config.ClientConfig;
+import com.hazelcast.client.config.ConnectionRetryConfig;
+import com.hazelcast.core.HazelcastInstance;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.CacheService;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;

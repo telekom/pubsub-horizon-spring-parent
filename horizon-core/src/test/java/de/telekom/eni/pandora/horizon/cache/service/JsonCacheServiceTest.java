@@ -5,7 +5,6 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
@@ -13,7 +12,10 @@ import de.telekom.eni.pandora.horizon.autoconfigure.cache.CacheAutoConfiguration
 import de.telekom.eni.pandora.horizon.cache.util.HazelcastTestInstance;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.model.dummy.CacheDummy;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

@@ -27,8 +27,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-import static java.util.Optional.*;
-
 @Slf4j
 public class JsonCacheService<T> {
 
@@ -170,12 +168,12 @@ public class JsonCacheService<T> {
             SubscriptionResource resource = new SubscriptionResource();
             Subscription sub = new Subscription();
 
-            sub.setSubscriptionId(doc.getSubscriptionId());
-            sub.setSubscriberId(doc.getSubscriberId());
-            sub.setPublisherId(doc.getPublisherId());
-            sub.setDeliveryType(doc.getDeliveryType());
-            sub.setType(doc.getType());
-            sub.setCallback(doc.getCallback());
+            sub.setSubscriptionId(doc.getSpec().getSubscription().getSubscriptionId());
+            sub.setSubscriberId(doc.getSpec().getSubscription().getSubscriberId());
+            sub.setPublisherId(doc.getSpec().getSubscription().getPublisherId());
+            sub.setDeliveryType(doc.getSpec().getSubscription().getDeliveryType());
+            sub.setType(doc.getSpec().getSubscription().getType());
+            sub.setCallback(doc.getSpec().getSubscription().getCallback());
 
             spec.setSubscription(sub);
 

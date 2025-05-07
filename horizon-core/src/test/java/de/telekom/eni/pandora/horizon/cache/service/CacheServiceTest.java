@@ -4,17 +4,13 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
-import com.hazelcast.core.Hazelcast;
-import com.hazelcast.core.HazelcastInstance;
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.CacheAutoConfiguration;
-import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.util.HazelcastTestInstance;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.utils.CacheServiceDummy;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.List;
