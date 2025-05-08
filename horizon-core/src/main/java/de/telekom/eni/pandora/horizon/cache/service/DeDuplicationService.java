@@ -31,15 +31,7 @@ public class DeDuplicationService {
 
     private IMap<String, String> getCache(@Nullable String cacheName) throws HazelcastInstanceNotActiveException {
         String actualCacheName = StringUtil.isNullOrEmptyAfterTrim(cacheName) ? cacheProperties.getDeDuplication().getDefaultCacheName() : cacheName;
-        IMap<String, String> map = null;
-
-        try {
-            map = hazelcastInstance.getMap(actualCacheName);
-        } catch (Exception e) {
-            log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
-            return map;
-        }
-        return map;
+        return hazelcastInstance.getMap(actualCacheName);
     }
 
     public boolean isEnabled(String cacheName) {
