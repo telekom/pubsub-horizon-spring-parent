@@ -12,6 +12,7 @@ import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.model.event.PublishedEventMessage;
 import de.telekom.eni.pandora.horizon.model.event.SubscriptionEventMessage;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.NonNull;
 import org.springframework.lang.Nullable;
 
@@ -20,6 +21,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @AllArgsConstructor
 public class DeDuplicationService {
 
@@ -29,7 +31,14 @@ public class DeDuplicationService {
 
     private IMap<String, String> getCache(@Nullable String cacheName) throws HazelcastInstanceNotActiveException {
         String actualCacheName = StringUtil.isNullOrEmptyAfterTrim(cacheName) ? cacheProperties.getDeDuplication().getDefaultCacheName() : cacheName;
-        return hazelcastInstance.getMap(actualCacheName);
+        IMap<String, String> map = null;
+
+        try {
+            map = hazelcastInstance.getMap(actualCacheName);
+        } catch (Exception e) {
+            log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
+        }
+        return map;
     }
 
     public boolean isEnabled() {
