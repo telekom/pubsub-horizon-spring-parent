@@ -108,7 +108,14 @@ public class DeDuplicationService {
     }
 
     public String get(String key) throws HazelcastInstanceNotActiveException {
-        return get("", key);
+        String cacheName = null;
+
+        try {
+            cacheName = get("", key);
+        } catch (Exception e) {
+            log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
+        }
+        return cacheName;
     }
 
     public String get(String cacheName, String key) throws HazelcastInstanceNotActiveException {
