@@ -75,7 +75,7 @@ public class JsonCacheService<T> {
                     throw new JsonCacheException(msg, e);
                 }
             }
-        } else {
+        } else if (subscriptionsMongoRepo != null) {
             log.warn("Hazelcast map not available. Falling back to MongoDB.");
             List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findBySubscriptionId(key);
             log.debug("MongoDB Query raw result: {}", docs);
