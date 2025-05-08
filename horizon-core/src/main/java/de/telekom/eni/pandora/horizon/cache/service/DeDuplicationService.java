@@ -42,7 +42,14 @@ public class DeDuplicationService {
         return map;
     }
 
-    public boolean isEnabled() {
+    public boolean isEnabled(String cacheName) {
+        try {
+            hazelcastInstance.getMap(cacheName);
+        } catch (Exception e) {
+            log.warn("Hazelcast instance is not active or cache not found, skipping deduplication check: {}", e.getMessage());
+            return false;
+        }
+
         return cacheProperties.getDeDuplication().isEnabled();
     }
 
@@ -85,12 +92,11 @@ public class DeDuplicationService {
     }
 
     public boolean isDuplicate(String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        IMap<String, String> cache = getCache(cacheName);
-        if (!isEnabled() || cache == null) {
+        if (!isEnabled(cacheName)) {
             return false;
         }
 
-        return cache.containsKey(key);
+        return getCache(cacheName).containsKey(key);
     }
 
     public String get(String cacheName, @NonNull PublishedEventMessage publishedEventMessage, String subscriptionId) throws HazelcastInstanceNotActiveException {
@@ -122,8 +128,7 @@ public class DeDuplicationService {
     }
 
     public String get(String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        IMap<String, String> cache = getCache(cacheName);
-        if (!isEnabled() || cache == null) {
+        if (!isEnabled(cacheName)) {
             return null;
         }
 
@@ -155,7 +160,7 @@ public class DeDuplicationService {
      * @return null if disable or old value was null
      */
     public String track(String cacheName, String key, @NonNull String value) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        if (!isEnabled(cacheName)) {
             return null;
         }
 
@@ -171,7 +176,7 @@ public class DeDuplicationService {
     }
 
     public void clear(@Nullable String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        if (!isEnabled(cacheName)) {
             return;
         }
 
