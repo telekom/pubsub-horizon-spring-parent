@@ -37,6 +37,7 @@ public class DeDuplicationService {
             map = hazelcastInstance.getMap(actualCacheName);
         } catch (Exception e) {
             log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
+            return map;
         }
         return map;
     }
@@ -84,11 +85,12 @@ public class DeDuplicationService {
     }
 
     public boolean isDuplicate(String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        IMap<String, String> cache = getCache(cacheName);
+        if (!isEnabled() || cache == null) {
             return false;
         }
 
-        return getCache(cacheName).containsKey(key);
+        return cache.containsKey(key);
     }
 
     public String get(String cacheName, @NonNull PublishedEventMessage publishedEventMessage, String subscriptionId) throws HazelcastInstanceNotActiveException {
@@ -114,12 +116,14 @@ public class DeDuplicationService {
             cacheName = get("", key);
         } catch (Exception e) {
             log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
+            return cacheName;
         }
         return cacheName;
     }
 
     public String get(String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        IMap<String, String> cache = getCache(cacheName);
+        if (!isEnabled() || cache == null) {
             return null;
         }
 
