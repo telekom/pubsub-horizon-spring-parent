@@ -59,6 +59,7 @@ public class JsonCacheService<T> {
 
     public Optional<T> getByKey(String key) throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
+        Optional<T> result;
 
         if (map != null) {
             HazelcastJsonValue value = map.get(key);
@@ -66,6 +67,8 @@ public class JsonCacheService<T> {
                 try {
                     log.debug("Raw JSON value for key {}: {}", key, value.getValue());
                     T mappedValue = mapper.readValue(value.getValue(), mapClass);
+                    log.debug("Mapped value for key {}: {}", key, mappedValue);
+
                     return Optional.of(mappedValue);
                 } catch (JsonProcessingException e) {
                     String msg = String.format("Could not map %s from hazelcast map %s to %s", key, map.getName(), mapClass.getName());
@@ -74,12 +77,16 @@ public class JsonCacheService<T> {
             }
         } else {
             log.warn("Hazelcast map not available. Falling back to MongoDB.");
-            // Fallback to MongoDB
-            List<SubscriptionMongoDocument> docs = List.of(subscriptionsMongoRepo.findById(key).orElse(null));
+            List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findBySubscriptionId(key);
+            log.debug("MongoDB Query raw result: {}", docs);
 
             if (docs.getFirst() != null) {
                 List<T> mapped = mapMongoSubscriptions(docs);
-                return Optional.of(mapped.getFirst());
+
+                result = Optional.of(mapped.getFirst());
+                log.debug("MongoDB Query result: {}", result);
+
+                return result;
             }
         }
 
