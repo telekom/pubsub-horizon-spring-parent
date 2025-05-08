@@ -100,6 +100,8 @@ public class JsonCacheService<T> {
             log.error("Hazelcast map is not available, using MongoDB instead");
 
             List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByType(query.getEventType());
+            log.debug("MongoDB Query raw result: {}", docs);
+
             result = mapMongoSubscriptions(docs);
             log.debug("MongoDB Query result: {}", result);
 
