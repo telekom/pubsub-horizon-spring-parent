@@ -104,19 +104,21 @@ public class DeDuplicationService {
     }
 
     public String get(SubscriptionEventMessage subscriptionEventMessage) throws HazelcastInstanceNotActiveException {
-        return get("", generateKey(subscriptionEventMessage));
+        try {
+            return get("", generateKey(subscriptionEventMessage));
+        } catch (Exception e) {
+            log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
+            return null;
+        }
     }
 
     public String get(String key) throws HazelcastInstanceNotActiveException {
-        String cacheName = null;
-
         try {
-            cacheName = get("", key);
+            return get("", key);
         } catch (Exception e) {
             log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
-            return cacheName;
+            return null;
         }
-        return cacheName;
     }
 
     public String get(String cacheName, String key) throws HazelcastInstanceNotActiveException {
