@@ -1,0 +1,28 @@
+version = 1
+SPDX-PackageName = "Horizon Spring Parent"
+SPDX-PackageSupplier = "Deutsche Telekom AG <opensource@telekom.de>"
+SPDX-PackageDownloadLocation = "https://github.com/telekom/pubsub-horizon-spring-parent"
+
+[[annotations]]
+path = "horizon-spring-boot-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2024 Deutsche Telekom IT GmbH"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "gradle/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2015 the original author or authors."
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["gradlew", "gradlew.bat"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2015 the original author or authors."
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "gradle.properties"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2015 the original author or authors."
+SPDX-License-Identifier = "Apache-2.0"
