@@ -34,7 +34,7 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
             List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findBySubscriptionId(key);
             log.debug("SubscriptionsCacheMongoFallback MongoDB Query raw result: {}", docs);
 
-            if (docs.getFirst() != null) {
+            if (!docs.isEmpty() && docs.getFirst() != null) {
                 List<SubscriptionResource> mapped = mapMongoSubscriptions(docs);
                 result = Optional.of(mapped.getFirst());
                 log.debug("MongoDB Query result: {}", result);
