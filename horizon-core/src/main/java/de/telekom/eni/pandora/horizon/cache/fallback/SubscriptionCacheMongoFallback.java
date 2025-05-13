@@ -1,11 +1,13 @@
+// Copyright 2024 Deutsche Telekom IT GmbH
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package de.telekom.eni.pandora.horizon.cache.fallback;
 
 import de.telekom.eni.pandora.horizon.cache.util.Query;
-import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
-import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionTrigger;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.AllArgsConstructor;
@@ -67,9 +69,6 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         List<SubscriptionResource> mappedValues = new ArrayList<>();
 
         for (SubscriptionMongoDocument doc : docs) {
-            SubscriptionTrigger trigger = new SubscriptionTrigger();
-            SubscriptionTrigger publisherTrigger = new SubscriptionTrigger();
-
             SubscriptionResourceSpec spec = new SubscriptionResourceSpec();
             SubscriptionResource resource = new SubscriptionResource();
             Subscription sub = new Subscription();
