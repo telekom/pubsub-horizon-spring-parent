@@ -6,6 +6,7 @@ package de.telekom.eni.pandora.horizon.cache.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hazelcast.client.HazelcastClientOfflineException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
@@ -88,7 +89,7 @@ class JsonCacheServiceTest {
     void testGetQueryFallback() throws JsonCacheException {
 
         // Prepare test data and simulate Hazelcast map unavailability
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new RuntimeException("Hazelcast map unavailable"));
+        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
         when(subscriptionsMongoRepo.findByType(TEST_SUBSCRIPTION_TYPE)).thenReturn(List.of(mockDocument));
 
@@ -133,7 +134,7 @@ class JsonCacheServiceTest {
 
         // Prepare test data and simulate Hazelcast map unavailability
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new RuntimeException("Hazelcast unavailable"));
+        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
         when(subscriptionsMongoRepo.findBySubscriptionId(TEST_SUBSCRIPTION_ID)).thenReturn(List.of(mockDocument));
 
         // Call method to test
@@ -173,7 +174,7 @@ class JsonCacheServiceTest {
 
         // Prepare test data and simulate Hazelcast map unavailability
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new RuntimeException("Hazelcast unavailable"));
+        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
         when(subscriptionsMongoRepo.findAll()).thenReturn(List.of(mockDocument));
 
         // Call method to test
@@ -240,7 +241,7 @@ class JsonCacheServiceTest {
 
         // Prepare test data and simulate Hazelcast
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new RuntimeException("Hazelcast unavailable"));
+        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
         when(subscriptionsMongoRepo.findBySubscriptionId(TEST_SUBSCRIPTION_ID)).thenReturn(List.of(mockDocument));
 
         // Call method to test indirectly, because its private
@@ -293,7 +294,7 @@ class JsonCacheServiceTest {
     void testMapSubscriptionsFallback() throws JsonCacheException {
 
         // Prepare test data and simulate Hazelcast map unavailability
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new RuntimeException("Hazelcast map unavailable"));
+        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
         when(subscriptionsMongoRepo.findByType(any())).thenReturn(List.of(mockDocument));
 
