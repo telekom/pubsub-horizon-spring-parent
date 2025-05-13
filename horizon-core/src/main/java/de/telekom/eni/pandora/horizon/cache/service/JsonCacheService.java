@@ -6,6 +6,7 @@ package de.telekom.eni.pandora.horizon.cache.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hazelcast.client.HazelcastClientOfflineException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
@@ -156,8 +157,8 @@ public class JsonCacheService<T> {
                     map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
                     listenerAdded = true;
                 }
-            } catch (Exception e) {
-                log.warn("Using fallback... " + e.getMessage());
+            } catch (HazelcastClientOfflineException e) {
+                log.warn("Hazelcast map is not available, using MongoDB instead " + e.getMessage());
                 map = null; // stay null to retry later
             }
         return map;

@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 @Slf4j
@@ -25,25 +26,27 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
     public Optional<SubscriptionResource> getByKey(String key) {
         Optional<SubscriptionResource> result;
 
-        log.warn("Hazelcast map not available. Falling back to MongoDB.");
-        List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findBySubscriptionId(key);
-        log.debug("MongoDB Query raw result: {}", docs);
+        log.debug("Entering SubscriptionsCacheMongoFallback getByKey with key={}", key);
 
-        if (docs.getFirst() != null) {
-            List<SubscriptionResource> mapped = mapMongoSubscriptions(docs);
+        try {
+            List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findBySubscriptionId(key);
+            log.debug("SubscriptionsCacheMongoFallback MongoDB Query raw result: {}", docs);
 
-            result = Optional.of(mapped.getFirst());
-            log.debug("MongoDB Query result: {}", result);
-
-            return result;
+            if (docs.getFirst() != null) {
+                List<SubscriptionResource> mapped = mapMongoSubscriptions(docs);
+                result = Optional.of(mapped.getFirst());
+                log.debug("MongoDB Query result: {}", result);
+                return result;
+            }
+        } catch (NoSuchElementException e) {
+            log.error("SubscriptionsCacheMongoFallback Error occurred while executing query on MongoDB: ", e);
         }
+    return Optional.empty();
 
-        return Optional.empty();
     }
 
     @Override
     public List<SubscriptionResource> getQuery(Query query) {
-        log.error("Hazelcast map is not available, using MongoDB instead");
 
         List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByType(query.getEventType());
         log.debug("MongoDB Query raw result: {}", docs);
@@ -56,7 +59,6 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
 
     @Override
     public List<SubscriptionResource> getAll() {
-        log.error("Hazelcast map is not available, using MongoDB instead");
         List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findAll();
         return mapMongoSubscriptions(docs);
     }

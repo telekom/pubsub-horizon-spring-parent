@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import com.hazelcast.client.HazelcastClientOfflineException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.internal.util.StringUtil;
@@ -106,7 +107,7 @@ public class DeDuplicationService {
     public String get(SubscriptionEventMessage subscriptionEventMessage) throws HazelcastInstanceNotActiveException {
         try {
             return get("", generateKey(subscriptionEventMessage));
-        } catch (Exception e) {
+        } catch (HazelcastInstanceNotActiveException e) {
             log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
             return null;
         }
@@ -115,7 +116,7 @@ public class DeDuplicationService {
     public String get(String key) throws HazelcastInstanceNotActiveException {
         try {
             return get("", key);
-        } catch (Exception e) {
+        } catch (HazelcastInstanceNotActiveException e) {
             log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
             return null;
         }
