@@ -8,10 +8,10 @@ import java.util.Optional;
 
 public interface JsonCacheFallback<T> {
 
-    Optional<T> getByKey(String key) throws JsonCacheException;
+    Optional<T> getByKey(String key);
 
-    List<T> getQuery(Query query) throws JsonCacheException;
+    List<T> getQuery(Query query);
 
-    List<T> getAll() throws JsonCacheException;
+    List<T> getAll();
 
 }

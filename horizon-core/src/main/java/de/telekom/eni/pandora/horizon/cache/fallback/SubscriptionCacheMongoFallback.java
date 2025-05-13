@@ -22,7 +22,7 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
     private final SubscriptionsMongoRepo subscriptionsMongoRepo;
 
     @Override
-    public Optional<SubscriptionResource> getByKey(String key) throws JsonCacheException {
+    public Optional<SubscriptionResource> getByKey(String key) {
         Optional<SubscriptionResource> result;
 
         log.warn("Hazelcast map not available. Falling back to MongoDB.");
@@ -42,7 +42,7 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
     }
 
     @Override
-    public List<SubscriptionResource> getQuery(Query query) throws JsonCacheException {
+    public List<SubscriptionResource> getQuery(Query query) {
         log.error("Hazelcast map is not available, using MongoDB instead");
 
         List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByType(query.getEventType());
@@ -55,7 +55,7 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
     }
 
     @Override
-    public List<SubscriptionResource> getAll() throws JsonCacheException {
+    public List<SubscriptionResource> getAll() {
         log.error("Hazelcast map is not available, using MongoDB instead");
         List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findAll();
         return mapMongoSubscriptions(docs);
