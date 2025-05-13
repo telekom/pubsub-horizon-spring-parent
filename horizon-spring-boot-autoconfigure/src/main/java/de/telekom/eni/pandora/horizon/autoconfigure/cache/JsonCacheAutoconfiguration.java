@@ -11,6 +11,7 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
+import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
@@ -54,7 +55,9 @@ public class JsonCacheAutoconfiguration {
             log.error("Hazelcast map {} is not available", SUBSCRIPTION_RESOURCE_V1);
         }
 
-        return new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1, subscriptionsMongoRepo, applicationEventPublisher);
+        var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1, applicationEventPublisher);
+        svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo));
+        return svc;
     }
 
     @Bean
@@ -71,7 +74,7 @@ public class JsonCacheAutoconfiguration {
         var mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
 
-        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP, null, null);
+        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP, null);
     }
 
 }

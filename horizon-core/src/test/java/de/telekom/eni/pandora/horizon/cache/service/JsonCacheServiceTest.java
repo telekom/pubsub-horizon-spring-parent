@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
+import de.telekom.eni.pandora.horizon.cache.fallback.JsonCacheFallback;
+import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
@@ -44,9 +46,9 @@ class JsonCacheServiceTest {
                 new ObjectMapper(),
                 hazelcastInstance,
                 "testMap",
-                subscriptionsMongoRepo,
                 eventPublisher
         );
+        jsonCacheService.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo));
     }
 
     @Test
@@ -238,36 +240,12 @@ class JsonCacheServiceTest {
 
         // Verify results
         verify(hazelcastInstance, times(1)).getMap("testMap");
-        assertNotNull(result, "Map should be filles");
-    }
-
-    @Test
-    void testMapMongoSubscriptions() {
-        // Prepare test data
-        SubscriptionMongoDocument mongoDocument = createMockSubscriptionDocument("testSubscriptionId", "testSubscriptionType");
-
-        // Call method to test
-        List<SubscriptionResource> result = jsonCacheService.mapMongoSubscriptions(List.of(mongoDocument));
-
-        // Verify results
-        assertNotNull(result);
-        assertEquals(1, result.size());
-        assertInstanceOf(SubscriptionResource.class, result.getFirst());
-
-        var mongoDoc = mongoDocument.getSpec().getSubscription();
-        var resDoc = result.getFirst().getSpec().getSubscription();
-
-        assertEquals(mongoDoc.getSubscriptionId(), resDoc.getSubscriptionId());
-        assertEquals(mongoDoc.getSubscriberId(), resDoc.getSubscriberId());
-        assertEquals(mongoDoc.getPublisherId(), resDoc.getPublisherId());
-        assertEquals(mongoDoc.getDeliveryType(), resDoc.getDeliveryType());
-        assertEquals(mongoDoc.getType(), resDoc.getType());
-        assertEquals(mongoDoc.getCallback(), resDoc.getCallback());
+        assertNotNull(result, "Map should be filled");
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void testMapHazelcastSubscriptions() throws JsonCacheException, JsonProcessingException {
+    void testMapSubscriptions() throws JsonCacheException, JsonProcessingException {
 
         // Prepare test data and simulate Hazelcast
         IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
@@ -284,7 +262,7 @@ class JsonCacheServiceTest {
         when(mockMap.values(query.toSqlPredicate())).thenReturn(List.of(hazelcastJsonValue));
         when(mockMap.size()).thenReturn(1);
 
-        // Call method to test
+        // Call method getQuery to map cache subscriptions
         List<SubscriptionResource> result = jsonCacheService.getQuery(query);
 
         // Verify results
@@ -302,6 +280,39 @@ class JsonCacheServiceTest {
         assertEquals(inputDoc.getType(), resDoc.getType());
         assertEquals(inputDoc.getCallback(), resDoc.getCallback());
     }
+
+    @Test
+    void testMapSubscriptionsFallback() throws JsonCacheException {
+
+        // Prepare test data and simulate Hazelcast map unavailability
+        when(hazelcastInstance.getMap("testMap")).thenThrow(new RuntimeException("Hazelcast map unavailable"));
+        SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument("123", "testSubscriptionType");
+        when(subscriptionsMongoRepo.findByType(any())).thenReturn(List.of(mockDocument));
+
+        // Call method getQuery to map subscriptions for fallback scenario
+        Query query = Query.builder(SubscriptionMongoDocument.class)
+                .addMatcher("type", "testSubscriptionType")
+                .build();
+
+        List<SubscriptionResource> result = jsonCacheService.getQuery(query);
+
+        // Verify results
+        assertNotNull(result);
+        assertEquals(1, result.size());
+        assertInstanceOf(SubscriptionResource.class, result.getFirst());
+
+        var mongoDoc = mockDocument.getSpec().getSubscription();
+        var resDoc = result.getFirst().getSpec().getSubscription();
+
+        assertEquals(mongoDoc.getSubscriptionId(), resDoc.getSubscriptionId());
+        assertEquals(mongoDoc.getSubscriberId(), resDoc.getSubscriberId());
+        assertEquals(mongoDoc.getPublisherId(), resDoc.getPublisherId());
+        assertEquals(mongoDoc.getDeliveryType(), resDoc.getDeliveryType());
+        assertEquals(mongoDoc.getType(), resDoc.getType());
+        assertEquals(mongoDoc.getCallback(), resDoc.getCallback());
+
+    }
+
 
     // Helper method to create a mock SubscriptionMongoDocument
     @SuppressWarnings("SameParameterValue")
