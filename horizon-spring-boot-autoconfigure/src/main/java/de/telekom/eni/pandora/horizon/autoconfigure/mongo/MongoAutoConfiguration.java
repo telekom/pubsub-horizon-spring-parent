@@ -31,6 +31,8 @@ public class MongoAutoConfiguration {
     public MongoClient mongo(MongoProperties properties) {
         log.debug("Using database at: " + properties.getUrl());
         log.debug("Using database: " + properties.getDatabase());
+        log.debug("isRethrowExceptions: " + properties.isRethrowExceptions());
+
         var connectionString = new ConnectionString(properties.getUrl());
         var clientSettings = MongoClientSettings.builder()
                 .applyConnectionString(connectionString)

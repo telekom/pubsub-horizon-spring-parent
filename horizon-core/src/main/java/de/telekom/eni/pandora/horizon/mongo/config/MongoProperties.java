@@ -31,4 +31,6 @@ public class MongoProperties {
     private long maxTimeout = 30000;
 
     private boolean enabled = false;
+
+    private boolean rethrowExceptions = false;
 }

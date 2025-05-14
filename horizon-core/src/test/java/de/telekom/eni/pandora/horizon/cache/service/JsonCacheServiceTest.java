@@ -17,6 +17,7 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.model.dummy.CacheDummy;
+import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +40,7 @@ class JsonCacheServiceTest {
     private static final String TEST_MAP_NAME = "testMap";
     private static final String TEST_SUBSCRIPTION_ID = "123";
     private static final String TEST_SUBSCRIPTION_TYPE = "testSubscriptionType";
+    private static final MongoProperties mongoProperties = new MongoProperties();
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -56,7 +58,7 @@ class JsonCacheServiceTest {
                 TEST_MAP_NAME,
                 eventPublisher
         );
-        jsonCacheService.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo));
+        jsonCacheService.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
     }
 
     @Test

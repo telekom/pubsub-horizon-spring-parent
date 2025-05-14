@@ -8,10 +8,13 @@ import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
+import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.AllArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,27 +26,36 @@ import java.util.Optional;
 public class SubscriptionCacheMongoFallback implements JsonCacheFallback<SubscriptionResource> {
 
     private final SubscriptionsMongoRepo subscriptionsMongoRepo;
+    private final MongoProperties mongoProperties;
 
+    @SneakyThrows
     @Override
     public Optional<SubscriptionResource> getByKey(String key) {
         Optional<SubscriptionResource> result;
+        List<SubscriptionMongoDocument> docs = new ArrayList<>();
 
-        log.debug("Entering SubscriptionsCacheMongoFallback getByKey with key={}", key);
+        log.error("mongoProperties.getDatabase() = {}", mongoProperties.getDatabase());
+        log.error("mongoProperties.isRethrowExceptions() = {}", mongoProperties.isRethrowExceptions());
 
         try {
-            List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findBySubscriptionId(key);
-            log.debug("SubscriptionsCacheMongoFallback MongoDB Query raw result: {}", docs);
+            docs = subscriptionsMongoRepo.findBySubscriptionId(key);
+            log.debug("MongoDB Query raw result: {}", docs);
 
-            if (!docs.isEmpty() && docs.getFirst() != null) {
-                List<SubscriptionResource> mapped = mapMongoSubscriptions(docs);
-                result = Optional.of(mapped.getFirst());
-                log.debug("MongoDB Query result: {}", result);
-                return result;
+        } catch (Exception e) {
+            log.error("Error occurred while executing query on MongoDB: ", e.getCause());
+            if (mongoProperties.isRethrowExceptions()) {
+                throw e.getCause();
             }
-        } catch (NoSuchElementException e) {
-            log.error("SubscriptionsCacheMongoFallback Error occurred while executing query on MongoDB: ", e);
         }
-    return Optional.empty();
+
+        if (!docs.isEmpty() && docs.getFirst() != null) {
+            List<SubscriptionResource> mapped = mapMongoSubscriptions(docs);
+            result = Optional.of(mapped.getFirst());
+            log.debug("MongoDB Query result: {}", result);
+            return result;
+        }
+
+        return Optional.empty();
 
     }
 

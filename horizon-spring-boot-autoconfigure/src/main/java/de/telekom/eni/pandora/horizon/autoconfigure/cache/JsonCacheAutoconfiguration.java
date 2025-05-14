@@ -15,12 +15,14 @@ import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallb
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
+import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -35,6 +37,8 @@ public class JsonCacheAutoconfiguration {
     private static final String CIRCUITBREAKER_MAP = "circuit-breakers";
 
     private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
+
+    private static final MongoProperties mongoProperties = new MongoProperties();
 
     @Bean
     public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo) {
@@ -56,7 +60,7 @@ public class JsonCacheAutoconfiguration {
         }
 
         var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1, applicationEventPublisher);
-        svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo));
+        svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
         return svc;
     }
 

@@ -8,6 +8,7 @@ import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
+import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,11 +26,13 @@ class SubscriptionCacheMongoFallbackTest {
     private JsonCacheFallback<SubscriptionResource> subscriptionCacheMongoFallback;
     private static final String TEST_SUBSCRIPTION_ID = "123";
     private static final String TEST_SUBSCRIPTION_TYPE = "testSubscriptionType";
+    private static final MongoProperties mongoProperties = new MongoProperties();
+
 
     @BeforeEach
     void setUp() {
         subscriptionsMongoRepo = mock(SubscriptionsMongoRepo.class);
-        subscriptionCacheMongoFallback = new SubscriptionCacheMongoFallback(subscriptionsMongoRepo);
+        subscriptionCacheMongoFallback = new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties);
     }
 
     @Test
