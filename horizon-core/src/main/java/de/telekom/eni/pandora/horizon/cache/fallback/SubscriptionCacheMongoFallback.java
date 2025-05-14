@@ -4,6 +4,8 @@
 
 package de.telekom.eni.pandora.horizon.cache.fallback;
 
+import com.mongodb.MongoCommandException;
+import com.mongodb.MongoTimeoutException;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
@@ -12,13 +14,10 @@ import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.AllArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 
 @Slf4j
@@ -28,7 +27,6 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
     private final SubscriptionsMongoRepo subscriptionsMongoRepo;
     private final MongoProperties mongoProperties;
 
-    @SneakyThrows
     @Override
     public Optional<SubscriptionResource> getByKey(String key) {
         Optional<SubscriptionResource> result;
@@ -41,10 +39,10 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
             docs = subscriptionsMongoRepo.findBySubscriptionId(key);
             log.debug("MongoDB Query raw result: {}", docs);
 
-        } catch (Exception e) {
+        } catch (MongoCommandException | MongoTimeoutException e) {
             log.error("Error occurred while executing query on MongoDB: ", e.getCause());
             if (mongoProperties.isRethrowExceptions()) {
-                throw e.getCause();
+                throw new RuntimeException(e.getCause());
             }
         }
 

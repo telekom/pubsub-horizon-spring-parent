@@ -30,7 +30,8 @@ public class MongoAutoConfiguration {
     @Bean
     public MongoClient mongo(MongoProperties properties) {
         log.debug("Using database at: " + properties.getUrl());
-        log.debug("Using database: " + properties.getDatabase());
+        log.debug("Using status database: " + properties.getDatabase());
+        log.debug("Using config database: " + properties.getDatabaseConfig());
         log.debug("isRethrowExceptions: " + properties.isRethrowExceptions());
 
         var connectionString = new ConnectionString(properties.getUrl());
@@ -44,19 +45,25 @@ public class MongoAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public MongoTemplate mongoTemplate(MongoProperties properties) {
+    public MongoTemplate mongoStatusTemplate(MongoProperties properties) {
         return new MongoTemplate(mongo(properties), properties.getDatabase());
     }
 
     @Bean
-    public MessageStateMongoRepo getStatusMessageRepo(MongoTemplate mongoTemplate) {
-        MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoTemplate);
+    @ConditionalOnMissingBean
+    public MongoTemplate mongoConfigTemplate(MongoProperties properties) {
+        return new MongoTemplate(mongo(properties), properties.getDatabaseConfig());
+    }
+
+    @Bean
+    public MessageStateMongoRepo getStatusMessageRepo(MongoTemplate mongoStatusTemplate) {
+        MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoStatusTemplate);
         return mongoRepositoryFactory.getRepository(MessageStateMongoRepo.class);
     }
 
     @Bean
-    public SubscriptionsMongoRepo getSubscriptionsRepo(MongoTemplate mongoTemplate) {
-        MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoTemplate);
+    public SubscriptionsMongoRepo getSubscriptionsRepo(MongoTemplate mongoConfigTemplate) {
+        MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoConfigTemplate);
         return mongoRepositoryFactory.getRepository(SubscriptionsMongoRepo.class);
     }
 

@@ -21,6 +21,7 @@ import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
@@ -38,10 +39,8 @@ public class JsonCacheAutoconfiguration {
 
     private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
 
-    private static final MongoProperties mongoProperties = new MongoProperties();
-
     @Bean
-    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo) {
+    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo, MongoProperties mongoProperties) {
         var module = new SimpleModule();
         module.addSerializer(Operator.class, new OperatorSerializer());
         module.addDeserializer(Operator.class, new OperatorDeserializer());

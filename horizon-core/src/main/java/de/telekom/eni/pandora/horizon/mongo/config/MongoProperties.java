@@ -20,6 +20,8 @@ public class MongoProperties {
 
     private String database = "horizon";
 
+    private String databaseConfig = "horizon-config";
+
     private WriteConcern writeConcern = WriteConcern.W1;
 
     private int maxConnections = 100;
