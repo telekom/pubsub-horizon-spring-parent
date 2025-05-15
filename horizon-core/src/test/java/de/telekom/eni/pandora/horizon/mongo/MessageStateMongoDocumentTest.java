@@ -89,9 +89,9 @@ public class MessageStateMongoDocumentTest {
     @DisplayName("Verify that messageStateMongoRepo is running")
     void testContainerRun() {
 //        assertNotNull(embeddedMongoServer);
-        assertNotNull(messageStateMongoRepo);
-        var collectionNames = mongoTemplate.getCollectionNames();
-        assertNotNull(collectionNames);
+        var collectionName = mongoTemplate.getCollectionName(MessageStateMongoDocument.class);
+        var collection = mongoTemplate.getCollection(collectionName);
+        assertNotNull(collection);
     }
 
     @Test
