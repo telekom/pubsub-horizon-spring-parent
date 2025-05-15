@@ -32,7 +32,7 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         Optional<SubscriptionResource> result;
         List<SubscriptionMongoDocument> docs = new ArrayList<>();
 
-        log.error("mongoProperties.getDatabase() = {}", mongoProperties.getDatabase());
+        log.error("mongoProperties.getDatabase() = {}", mongoProperties.getDatabases());
         log.error("mongoProperties.isRethrowExceptions() = {}", mongoProperties.isRethrowExceptions());
 
         try {

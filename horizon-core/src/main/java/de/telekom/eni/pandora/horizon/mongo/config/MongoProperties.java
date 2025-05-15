@@ -18,9 +18,7 @@ public class MongoProperties {
 
     private String url = "mongodb://root:ineedcoffee@localhost:27017";
 
-    private String database = "horizon";
-
-    private String databaseConfig = "horizon-config";
+    private Databases databases = new Databases();
 
     private WriteConcern writeConcern = WriteConcern.W1;
 

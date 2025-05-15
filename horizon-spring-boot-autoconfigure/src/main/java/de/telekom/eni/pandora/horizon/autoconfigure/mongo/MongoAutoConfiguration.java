@@ -10,7 +10,6 @@ import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -33,8 +32,8 @@ public class MongoAutoConfiguration {
     @Bean
     public MongoClient mongoClient(MongoProperties properties) {
         log.debug("Using database at: " + properties.getUrl());
-        log.debug("Using status database: " + properties.getDatabase());
-        log.debug("Using config database: " + properties.getDatabaseConfig());
+        log.debug("Using status database: " + properties.getDatabases().getRunTimeDatabase());
+        log.debug("Using config database: " + properties.getDatabases().getConfigTimeDatabase());
         log.debug("isRethrowExceptions: " + properties.isRethrowExceptions());
 
         log.debug("MongoProperties: {}", properties);
@@ -54,14 +53,14 @@ public class MongoAutoConfiguration {
     @Bean(name = "mongoStatusTemplate")
     //@ConditionalOnMissingBean(name = "mongoStatusTemplate")
     public MongoTemplate mongoStatusTemplate(MongoClient mongoClient, MongoProperties properties) {
-        return new MongoTemplate(mongoClient, properties.getDatabase());
+        return new MongoTemplate(mongoClient, properties.getDatabases().getRunTimeDatabase());
     }
 
     @Primary
     @Bean(name = "mongoConfigTemplate")
     //@ConditionalOnMissingBean(name = "mongoConfigTemplate")
     public MongoTemplate mongoConfigTemplate(MongoClient mongoClient, MongoProperties properties) {
-        return new MongoTemplate(mongoClient, properties.getDatabaseConfig());
+        return new MongoTemplate(mongoClient, properties.getDatabases().getConfigTimeDatabase());
     }
 
     @Bean
