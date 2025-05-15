@@ -1,7 +1,3 @@
-// Copyright 2024 Deutsche Telekom IT GmbH
-//
-// SPDX-License-Identifier: Apache-2.0
-
 package de.telekom.eni.pandora.horizon.autoconfigure.mongo;
 
 import com.mongodb.ConnectionString;
@@ -12,11 +8,14 @@ import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 import org.springframework.retry.annotation.EnableRetry;
@@ -27,44 +26,53 @@ import org.springframework.retry.annotation.EnableRetry;
 @EnableRetry
 @EnableConfigurationProperties({MongoProperties.class})
 public class MongoAutoConfiguration {
+
+    @Value("${spring.application.name}")
+    private String applicationName;
+
     @Bean
-    public MongoClient mongo(MongoProperties properties) {
+    public MongoClient mongoClient(MongoProperties properties) {
         log.debug("Using database at: " + properties.getUrl());
         log.debug("Using status database: " + properties.getDatabase());
         log.debug("Using config database: " + properties.getDatabaseConfig());
         log.debug("isRethrowExceptions: " + properties.isRethrowExceptions());
 
+        log.debug("MongoProperties: {}", properties);
+
+
         var connectionString = new ConnectionString(properties.getUrl());
         var clientSettings = MongoClientSettings.builder()
                 .applyConnectionString(connectionString)
                 .writeConcern(properties.getWriteConcern())
+                .applicationName(applicationName)
                 .build();
 
         return MongoClients.create(clientSettings);
     }
 
-    @Bean
-    @ConditionalOnMissingBean
-    public MongoTemplate mongoStatusTemplate(MongoProperties properties) {
-        return new MongoTemplate(mongo(properties), properties.getDatabase());
+
+    @Bean(name = "mongoStatusTemplate")
+    //@ConditionalOnMissingBean(name = "mongoStatusTemplate")
+    public MongoTemplate mongoStatusTemplate(MongoClient mongoClient, MongoProperties properties) {
+        return new MongoTemplate(mongoClient, properties.getDatabase());
+    }
+
+    @Primary
+    @Bean(name = "mongoConfigTemplate")
+    //@ConditionalOnMissingBean(name = "mongoConfigTemplate")
+    public MongoTemplate mongoConfigTemplate(MongoClient mongoClient, MongoProperties properties) {
+        return new MongoTemplate(mongoClient, properties.getDatabaseConfig());
     }
 
     @Bean
-    @ConditionalOnMissingBean
-    public MongoTemplate mongoConfigTemplate(MongoProperties properties) {
-        return new MongoTemplate(mongo(properties), properties.getDatabaseConfig());
-    }
-
-    @Bean
-    public MessageStateMongoRepo getStatusMessageRepo(MongoTemplate mongoStatusTemplate) {
+    public MessageStateMongoRepo getStatusMessageRepo(@Qualifier("mongoStatusTemplate") MongoTemplate mongoStatusTemplate) {
         MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoStatusTemplate);
         return mongoRepositoryFactory.getRepository(MessageStateMongoRepo.class);
     }
 
     @Bean
-    public SubscriptionsMongoRepo getSubscriptionsRepo(MongoTemplate mongoConfigTemplate) {
+    public SubscriptionsMongoRepo getSubscriptionsRepo(@Qualifier("mongoConfigTemplate") MongoTemplate mongoConfigTemplate) {
         MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoConfigTemplate);
         return mongoRepositoryFactory.getRepository(SubscriptionsMongoRepo.class);
     }
-
 }
