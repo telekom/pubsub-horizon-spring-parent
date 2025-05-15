@@ -27,7 +27,7 @@ import org.springframework.retry.annotation.EnableRetry;
 @EnableConfigurationProperties({MongoProperties.class})
 public class MongoAutoConfiguration {
 
-    @Value("${spring.application.name}")
+    @Value("${spring.application.name:horizon-parent}")
     private String applicationName;
 
     @Bean
