@@ -10,12 +10,10 @@ import com.hazelcast.client.HazelcastClientOfflineException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
-import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
 import de.telekom.eni.pandora.horizon.cache.fallback.JsonCacheFallback;
+import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
-import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -63,9 +61,8 @@ public class JsonCacheService<T> {
             HazelcastJsonValue value = map.get(key);
             if (value != null) {
                 try {
-                    log.debug("Raw JSON value for key {}: {}", key, value.getValue());
                     T mappedValue = mapper.readValue(value.getValue(), mapClass);
-                    log.debug("Mapped value for key {}: {}", key, mappedValue);
+                    log.debug("Hazelcast getByKey result {}: {}", key, mappedValue);
 
                     return Optional.of(mappedValue);
                 } catch (JsonProcessingException e) {
@@ -87,7 +84,7 @@ public class JsonCacheService<T> {
         if (map != null) {
             values = map.values(query.toSqlPredicate()); //list of subscription resources
             List<T> result = mapAll(values);
-            log.debug("Hazelcast Query result: {}", result);
+            log.debug("Hazelcast getQuery result: {}", result);
             return result;
         }
         else if (jsonCacheFallback != null) {

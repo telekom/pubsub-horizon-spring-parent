@@ -32,15 +32,10 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         Optional<SubscriptionResource> result;
         List<SubscriptionMongoDocument> docs = new ArrayList<>();
 
-        log.error("mongoProperties.getDatabase() = {}", mongoProperties.getDatabases());
-        log.error("mongoProperties.isRethrowExceptions() = {}", mongoProperties.isRethrowExceptions());
-
         try {
             docs = subscriptionsMongoRepo.findBySubscriptionId(key);
-            log.debug("MongoDB Query raw result: {}", docs);
-
         } catch (MongoCommandException | MongoTimeoutException e) {
-            log.error("Error occurred while executing query on MongoDB: ", e.getCause());
+            log.error("MongoDB fallback error occurred executing query: ", e.getCause());
             if (mongoProperties.isRethrowExceptions()) {
                 throw new RuntimeException(e.getCause());
             }
@@ -49,23 +44,18 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         if (!docs.isEmpty() && docs.getFirst() != null) {
             List<SubscriptionResource> mapped = mapMongoSubscriptions(docs);
             result = Optional.of(mapped.getFirst());
-            log.debug("MongoDB Query result: {}", result);
+            log.debug("MongoDB fallback getByKey result: {}", result);
             return result;
         }
 
         return Optional.empty();
-
     }
 
     @Override
     public List<SubscriptionResource> getQuery(Query query) {
-
         List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByType(query.getEventType());
-        log.debug("MongoDB Query raw result: {}", docs);
-
         List<SubscriptionResource> result = mapMongoSubscriptions(docs);
-        log.debug("MongoDB Query result: {}", result);
-
+        log.debug("MongoDB fallback getQuery result: {}", result);
         return result;
     }
 
