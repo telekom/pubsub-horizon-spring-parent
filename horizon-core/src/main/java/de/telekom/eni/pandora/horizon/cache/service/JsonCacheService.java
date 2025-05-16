@@ -113,8 +113,6 @@ public class JsonCacheService<T> {
     }
 
     public void set(String key, Object value) throws JsonCacheException {
-        IMap<String, HazelcastJsonValue> map = getCacheMap();
-
         if (map != null) {
             try {
                 var jsonValue = mapper.writeValueAsString(value);
@@ -128,8 +126,6 @@ public class JsonCacheService<T> {
     }
 
     public void remove(String key) {
-        IMap<String, HazelcastJsonValue> map = getCacheMap();
-
         if (map != null) {
             map.remove(key);
         }
