@@ -73,6 +73,8 @@ public class CacheAutoConfiguration {
         config.getConnectionStrategyConfig()
                 .setAsyncStart(true) // creates the client without waiting for a connection to the cluster
                 .setReconnectMode(ASYNC); //non blocking reconnection enabling HazelcastClientOfflineException
+        config.setProperty("hazelcast.client.heartbeat.interval", "1000");
+        config.setProperty("hazelcast.client.heartbeat.timeout", "5000");
         // Set retry configuration
         ConnectionRetryConfig retryConfig = config.getConnectionStrategyConfig().getConnectionRetryConfig();
         retryConfig.setInitialBackoffMillis(1000)   // default 1000ms
