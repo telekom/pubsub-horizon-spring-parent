@@ -38,7 +38,7 @@ public class DeDuplicationService {
     public boolean isEnabled(String cacheName) {
         try {
             hazelcastInstance.getMap(cacheName);
-        } catch (Exception e) {
+        } catch (HazelcastInstanceNotActiveException | HazelcastClientOfflineException e) {
             log.warn("Hazelcast instance is not active or cache not found, skipping deduplication check: {}", e.getMessage());
             return false;
         }
