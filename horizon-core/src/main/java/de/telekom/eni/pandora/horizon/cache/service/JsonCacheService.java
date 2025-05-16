@@ -94,7 +94,6 @@ public class JsonCacheService<T> {
             return jsonCacheFallback.getQuery(query);
         }
 
-
         return null;
     }
 
@@ -114,18 +113,26 @@ public class JsonCacheService<T> {
     }
 
     public void set(String key, Object value) throws JsonCacheException {
-        try {
-            var jsonValue = mapper.writeValueAsString(value);
-            var hazelcastValue = new HazelcastJsonValue(jsonValue);
-            map.set(key, hazelcastValue);
-        } catch (JsonProcessingException e) {
-            var msg = String.format("Could not set value of %s in hazelcast map %s: %s", key, map.getName(), e.getMessage());
-            throw new JsonCacheException(msg, e);
+        IMap<String, HazelcastJsonValue> map = getCacheMap();
+
+        if (map != null) {
+            try {
+                var jsonValue = mapper.writeValueAsString(value);
+                var hazelcastValue = new HazelcastJsonValue(jsonValue);
+                map.set(key, hazelcastValue);
+            } catch (JsonProcessingException e) {
+                var msg = String.format("Could not set value of %s in hazelcast map %s: %s", key, map.getName(), e.getMessage());
+                throw new JsonCacheException(msg, e);
+            }
         }
     }
 
     public void remove(String key) {
-        map.remove(key);
+        IMap<String, HazelcastJsonValue> map = getCacheMap();
+
+        if (map != null) {
+            map.remove(key);
+        }
     }
 
     private List<T> mapAll(Collection<HazelcastJsonValue> values) throws JsonCacheException {
