@@ -15,7 +15,7 @@ import java.io.Serializable;
 public enum DeliveryType implements Serializable {
 
     CALLBACK("callback"),
-    SERVER_SENT_EVENT("sse");
+    SERVER_SENT_EVENT("server_sent_event");
 
     private final String value;
 
