@@ -52,6 +52,16 @@ public class Query {
         return query.toString();
     }
 
+    public String getEventType() {
+        if (matchers.containsKey("spec.subscription.type")) {
+            List<Object> values = matchers.get("spec.subscription.type");
+            if (!values.isEmpty()) {
+                return values.get(0).toString();
+            }
+        }
+        return null;
+    }
+
     public static QueryBuilder builder(Class<?> type) {
         return new QueryBuilder().type(type).matchers(new HashMap<>());
     }

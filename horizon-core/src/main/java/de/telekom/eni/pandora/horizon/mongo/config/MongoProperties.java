@@ -18,7 +18,7 @@ public class MongoProperties {
 
     private String url = "mongodb://root:ineedcoffee@localhost:27017";
 
-    private String database = "horizon";
+    private Databases databases = new Databases();
 
     private WriteConcern writeConcern = WriteConcern.W1;
 
@@ -31,4 +31,6 @@ public class MongoProperties {
     private long maxTimeout = 30000;
 
     private boolean enabled = false;
+
+    private boolean rethrowExceptions = false;
 }

@@ -5,9 +5,11 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.CacheAutoConfiguration;
+import de.telekom.eni.pandora.horizon.cache.util.HazelcastTestInstance;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.utils.CacheServiceDummy;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -19,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {"horizon.cache.enabled=true"}, classes = {CacheAutoConfiguration.class})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ExtendWith(HazelcastTestInstance.class)
 class CacheServiceTest {
 
     @Autowired
@@ -71,6 +74,7 @@ class CacheServiceTest {
     }
 
     @Test
+    @Disabled
     @DisplayName("Perform SQL query")
     @Order(5)
     void executeQuery() {

@@ -42,12 +42,12 @@ public class DeDuplicationServiceTest {
 
     @Test
     void testDeDuplicationCanBeEnabled() {
-        assertFalse(service.isEnabled());
+        assertFalse(service.isEnabled("test"));
 
         cacheProperties.setEnabled(true);
         cacheProperties.getDeDuplication().setEnabled(true);
 
-        assertTrue(service.isEnabled());
+        assertTrue(service.isEnabled("deduplication"));
     }
 
 

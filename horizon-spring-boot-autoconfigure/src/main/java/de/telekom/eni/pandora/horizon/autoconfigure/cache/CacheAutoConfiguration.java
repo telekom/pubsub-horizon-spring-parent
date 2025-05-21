@@ -4,17 +4,17 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
-import com.hazelcast.config.Config;
-import com.hazelcast.config.MemberAttributeConfig;
-import com.hazelcast.core.Hazelcast;
+import com.hazelcast.client.HazelcastClient;
+import com.hazelcast.client.config.ClientConfig;
+import com.hazelcast.client.config.ConnectionRetryConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.spi.properties.ClusterProperty;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.CacheService;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.hazelcast.HazelcastAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -23,6 +23,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
+import java.util.UUID;
+
+import static com.hazelcast.client.config.ClientConnectionStrategyConfig.ReconnectMode.ASYNC;
+
 @Slf4j
 @Configuration
 @ConditionalOnProperty(value = "horizon.cache.enabled")
@@ -30,39 +34,59 @@ import org.springframework.context.annotation.Primary;
 @EnableConfigurationProperties({CacheProperties.class})
 public class CacheAutoConfiguration {
 
-    private static final String DEFAULT_HAZELCAST_INSTANCE_NAME = "horizon";
+    private static final String DEFAULT_HAZELCAST_CLUSTER_NAME = "dev";
+    private HazelcastInstance hazelcastInstance;
+
+    @Value("${POD_NAME:horizon}")
+    private String podName;
 
     @PreDestroy()
     public void shutdown() {
-        log.info("Shutdown all hazelcast instances");
-        Hazelcast.shutdownAll(); // Because we set SHUTDOWNHOOK_ENABLED to false, we need to explicitly call shutdown
+        log.info("Shutdown hazelcast client");
+        HazelcastClient.shutdown(hazelcastInstance);
     }
 
     @Primary
     @Bean
     public HazelcastInstance hazelcastInstance(CacheProperties cacheProperties) {
-        log.debug("Initialized new hazelcast instance");
-        var config = new Config();
+        log.info("Initializing new hazelcast client");
 
-        var attributeConfig = new MemberAttributeConfig();
-        cacheProperties.getAttributes().forEach(attributeConfig::setAttribute);
-        config.setMemberAttributeConfig(attributeConfig);
-
-        config.setProperty(ClusterProperty.SHUTDOWNHOOK_ENABLED.getName(), "false");
-        config.setProperty(ClusterProperty.SHUTDOWNHOOK_POLICY.getName(), "GRACEFUL");
-        config.setInstanceName(DEFAULT_HAZELCAST_INSTANCE_NAME);
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        ClientConfig config = new ClientConfig();
+        // Set cluster name, network configuration and instance name
+        config.setClusterName(DEFAULT_HAZELCAST_CLUSTER_NAME);
 
         if (cacheProperties != null && StringUtils.isNotBlank(cacheProperties.getKubernetesServiceDns())) {
-            var kubernetesConfig = config.getNetworkConfig().getJoin().getKubernetesConfig().setEnabled(true);
-
-            kubernetesConfig.setProperty("service-dns", cacheProperties.getKubernetesServiceDns());
-            kubernetesConfig.setProperty("service-port", "5701");
+            config.getNetworkConfig().addAddress(cacheProperties.getKubernetesServiceDns());
         } else {
-            config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(true).addMember("localhost");
+            config.getNetworkConfig().addAddress("localhost:5701");
         }
 
-        return Hazelcast.getOrCreateHazelcastInstance(config);
+        if ("horizon".equals(podName)) {
+            podName = "horizon-" + UUID.randomUUID().toString();
+        }
+        config.setInstanceName(podName);
+
+        // Set connection timeout
+        config.getNetworkConfig().setConnectionTimeout(5000);  // default 5000ms
+
+        // Set connection strategy
+        config.getConnectionStrategyConfig()
+                .setAsyncStart(true) // creates the client without waiting for a connection to the cluster
+                .setReconnectMode(ASYNC); //non blocking reconnection enabling HazelcastClientOfflineException
+        config.setProperty("hazelcast.client.heartbeat.interval", "1000");
+        config.setProperty("hazelcast.client.heartbeat.timeout", "5000");
+        // Set retry configuration
+        ConnectionRetryConfig retryConfig = config.getConnectionStrategyConfig().getConnectionRetryConfig();
+        retryConfig.setInitialBackoffMillis(1000)   // default 1000ms
+                .setMaxBackoffMillis(1000)  // no increasing backoff, default 30000ms
+                .setMultiplier(1.0) // no increasing backoff, default 1.05
+                .setClusterConnectTimeoutMillis(-1); // Retry indefinitely, default -1
+
+        // debug log for hazelcast client config options
+        log.debug("Hazelcast client config: {}", config);
+        hazelcastInstance = HazelcastClient.newHazelcastClient(config);
+
+        return hazelcastInstance;
     }
 
     @Bean

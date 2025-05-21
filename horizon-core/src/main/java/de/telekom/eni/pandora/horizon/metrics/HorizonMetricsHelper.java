@@ -43,13 +43,17 @@ public class HorizonMetricsHelper {
                     tags = tags.and(TAG_CALLBACK_URL, (String)additionalFields.get("callback-url"));
                 }
             }
+            if (DeliveryType.SERVER_SENT_EVENT.getValue().equalsIgnoreCase(eventMessage.getDeliveryType().getValue())) {
+                tags = tags.and(TAG_CALLBACK_URL, "none");
+            }
 
             if (additionalFields.containsKey("subscriber-id")) {
                 tags = tags.and(TAG_SUBSCRIBER_ID, (String)additionalFields.get("subscriber-id"));
+            } else {
+                tags = tags.and(TAG_SUBSCRIBER_ID, "none");
             }
 
         }
-
 
         return tags;
     }

@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import com.hazelcast.client.HazelcastClientOfflineException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.internal.util.StringUtil;
@@ -12,6 +13,7 @@ import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.model.event.PublishedEventMessage;
 import de.telekom.eni.pandora.horizon.model.event.SubscriptionEventMessage;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.NonNull;
 import org.springframework.lang.Nullable;
 
@@ -20,6 +22,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @AllArgsConstructor
 public class DeDuplicationService {
 
@@ -32,7 +35,14 @@ public class DeDuplicationService {
         return hazelcastInstance.getMap(actualCacheName);
     }
 
-    public boolean isEnabled() {
+    public boolean isEnabled(String cacheName) {
+        try {
+            hazelcastInstance.getMap(cacheName);
+        } catch (HazelcastInstanceNotActiveException | HazelcastClientOfflineException e) {
+            log.warn("Hazelcast instance is not active or cache not found, skipping deduplication check: {}", e.getMessage());
+            return false;
+        }
+
         return cacheProperties.getDeDuplication().isEnabled();
     }
 
@@ -75,7 +85,7 @@ public class DeDuplicationService {
     }
 
     public boolean isDuplicate(String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        if (!isEnabled(cacheName)) {
             return false;
         }
 
@@ -95,15 +105,25 @@ public class DeDuplicationService {
     }
 
     public String get(SubscriptionEventMessage subscriptionEventMessage) throws HazelcastInstanceNotActiveException {
-        return get("", generateKey(subscriptionEventMessage));
+        try {
+            return get("", generateKey(subscriptionEventMessage));
+        } catch (HazelcastInstanceNotActiveException | HazelcastClientOfflineException e) {
+            log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
+            return null;
+        }
     }
 
     public String get(String key) throws HazelcastInstanceNotActiveException {
-        return get("", key);
+        try {
+            return get("", key);
+        } catch (HazelcastInstanceNotActiveException | HazelcastClientOfflineException e) {
+            log.warn("Hazelcast instance is not active or cache not found: {}", e.getMessage());
+            return null;
+        }
     }
 
     public String get(String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        if (!isEnabled(cacheName)) {
             return null;
         }
 
@@ -135,7 +155,7 @@ public class DeDuplicationService {
      * @return null if disable or old value was null
      */
     public String track(String cacheName, String key, @NonNull String value) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        if (!isEnabled(cacheName)) {
             return null;
         }
 
@@ -151,7 +171,7 @@ public class DeDuplicationService {
     }
 
     public void clear(@Nullable String cacheName, String key) throws HazelcastInstanceNotActiveException {
-        if (!isEnabled()) {
+        if (!isEnabled(cacheName)) {
             return;
         }
 
