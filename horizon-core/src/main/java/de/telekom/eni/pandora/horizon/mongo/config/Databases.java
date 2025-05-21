@@ -9,6 +9,7 @@ import lombok.Data;
 public class Databases {
 
     private String runTimeDatabase = "horizon";
+    
     private String configTimeDatabase = "horizon-config";
 
 }

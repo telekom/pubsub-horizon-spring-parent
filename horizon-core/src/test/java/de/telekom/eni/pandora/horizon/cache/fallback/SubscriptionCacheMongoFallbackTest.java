@@ -23,9 +23,13 @@ import static org.mockito.Mockito.*;
 class SubscriptionCacheMongoFallbackTest {
 
     private SubscriptionsMongoRepo subscriptionsMongoRepo;
+    
     private JsonCacheFallback<SubscriptionResource> subscriptionCacheMongoFallback;
+    
     private static final String TEST_SUBSCRIPTION_ID = "123";
+    
     private static final String TEST_SUBSCRIPTION_TYPE = "testSubscriptionType";
+    
     private static final MongoProperties mongoProperties = new MongoProperties();
 
 

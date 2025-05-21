@@ -18,4 +18,5 @@ public interface SubscriptionsMongoRepo extends MongoRepository<SubscriptionMong
 
     @Query(value = "{ \"_id\": ?0}")
     List<SubscriptionMongoDocument> findBySubscriptionId(String subscriptionId);
+    
 }
