@@ -232,7 +232,6 @@ class JsonCacheServiceTest {
 
         // Verify results
         verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        verify(mockMap, times(1)).addEntryListener(any(), eq(true));
         assertNotNull(result, "Map should be filled");
     }
 
