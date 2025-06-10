@@ -56,8 +56,9 @@ public class JsonCacheAutoconfiguration {
             log.error("Hazelcast map {} is not available", SUBSCRIPTION_RESOURCE_V1);
         }
 
-        var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1, applicationEventPublisher);
+        var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1);
         svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
+        svc.setJsonEntryMapEventBroadcaster(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher));
         return svc;
     }
 
@@ -75,7 +76,7 @@ public class JsonCacheAutoconfiguration {
         var mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
 
-        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP, null);
+        return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP);
     }
 
 }

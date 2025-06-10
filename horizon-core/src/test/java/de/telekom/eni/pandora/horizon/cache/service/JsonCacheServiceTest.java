@@ -47,7 +47,6 @@ class JsonCacheServiceTest {
     void setUp() {
         hazelcastInstance = mock(HazelcastInstance.class);
         subscriptionsMongoRepo = mock(SubscriptionsMongoRepo.class);
-        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
         IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
 
         jsonCacheService = new JsonCacheService<>(
@@ -55,8 +54,7 @@ class JsonCacheServiceTest {
                 mockMap,
                 new ObjectMapper(),
                 hazelcastInstance,
-                TEST_MAP_NAME,
-                eventPublisher
+                TEST_MAP_NAME
         );
         jsonCacheService.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
     }
@@ -234,7 +232,6 @@ class JsonCacheServiceTest {
 
         // Verify results
         verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        verify(mockMap, times(1)).addEntryListener(any(), eq(true));
         assertNotNull(result, "Map should be filled");
     }
 

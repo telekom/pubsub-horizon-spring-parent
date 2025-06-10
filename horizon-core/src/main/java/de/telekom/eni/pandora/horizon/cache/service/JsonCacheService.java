@@ -11,13 +11,13 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.fallback.JsonCacheFallback;
-import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
+import de.telekom.eni.pandora.horizon.cache.listener.AbstractHazelcastJsonEntryMapEventBroadcaster;
+import de.telekom.eni.pandora.horizon.cache.listener.AbstractHazelcastJsonEvent;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,6 +32,9 @@ public class JsonCacheService<T> {
     @Setter
     private JsonCacheFallback<T> jsonCacheFallback;
 
+    @Setter
+    private AbstractHazelcastJsonEntryMapEventBroadcaster<? extends AbstractHazelcastJsonEvent<T>> jsonEntryMapEventBroadcaster;
+
     @Getter
     private IMap<String, HazelcastJsonValue> map;
 
@@ -41,17 +44,14 @@ public class JsonCacheService<T> {
 
     private final String cacheMapName;
 
-    private final ApplicationEventPublisher applicationEventPublisher;
-
     private boolean listenerAdded = false;
 
-    public JsonCacheService(Class<T> mapClass, IMap<String, HazelcastJsonValue> map, ObjectMapper mapper, HazelcastInstance hazelcastInstance, String cacheMapName, ApplicationEventPublisher applicationEventPublisher) {
+    public JsonCacheService(Class<T> mapClass, IMap<String, HazelcastJsonValue> map, ObjectMapper mapper, HazelcastInstance hazelcastInstance, String cacheMapName) {
         this.mapClass = mapClass;
         this.map = map;
         this.mapper = mapper;
         this.hazelcastInstance = hazelcastInstance;
         this.cacheMapName = cacheMapName;
-        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     public Optional<T> getByKey(String key) throws JsonCacheException {
@@ -153,8 +153,8 @@ public class JsonCacheService<T> {
                 map = hazelcastInstance.getMap(cacheMapName);
                 int mapSize = map.size();
 
-                if (!listenerAdded) {
-                    map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
+                if (!listenerAdded && jsonEntryMapEventBroadcaster != null) {
+                    map.addEntryListener(jsonEntryMapEventBroadcaster, true);
                     listenerAdded = true;
                 }
             } catch (HazelcastClientOfflineException e) {
