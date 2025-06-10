@@ -18,6 +18,8 @@ public class HorizonMetricsConstants {
     public static final String METRIC_PAYLOAD_SIZE_OUTGOING = "payload_size_outgoing";
     public static final String METRIC_SCHEMA_VALIDATION_FAILURES = "schema_validation_failures";
     public static final String METRIC_SCHEMA_VALIDATION_SUCCESS = "schema_validation_success";
+
+    // Not used yet, but reserved for future use with the new control-plane.
     public static final String METRIC_SCHEMA_VALIDATION_INVALID_SCHEMA = "schema_validation_invalid_schema";
 
     //Tags
