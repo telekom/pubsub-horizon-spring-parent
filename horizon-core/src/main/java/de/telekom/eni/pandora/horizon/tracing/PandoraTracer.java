@@ -121,7 +121,7 @@ public class PandoraTracer {
         return tracing.currentTraceContext().wrap(runnable);
     }
 
-    @Deprecated(forRemoval = true)
+    @Deprecated
     public Callable<?> withCurrentTraceContext(Callable<?> callable) {
         return tracing.currentTraceContext().wrap(callable);
     }
