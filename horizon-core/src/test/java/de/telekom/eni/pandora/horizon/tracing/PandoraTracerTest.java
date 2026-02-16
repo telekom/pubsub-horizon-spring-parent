@@ -21,6 +21,9 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 
+import java.util.List;
+import java.util.concurrent.Callable;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -239,5 +242,28 @@ public class PandoraTracerTest {
         assertEquals(spanId, extractedContext.context().spanIdString());
         assertTrue(extractedContext.context().debug());
         assertEquals(parentSpanId, extractedContext.context().parentIdString());
+    }
+
+    @Test
+    void testWithCurrentContext() throws Exception {
+        var expectedListCallableResult = List.of("one", "two", "three");
+        Callable<List<String>> expectedListCallable = () -> expectedListCallableResult;
+        when(tracing.currentTraceContext()).thenReturn(currentTraceContext);
+        when(currentTraceContext.wrap(eq(expectedListCallable))).thenReturn(expectedListCallable);
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        Callable<List<String>> actualListCallable = pandoraTracer.withCurrentContext(expectedListCallable);
+        assertEquals(expectedListCallable, actualListCallable);
+        assertEquals(actualListCallable.call(), expectedListCallableResult);
+
+        var expectedStringCallableResult = "expected result";
+        Callable<String> expectedStringCallable = () -> expectedStringCallableResult;
+        when(currentTraceContext.wrap(eq(expectedStringCallable))).thenReturn(expectedStringCallable);
+
+        Callable<String> actualStringCallable =  pandoraTracer.withCurrentContext(expectedStringCallable);
+        assertEquals(expectedStringCallable, actualStringCallable);
+        var actualStringCallableResult = actualStringCallable.call();
+        assertInstanceOf(String.class, actualStringCallableResult);
+        assertEquals(expectedStringCallableResult, actualStringCallableResult);
     }
 }
