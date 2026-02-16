@@ -51,6 +51,9 @@ public class KafkaProperties {
     @Value("${maxRequestSize:1048576}")
     private String maxRequestSize;
 
+    @Value("${batchSize:16384}")
+    private int batchSize;
+
     private Compression compression = new Compression();
 
 }
