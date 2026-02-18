@@ -36,6 +36,12 @@ public class KafkaProperties {
     @Value("${maxPollRecords:500}")
     private int maxPollRecords;
 
+    @Value("${requestTimeoutMs:30000}")
+    private int requestTimeoutMs;
+
+    @Value("${deliveryTimeoutMs:120000}")
+    private int deliveryTimeoutMs;
+
     @Value("${lingerMs:0}")
     private int lingerMs;
 
