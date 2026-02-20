@@ -31,3 +31,10 @@ jobs:
           PUBLISH_GPG_PRIVATE_KEY: ${{ secrets.PUBLISH_GPG_PRIVATE_KEY }}
           PUBLISH_GPG_PASSPHRASE: ${{ secrets.PUBLISH_GPG_PASSPHRASE }}
         run: ./gradlew -Pversion=${{ github.event.release.name }} publish
+
+      - name: Call Maven Central API
+        env:
+          PUBLISH_USERNAME: ${{ secrets.PUBLISH_USERNAME }}
+          PUBLISH_PASSWORD: ${{ secrets.PUBLISH_PASSWORD }}
+        run: |
+          curl -X POST -H "Authorization: Bearer $(echo -n $PUBLISH_USERNAME:$PUBLISH_PASSWORD | base64)" https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/de.telekom
