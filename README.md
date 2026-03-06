@@ -14,8 +14,10 @@ SPDX-License-Identifier: Apache-2.0
 
 <p align="center">
   <a href="#building-the-library">Building the library</a> •
-  <a href="#using-the-library">Using the library</a> 
+  <a href="#using-the-library">Using the library</a>
 </p>
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/telekom/pubsub-horizon-spring-parent)
 
 ## Overview
 
