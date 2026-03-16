@@ -77,7 +77,7 @@ public class JsonCacheService<T> {
         return Optional.empty();
     }
 
-     public List<T> getQuery(Query query) throws JsonCacheException {
+    public List<T> getQuery(Query query) throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
         Collection<HazelcastJsonValue> values;
 
@@ -86,8 +86,7 @@ public class JsonCacheService<T> {
             List<T> result = mapAll(values);
             log.debug("Hazelcast getQuery result: {}", result);
             return result;
-        }
-        else if (jsonCacheFallback != null) {
+        } else if (jsonCacheFallback != null) {
             return jsonCacheFallback.getQuery(query);
         }
 
@@ -101,8 +100,7 @@ public class JsonCacheService<T> {
         if (map != null) {
             values = map.values();
             return mapAll(values);
-        }
-        else if (jsonCacheFallback != null) {
+        } else if (jsonCacheFallback != null) {
             return jsonCacheFallback.getAll();
         }
 
@@ -145,22 +143,22 @@ public class JsonCacheService<T> {
 
 
     private IMap<String, HazelcastJsonValue> getCacheMap() {
-            try {
-                if (map == null) {
-                    listenerAdded = false;
-                }
-
-                map = hazelcastInstance.getMap(cacheMapName);
-                int mapSize = map.size();
-
-                if (!listenerAdded && jsonEntryMapEventBroadcaster != null) {
-                    map.addEntryListener(jsonEntryMapEventBroadcaster, true);
-                    listenerAdded = true;
-                }
-            } catch (HazelcastClientOfflineException e) {
-                log.warn("Hazelcast map is not available, using MongoDB instead " + e.getMessage());
-                map = null; // stay null to retry later
+        try {
+            if (map == null) {
+                listenerAdded = false;
             }
+
+            map = hazelcastInstance.getMap(cacheMapName);
+            int mapSize = map.size();
+
+            if (!listenerAdded && jsonEntryMapEventBroadcaster != null) {
+                map.addEntryListener(jsonEntryMapEventBroadcaster, true);
+                listenerAdded = true;
+            }
+        } catch (HazelcastClientOfflineException e) {
+            log.warn("Hazelcast map is not available, using MongoDB instead " + e.getMessage());
+            map = null; // stay null to retry later
+        }
         return map;
     }
 }

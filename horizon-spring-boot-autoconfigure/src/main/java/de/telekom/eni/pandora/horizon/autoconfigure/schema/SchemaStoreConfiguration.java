@@ -4,11 +4,15 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.schema;
 
+import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
+import de.telekom.eni.pandora.horizon.kubernetes.resource.PublisherResource;
+import de.telekom.eni.pandora.horizon.schema.CacheSchemaStore;
 import de.telekom.eni.pandora.horizon.schema.SchemaStore;
 import lombok.extern.slf4j.Slf4j;
 import org.everit.json.schema.Schema;
 import org.springframework.boot.autoconfigure.AutoConfigureOrder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
@@ -17,6 +21,13 @@ import org.springframework.core.Ordered;
 @Slf4j
 public class SchemaStoreConfiguration {
 
+    @Bean
+    @ConditionalOnProperty(name = {"horizon.schema.store.cache.enabled"}, havingValue = "true")
+    public SchemaStore cacheSchemaStore(JsonCacheService<PublisherResource> publisherCache) {
+        return new CacheSchemaStore(publisherCache);
+    }
+
+    @ConditionalOnProperty(name = {"horizon.schema.store.cache.enabled"}, havingValue = "false")
     @ConditionalOnMissingBean({SchemaStore.class})
     @AutoConfigureOrder(Ordered.LOWEST_PRECEDENCE)
     @Bean

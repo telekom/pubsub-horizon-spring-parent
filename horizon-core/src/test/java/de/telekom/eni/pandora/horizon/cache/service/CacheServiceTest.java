@@ -5,7 +5,7 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.CacheAutoConfiguration;
-import de.telekom.eni.pandora.horizon.cache.util.HazelcastTestInstance;
+import de.telekom.eni.pandora.horizon.extension.HazelcastExtension;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.utils.CacheServiceDummy;
 import org.junit.jupiter.api.*;
@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {"horizon.cache.enabled=true"}, classes = {CacheAutoConfiguration.class})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@ExtendWith(HazelcastTestInstance.class)
+@ExtendWith(HazelcastExtension.class)
 class CacheServiceTest {
 
     @Autowired
