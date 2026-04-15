@@ -5,7 +5,7 @@
 package de.telekom.eni.pandora.horizon.autoconfigure;
 
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.CacheAutoConfiguration;
-import de.telekom.eni.pandora.horizon.autoconfigure.cache.JsonCacheAutoconfiguration;
+import de.telekom.eni.pandora.horizon.autoconfigure.cache.JsonCacheAutoConfiguration;
 import de.telekom.eni.pandora.horizon.autoconfigure.kafka.KafkaAutoConfiguration;
 import de.telekom.eni.pandora.horizon.autoconfigure.metrics.HorizonMetricsHelperAutoConfiguration;
 import de.telekom.eni.pandora.horizon.autoconfigure.mongo.MongoAutoConfiguration;
@@ -27,7 +27,7 @@ import org.springframework.context.annotation.Import;
         CacheAutoConfiguration.class,
         MongoAutoConfiguration.class,
         KafkaAutoConfiguration.class,
-        JsonCacheAutoconfiguration.class
+        JsonCacheAutoConfiguration.class
 })
 public class HorizonAutoConfiguration {
 

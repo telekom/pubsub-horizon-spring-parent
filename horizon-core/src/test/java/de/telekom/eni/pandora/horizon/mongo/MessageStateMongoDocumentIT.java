@@ -6,6 +6,7 @@ package de.telekom.eni.pandora.horizon.mongo;
 
 
 import de.telekom.eni.pandora.horizon.autoconfigure.mongo.MongoAutoConfiguration;
+import de.telekom.eni.pandora.horizon.extension.MongoExtension;
 import de.telekom.eni.pandora.horizon.model.db.Coordinates;
 import de.telekom.eni.pandora.horizon.model.db.PartialEvent;
 import de.telekom.eni.pandora.horizon.model.db.StateProperty;
@@ -14,41 +15,44 @@ import de.telekom.eni.pandora.horizon.model.event.Status;
 import de.telekom.eni.pandora.horizon.model.meta.EventRetentionTime;
 import de.telekom.eni.pandora.horizon.mongo.model.MessageStateMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.junit4.SpringRunner;
 
 import java.sql.Time;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@RunWith(SpringRunner.class)
-@SpringBootTest(classes={MongoAutoConfiguration.class})
-@EnableAutoConfiguration
+@Tag("mongodb")
+@Tag("integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@Import(MongoTestServerConfiguration.class)
-public class MessageStateMongoDocumentTest {
-
-    @DynamicPropertySource
-    static void setProperties(DynamicPropertyRegistry registry) {
-        registry.add("horizon.mongo.enabled", () -> true);
-    }
+@SpringBootTest(classes = {MongoAutoConfiguration.class})
+@ExtendWith(MongoExtension.class)
+public class MessageStateMongoDocumentIT {
 
     @Autowired
     private MessageStateMongoRepo messageStateMongoRepo;
@@ -70,8 +74,6 @@ public class MessageStateMongoDocumentTest {
 
     @BeforeAll
     static void initContainer() {
-        //mongoDBContainer.start();
-
         testPartition = 123;
         testDeliveryType = DeliveryType.CALLBACK;
 
@@ -88,7 +90,6 @@ public class MessageStateMongoDocumentTest {
     @Order(1)
     @DisplayName("Verify that messageStateMongoRepo is running")
     void testContainerRun() {
-//        assertNotNull(embeddedMongoServer);
         var collectionName = mongoTemplate.getCollectionName(MessageStateMongoDocument.class);
         var collection = mongoTemplate.getCollection(collectionName);
         assertNotNull(collection);
@@ -161,7 +162,7 @@ public class MessageStateMongoDocumentTest {
         final List<Status> requiredStatus = List.of(Status.PROCESSED, Status.DELIVERED);
         var subscriptionId = String.valueOf(testMessageStateMongoDocumentDelivered.getSubscriptionId());
 
-        List<MessageStateMongoDocument> foundMessages = messageStateMongoRepo.findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(requiredStatus, testDeliveryType,subscriptionId);
+        List<MessageStateMongoDocument> foundMessages = messageStateMongoRepo.findByStatusInAndDeliveryTypeAndSubscriptionIdAsc(requiredStatus, testDeliveryType, subscriptionId);
 
         assertNotNull(foundMessages);
         assertEquals(1, foundMessages.size());
@@ -255,7 +256,7 @@ public class MessageStateMongoDocumentTest {
         assertNotNull(foundMessages);
 
         // we expect to get 6 messages that are newer (total of 10)
-        var expectedDocsCount = documents.size() - (documents.indexOf(doc) +1);
+        var expectedDocsCount = documents.size() - (documents.indexOf(doc) + 1);
         assertEquals(expectedDocsCount, foundMessages.size());
 
         // let's check if all filter criteria apply to the entries found

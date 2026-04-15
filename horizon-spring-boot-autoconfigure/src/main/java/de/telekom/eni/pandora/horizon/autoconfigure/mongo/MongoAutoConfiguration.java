@@ -9,6 +9,7 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
+import de.telekom.eni.pandora.horizon.mongo.repository.PublisherMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import lombok.extern.slf4j.Slf4j;
@@ -35,8 +36,8 @@ public class MongoAutoConfiguration {
 
     @Bean
     public MongoClient mongoClient(MongoProperties properties) {
-        log.debug("Using status database: " + properties.getDatabases().getRunTimeDatabase());
-        log.debug("Using config database: " + properties.getDatabases().getConfigTimeDatabase());
+        log.info("Using status database: {}", properties.getDatabases().getRunTimeDatabase());
+        log.info("Using config database: {}", properties.getDatabases().getConfigTimeDatabase());
 
         var connectionString = new ConnectionString(properties.getUrl());
         var clientSettings = MongoClientSettings.builder()
@@ -73,4 +74,12 @@ public class MongoAutoConfiguration {
         MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoConfigTemplate);
         return mongoRepositoryFactory.getRepository(SubscriptionsMongoRepo.class);
     }
+
+    @Bean
+    public PublisherMongoRepo getEventSpecificationRepo(@Qualifier("mongoConfigTemplate") MongoTemplate mongoConfigTemplate) {
+        MongoRepositoryFactory mongoRepositoryFactory = new MongoRepositoryFactory(mongoConfigTemplate);
+        log.info("EventSpecificationMongoRepo-Bean is initialized.");
+        return mongoRepositoryFactory.getRepository(PublisherMongoRepo.class);
+    }
+
 }

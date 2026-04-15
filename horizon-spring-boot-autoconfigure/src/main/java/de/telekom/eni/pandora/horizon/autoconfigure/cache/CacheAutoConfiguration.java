@@ -62,7 +62,7 @@ public class CacheAutoConfiguration {
         }
 
         if ("horizon".equals(podName)) {
-            podName = "horizon-" + UUID.randomUUID().toString();
+            podName = "horizon-" + UUID.randomUUID();
         }
         config.setInstanceName(podName);
 
