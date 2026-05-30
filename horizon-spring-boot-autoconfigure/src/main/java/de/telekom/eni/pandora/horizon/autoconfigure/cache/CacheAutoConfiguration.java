@@ -62,22 +62,22 @@ public class CacheAutoConfiguration {
         }
 
         if ("horizon".equals(podName)) {
-            podName = "horizon-" + UUID.randomUUID().toString();
+            podName = "horizon-" + UUID.randomUUID();
         }
-        config.setInstanceName(podName);
+        config.setInstanceName(podName)
+                .setProperty("hazelcast.client.heartbeat.interval", "1000")
+                .setProperty("hazelcast.client.heartbeat.timeout", "5000");
 
         // Set connection timeout
         config.getNetworkConfig().setConnectionTimeout(5000);  // default 5000ms
 
         // Set connection strategy
-        config.getConnectionStrategyConfig()
-                .setAsyncStart(true) // creates the client without waiting for a connection to the cluster
-                .setReconnectMode(ASYNC); //non blocking reconnection enabling HazelcastClientOfflineException
-        config.setProperty("hazelcast.client.heartbeat.interval", "1000");
-        config.setProperty("hazelcast.client.heartbeat.timeout", "5000");
+        config.getConnectionStrategyConfig().setReconnectMode(ASYNC); //non blocking reconnection enabling HazelcastClientOfflineException
+
         // Set retry configuration
-        ConnectionRetryConfig retryConfig = config.getConnectionStrategyConfig().getConnectionRetryConfig();
-        retryConfig.setInitialBackoffMillis(1000)   // default 1000ms
+        config.getConnectionStrategyConfig()
+                .getConnectionRetryConfig()
+                .setInitialBackoffMillis(1000)   // default 1000ms
                 .setMaxBackoffMillis(1000)  // no increasing backoff, default 30000ms
                 .setMultiplier(1.0) // no increasing backoff, default 1.05
                 .setClusterConnectTimeoutMillis(-1); // Retry indefinitely, default -1

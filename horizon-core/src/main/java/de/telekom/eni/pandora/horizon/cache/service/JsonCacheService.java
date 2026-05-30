@@ -5,6 +5,7 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hazelcast.client.HazelcastClientOfflineException;
 import com.hazelcast.core.HazelcastInstance;
@@ -23,6 +24,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 @Slf4j
 public class JsonCacheService<T> {
@@ -75,6 +78,30 @@ public class JsonCacheService<T> {
         }
 
         return Optional.empty();
+    }
+
+    public CompletionStage<T> getByKeyAsync(String key) {
+        IMap<String, HazelcastJsonValue> map = getCacheMap();
+
+        if (map != null) {
+            var futureValue = map.getAsync(key);
+            futureValue.thenApplyAsync(v -> {
+                if (v != null) {
+                    try {
+                        return mapper.readValue(v.getValue(), mapClass);
+                    } catch (JsonProcessingException e) {
+                        String msg = String.format("Could not map %s from hazelcast map %s to %s", key, map.getName(), mapClass.getName());
+                        log.error("Error occurred while executing query on JsonCacheServe", new JsonCacheException(msg, e));
+                        throw new RuntimeException(msg, e);
+                    }
+                }
+                return null;
+            });
+        } else if (jsonCacheFallback != null) {
+            return jsonCacheFallback.getByKeyAsync(key);
+        }
+
+        return CompletableFuture.completedFuture(null);
     }
 
      public List<T> getQuery(Query query) throws JsonCacheException {

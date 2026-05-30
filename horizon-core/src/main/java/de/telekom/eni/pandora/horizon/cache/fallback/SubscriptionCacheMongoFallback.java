@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletionStage;
 
 @Slf4j
 @AllArgsConstructor
@@ -49,6 +50,11 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         }
 
         return Optional.empty();
+    }
+
+    @Override
+    public CompletionStage<SubscriptionResource> getByKeyAsync(String key) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
