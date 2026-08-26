@@ -62,7 +62,7 @@ public class CacheAutoConfiguration {
         }
 
         if ("horizon".equals(podName)) {
-            podName = "horizon-" + UUID.randomUUID().toString();
+            podName = "horizon-" + UUID.randomUUID();
         }
         config.setInstanceName(podName);
 
@@ -72,7 +72,7 @@ public class CacheAutoConfiguration {
         // Set connection strategy
         config.getConnectionStrategyConfig()
                 .setAsyncStart(true) // creates the client without waiting for a connection to the cluster
-                .setReconnectMode(ASYNC); //non blocking reconnection enabling HazelcastClientOfflineException
+                .setReconnectMode(ASYNC); //non-blocking reconnection enabling HazelcastClientOfflineException
         config.setProperty("hazelcast.client.heartbeat.interval", "1000");
         config.setProperty("hazelcast.client.heartbeat.timeout", "5000");
         // Set retry configuration
