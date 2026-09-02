@@ -71,10 +71,7 @@ public class JsonCacheService<T> {
             log.debug("Hazelcast getByKey result {}: {}", key, mappedValue);
             return Optional.of(mappedValue);
         } catch (JsonProcessingException e) {
-            throw new JsonCacheException(
-                    String.format("Could not map %s from hazelcast map %s to %s", key, map.getName(), mapClass.getName()),
-                    e
-            );
+            throw new JsonCacheException(String.format("Could not map %s from hazelcast map %s to %s", key, map.getName(), mapClass.getName()), e);
         }
     }
 
@@ -94,7 +91,7 @@ public class JsonCacheService<T> {
 
     @Deprecated
     public List<T> getAll() throws JsonCacheException {
-        Collection<HazelcastJsonValue> values;
+        final Collection<HazelcastJsonValue> values;
         try {
             values = map.values();
         } catch (HazelcastClientOfflineException e) {
@@ -106,15 +103,17 @@ public class JsonCacheService<T> {
     }
 
     public void set(String key, Object value) throws JsonCacheException {
-        if (map != null) {
-            try {
-                var jsonValue = mapper.writeValueAsString(value);
-                var hazelcastValue = new HazelcastJsonValue(jsonValue);
-                map.set(key, hazelcastValue);
-            } catch (JsonProcessingException e) {
-                var msg = String.format("Could not set value of %s in hazelcast map %s: %s", key, map.getName(), e.getMessage());
-                throw new JsonCacheException(msg, e);
-            }
+        final String jsonValue;
+        try {
+            jsonValue = mapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new JsonCacheException(String.format("Could not set value of %s in hazelcast map %s: %s", key, map.getName(), e.getMessage()), e);
+        }
+
+        try {
+            map.set(key, new HazelcastJsonValue(jsonValue));
+        } catch (HazelcastClientOfflineException e) {
+            log.warn("Hazelcast map is not available" + e.getMessage());
         }
     }
 
