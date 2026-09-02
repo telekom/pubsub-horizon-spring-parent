@@ -7,10 +7,8 @@ package de.telekom.eni.pandora.horizon.cache.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hazelcast.client.HazelcastClientOfflineException;
-import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
-import de.telekom.eni.pandora.horizon.cache.fallback.JsonCacheFallback;
 import de.telekom.eni.pandora.horizon.cache.listener.AbstractHazelcastJsonEntryMapEventBroadcaster;
 import de.telekom.eni.pandora.horizon.cache.listener.AbstractHazelcastJsonEvent;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
@@ -30,28 +28,17 @@ public class JsonCacheService<T> {
     private final Class<T> mapClass;
 
     @Setter
-    private JsonCacheFallback<T> jsonCacheFallback;
-
-    @Setter
     private AbstractHazelcastJsonEntryMapEventBroadcaster<? extends AbstractHazelcastJsonEvent<T>> jsonEntryMapEventBroadcaster;
 
     @Getter
-    private IMap<String, HazelcastJsonValue> map;
+    private final IMap<String, HazelcastJsonValue> map;
 
     private final ObjectMapper mapper;
 
-    private final HazelcastInstance hazelcastInstance;
-
-    private final String cacheMapName;
-
-    private boolean listenerAdded = false;
-
-    public JsonCacheService(Class<T> mapClass, IMap<String, HazelcastJsonValue> map, ObjectMapper mapper, HazelcastInstance hazelcastInstance, String cacheMapName) {
+    public JsonCacheService(Class<T> mapClass, IMap<String, HazelcastJsonValue> map, ObjectMapper mapper) {
         this.mapClass = mapClass;
         this.map = map;
         this.mapper = mapper;
-        this.hazelcastInstance = hazelcastInstance;
-        this.cacheMapName = cacheMapName;
     }
 
     public Optional<T> getByKey(final String key) throws JsonCacheException {
@@ -117,6 +104,7 @@ public class JsonCacheService<T> {
         }
     }
 
+    @Deprecated
     public void remove(String key) {
         map.remove(key);
     }
@@ -134,26 +122,5 @@ public class JsonCacheService<T> {
             }
         }
         return mappedValues;
-    }
-
-
-    private IMap<String, HazelcastJsonValue> getCacheMap() {
-            try {
-                if (map == null) {
-                    listenerAdded = false;
-                }
-
-                map = hazelcastInstance.getMap(cacheMapName);
-                int mapSize = map.size();
-
-                if (!listenerAdded && jsonEntryMapEventBroadcaster != null) {
-                    map.addEntryListener(jsonEntryMapEventBroadcaster, true);
-                    listenerAdded = true;
-                }
-            } catch (HazelcastClientOfflineException e) {
-                log.warn("Hazelcast map is not available, using MongoDB instead " + e.getMessage());
-                map = null; // stay null to retry later
-            }
-        return map;
     }
 }

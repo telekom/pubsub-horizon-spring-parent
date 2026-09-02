@@ -23,7 +23,6 @@ import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
 import java.util.Optional;
@@ -52,9 +51,7 @@ class JsonCacheServiceTest {
         jsonCacheService = new JsonCacheService<>(
                 SubscriptionResource.class,
                 mockMap,
-                new ObjectMapper(),
-                hazelcastInstance,
-                TEST_MAP_NAME
+                new ObjectMapper()
         );
         jsonCacheService.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
     }
