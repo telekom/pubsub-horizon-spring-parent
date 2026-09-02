@@ -7,10 +7,8 @@ package de.telekom.eni.pandora.horizon.cache.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hazelcast.client.HazelcastClientOfflineException;
-import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
-import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
@@ -32,7 +30,6 @@ import static org.mockito.Mockito.*;
 
 class JsonCacheServiceTest {
 
-    private HazelcastInstance hazelcastInstance;
     private SubscriptionsMongoRepo subscriptionsMongoRepo;
     private JsonCacheService<SubscriptionResource> jsonCacheService;
 
@@ -44,16 +41,12 @@ class JsonCacheServiceTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        hazelcastInstance = mock(HazelcastInstance.class);
         subscriptionsMongoRepo = mock(SubscriptionsMongoRepo.class);
-        IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
-
         jsonCacheService = new JsonCacheService<>(
                 SubscriptionResource.class,
-                mockMap,
+                mock(IMap.class),
                 new ObjectMapper()
         );
-        jsonCacheService.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
     }
 
     @Test
@@ -61,14 +54,11 @@ class JsonCacheServiceTest {
     void testGetQueryHazelcastAvailable() throws JsonCacheException {
 
         // Prepare test data and simulate Hazelcast
-        IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
-        when(hazelcastInstance.<String, HazelcastJsonValue>getMap(TEST_MAP_NAME)).thenReturn(mockMap);
-
         HazelcastJsonValue mockValue = new HazelcastJsonValue("{\"spec\":{\"subscription\":{\"subscriptionId\":\"123\"}}}");
         Query query = Query.builder(SubscriptionResource.class)
                 .addMatcher("spec.subscription.subscriptionId", TEST_SUBSCRIPTION_ID)
                 .build();
-
+        var mockMap = jsonCacheService.getMap();
         when(mockMap.values(query.toSqlPredicate())).thenReturn(List.of(mockValue));
         when(mockMap.size()).thenReturn(1);
 
@@ -76,19 +66,16 @@ class JsonCacheServiceTest {
         List<SubscriptionResource> result = jsonCacheService.getQuery(query);
 
         // Verify results
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
         verify(mockMap, times(1)).values(query.toSqlPredicate());
         assertFalse(result.isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, result.getFirst().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
 
     @Test
-    void testGetQueryFallback() throws JsonCacheException {
-
+    void testGetQueryException() throws JsonCacheException {
         // Prepare test data and simulate Hazelcast map unavailability
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
-        SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(subscriptionsMongoRepo.findByType(TEST_SUBSCRIPTION_TYPE)).thenReturn(List.of(mockDocument));
+        var mockMap = jsonCacheService.getMap();
+        when(mockMap.values(any())).thenThrow(new HazelcastClientOfflineException());
 
         // Call method to test
         Query query = Query.builder(SubscriptionMongoDocument.class)
@@ -98,21 +85,15 @@ class JsonCacheServiceTest {
         List<SubscriptionResource> cacheResult = jsonCacheService.getQuery(query);
 
         // Verify result
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        verify(subscriptionsMongoRepo, times(1)).findByType(TEST_SUBSCRIPTION_TYPE);
-        assertFalse(cacheResult.isEmpty(), "Result should be filled");
-        assertEquals(TEST_SUBSCRIPTION_ID, cacheResult.getFirst().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
+        assertNull(cacheResult, "Result should be empty");
     }
 
     @Test
     void testGetByKeyHazelcastAvailable() throws JsonCacheException {
 
         // Prepare test data and simulate Hazelcast
-        // noinspection unchecked
-        IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
-        when(hazelcastInstance.<String, HazelcastJsonValue>getMap(TEST_MAP_NAME)).thenReturn(mockMap);
-
         HazelcastJsonValue mockValue = new HazelcastJsonValue("{\"spec\":{\"subscription\":{\"subscriptionId\":\"123\"}}}");
+        var mockMap = jsonCacheService.getMap();
         when(mockMap.get(TEST_SUBSCRIPTION_ID)).thenReturn(mockValue);
         when(mockMap.size()).thenReturn(1);
 
@@ -120,37 +101,31 @@ class JsonCacheServiceTest {
         Optional<SubscriptionResource> result = jsonCacheService.getByKey(TEST_SUBSCRIPTION_ID);
 
         // Verify results
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
         verify(mockMap, times(1)).get(TEST_SUBSCRIPTION_ID);
         assertFalse(result.isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, result.get().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
 
     @Test
-    void testGetByKeyFallback() throws JsonCacheException {
+    void testGetByKeyException() throws JsonCacheException {
 
         // Prepare test data and simulate Hazelcast map unavailability
-        SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
-        when(subscriptionsMongoRepo.findBySubscriptionId(TEST_SUBSCRIPTION_ID)).thenReturn(List.of(mockDocument));
+        var mockMap = jsonCacheService.getMap();
+        when(mockMap.get(TEST_SUBSCRIPTION_ID)).thenThrow(new HazelcastClientOfflineException());
 
         // Call method to test
         Optional<SubscriptionResource> result = jsonCacheService.getByKey(TEST_SUBSCRIPTION_ID);
 
         // Verify result
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        verify(subscriptionsMongoRepo, times(1)).findBySubscriptionId(TEST_SUBSCRIPTION_ID);
-        assertTrue(result.isPresent(), "Result should be present");
-        assertEquals(TEST_SUBSCRIPTION_ID, result.get().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
+        verify(mockMap, times(1)).get(TEST_SUBSCRIPTION_ID);
+        assertFalse(result.isPresent(), "Result should be empty");
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void testGetAllHazelcastAvailable() throws JsonCacheException {
-
         // Prepare test data and simulate Hazelcast
-        IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
-        when(hazelcastInstance.<String, HazelcastJsonValue>getMap(TEST_MAP_NAME)).thenReturn(mockMap);
+        IMap<String, HazelcastJsonValue> mockMap = jsonCacheService.getMap();
 
         HazelcastJsonValue mockValue = new HazelcastJsonValue("{\"spec\":{\"subscription\":{\"subscriptionId\":\"123\"}}}");
         when(mockMap.values()).thenReturn(List.of(mockValue));
@@ -160,28 +135,23 @@ class JsonCacheServiceTest {
         List<SubscriptionResource> result = jsonCacheService.getAll();
 
         // Verify results
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
         verify(mockMap, times(1)).values();
         assertFalse(result.isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, result.getFirst().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
 
     @Test
-    void testGetAllFallback() throws JsonCacheException {
+    void testGetAllException() throws JsonCacheException {
 
         // Prepare test data and simulate Hazelcast map unavailability
-        SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
-        when(subscriptionsMongoRepo.findAll()).thenReturn(List.of(mockDocument));
+        var mockMap = jsonCacheService.getMap();
+        when(mockMap.get(TEST_SUBSCRIPTION_ID)).thenThrow(new HazelcastClientOfflineException());
 
         // Call method to test
         List<SubscriptionResource> result = jsonCacheService.getAll();
 
         // Verify result
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        verify(subscriptionsMongoRepo, times(1)).findAll();
-        assertFalse(result.isEmpty(), "Result should be filled");
-        assertEquals(TEST_SUBSCRIPTION_ID, result.getFirst().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
+        assertTrue(result.isEmpty(), "Result should be filled");
     }
 
     @Test
@@ -217,44 +187,9 @@ class JsonCacheServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void testGetCacheMap() throws JsonCacheException {
-        
-        // Prepare test data and simulate Hazelcast
-        IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
-        when(hazelcastInstance.<String, HazelcastJsonValue>getMap(TEST_MAP_NAME)).thenReturn(mockMap);
-        when(mockMap.size()).thenReturn(1);
-
-        // Call method to test indirectly, because its private
-        Optional<SubscriptionResource> result = jsonCacheService.getByKey(TEST_SUBSCRIPTION_ID);
-
-        // Verify results
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        assertNotNull(result, "Map should be filled");
-    }
-
-    @Test
-    void testGetCacheMapFallback() throws JsonCacheException {
-
-        // Prepare test data and simulate Hazelcast
-        SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
-        when(subscriptionsMongoRepo.findBySubscriptionId(TEST_SUBSCRIPTION_ID)).thenReturn(List.of(mockDocument));
-
-        // Call method to test indirectly, because its private
-        Optional<SubscriptionResource> result = jsonCacheService.getByKey(TEST_SUBSCRIPTION_ID);
-
-        // Verify results
-        verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        assertNotNull(result, "Map should be filled");
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
     void testMapSubscriptions() throws JsonCacheException, JsonProcessingException {
-
         // Prepare test data and simulate Hazelcast
-        IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
-        when(hazelcastInstance.<String, HazelcastJsonValue>getMap(TEST_MAP_NAME)).thenReturn(mockMap);
+        var mockMap = jsonCacheService.getMap();
 
         SubscriptionMongoDocument mongoDocument = createMockSubscriptionDocument("subscription-123", "subscription-type");
         String jsonString = new ObjectMapper().writeValueAsString(mongoDocument);
@@ -290,9 +225,8 @@ class JsonCacheServiceTest {
     void testMapSubscriptionsFallback() throws JsonCacheException {
 
         // Prepare test data and simulate Hazelcast map unavailability
-        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
-        SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(subscriptionsMongoRepo.findByType(any())).thenReturn(List.of(mockDocument));
+        var mockMap = jsonCacheService.getMap();
+        when(mockMap.values(any())).thenThrow(new HazelcastClientOfflineException());
 
         // Call method getQuery to map subscriptions for fallback scenario
         Query query = Query.builder(SubscriptionMongoDocument.class)
@@ -301,20 +235,7 @@ class JsonCacheServiceTest {
         List<SubscriptionResource> result = jsonCacheService.getQuery(query);
 
         // Verify results
-        assertNotNull(result, "Result should be filled");
-        assertEquals(1, result.size(), "Size should be 1");
-        assertInstanceOf(SubscriptionResource.class, result.getFirst(), "Result should be of type SubscriptionResource");
-
-        var mockSubscription = mockDocument.getSpec().getSubscription();
-        var resultSubscription = result.getFirst().getSpec().getSubscription();
-
-        assertEquals(mockSubscription.getSubscriptionId(), resultSubscription.getSubscriptionId(), "SubscriptionId should match");
-        assertEquals(mockSubscription.getSubscriberId(), resultSubscription.getSubscriberId(), "SubscriberId should match");
-        assertEquals(mockSubscription.getPublisherId(), resultSubscription.getPublisherId(), "PublisherId should match");
-        assertEquals(mockSubscription.getDeliveryType(), resultSubscription.getDeliveryType(), "DeliveryType should match");
-        assertEquals(mockSubscription.getType(), resultSubscription.getType(), "Type should match");
-        assertEquals(mockSubscription.getCallback(), resultSubscription.getCallback(), "Callback should match");
-
+        assertNull(result, "Result should be null");
     }
 
     // Helper method to create a mock SubscriptionMongoDocument
