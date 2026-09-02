@@ -59,7 +59,7 @@ public class JsonCacheService<T> {
         try {
             value = map.get(key);
         } catch (HazelcastClientOfflineException e) {
-            log.warn("Hazelcast map is not available, using MongoDB instead " + e.getMessage());
+            log.warn("Hazelcast map is not available" + e.getMessage());
             return Optional.empty();
         }
         if (value == null) {
@@ -79,20 +79,17 @@ public class JsonCacheService<T> {
     }
 
      public List<T> getQuery(Query query) throws JsonCacheException {
-        IMap<String, HazelcastJsonValue> map = getCacheMap();
-        Collection<HazelcastJsonValue> values;
-
-        if (map != null) {
-            values = map.values(query.toSqlPredicate()); //list of subscription resources
-            List<T> result = mapAll(values);
-            log.debug("Hazelcast getQuery result: {}", result);
-            return result;
-        }
-        else if (jsonCacheFallback != null) {
-            return jsonCacheFallback.getQuery(query);
+        final Collection<HazelcastJsonValue> values;
+        try {
+            values = map.values(query.toSqlPredicate());
+        } catch (HazelcastClientOfflineException e) {
+            log.warn("Hazelcast map is not available" + e.getMessage());
+            return null;
         }
 
-        return null;
+        List<T> results = mapAll(values);
+        log.debug("Hazelcast getQuery result: {}", results);
+        return results;
     }
 
     public List<T> getAll() throws JsonCacheException {
