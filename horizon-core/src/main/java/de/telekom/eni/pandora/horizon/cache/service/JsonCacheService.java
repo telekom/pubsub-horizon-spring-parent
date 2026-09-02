@@ -118,9 +118,7 @@ public class JsonCacheService<T> {
     }
 
     public void remove(String key) {
-        if (map != null) {
-            map.remove(key);
-        }
+        map.remove(key);
     }
 
     private List<T> mapAll(Collection<HazelcastJsonValue> values) throws JsonCacheException {
