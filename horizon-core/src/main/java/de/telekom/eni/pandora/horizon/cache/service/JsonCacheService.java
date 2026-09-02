@@ -54,27 +54,28 @@ public class JsonCacheService<T> {
         this.cacheMapName = cacheMapName;
     }
 
-    public Optional<T> getByKey(String key) throws JsonCacheException {
-        IMap<String, HazelcastJsonValue> map = getCacheMap();
-
-        if (map != null) {
-            HazelcastJsonValue value = map.get(key);
-            if (value != null) {
-                try {
-                    T mappedValue = mapper.readValue(value.getValue(), mapClass);
-                    log.debug("Hazelcast getByKey result {}: {}", key, mappedValue);
-
-                    return Optional.of(mappedValue);
-                } catch (JsonProcessingException e) {
-                    String msg = String.format("Could not map %s from hazelcast map %s to %s", key, map.getName(), mapClass.getName());
-                    throw new JsonCacheException(msg, e);
-                }
-            }
-        } else if (jsonCacheFallback != null) {
-            return jsonCacheFallback.getByKey(key);
+    public Optional<T> getByKey(final String key) throws JsonCacheException {
+        final HazelcastJsonValue value;
+        try {
+            value = map.get(key);
+        } catch (HazelcastClientOfflineException e) {
+            log.warn("Hazelcast map is not available, using MongoDB instead " + e.getMessage());
+            return Optional.empty();
+        }
+        if (value == null) {
+            return Optional.empty();
         }
 
-        return Optional.empty();
+        try {
+            var mappedValue = mapper.readValue(value.getValue(), mapClass);
+            log.debug("Hazelcast getByKey result {}: {}", key, mappedValue);
+            return Optional.of(mappedValue);
+        } catch (JsonProcessingException e) {
+            throw new JsonCacheException(
+                    String.format("Could not map %s from hazelcast map %s to %s", key, map.getName(), mapClass.getName()),
+                    e
+            );
+        }
     }
 
      public List<T> getQuery(Query query) throws JsonCacheException {
