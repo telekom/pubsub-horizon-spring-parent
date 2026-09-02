@@ -92,19 +92,17 @@ public class JsonCacheService<T> {
         return results;
     }
 
+    @Deprecated
     public List<T> getAll() throws JsonCacheException {
-        IMap<String, HazelcastJsonValue> map = getCacheMap();
         Collection<HazelcastJsonValue> values;
-
-        if (map != null) {
+        try {
             values = map.values();
-            return mapAll(values);
-        }
-        else if (jsonCacheFallback != null) {
-            return jsonCacheFallback.getAll();
+        } catch (HazelcastClientOfflineException e) {
+            log.warn("Hazelcast map is not available" + e.getMessage());
+            return null;
         }
 
-        return null;
+        return mapAll(values);
     }
 
     public void set(String key, Object value) throws JsonCacheException {
