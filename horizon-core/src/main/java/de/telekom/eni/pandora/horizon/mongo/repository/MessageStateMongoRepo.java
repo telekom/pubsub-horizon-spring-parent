@@ -15,7 +15,8 @@ import org.springframework.data.mongodb.repository.Query;
 import java.util.Date;
 import java.util.List;
 
-public interface MessageStateMongoRepo extends MongoRepository<MessageStateMongoDocument, String> {
+public interface
+MessageStateMongoRepo extends MongoRepository<MessageStateMongoDocument, String> {
 
     List<MessageStateMongoDocument> findByStatus(Status status);
     Slice<MessageStateMongoDocument> findByStatus(Status status, Pageable pageable);

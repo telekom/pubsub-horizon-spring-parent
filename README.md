@@ -57,6 +57,28 @@ dependencies {
 
 This library will provide an autoconfigured `HorizonTracer` bean that you can use in order to do tracing in an Horizon component.
 
+### Subscription snapshot cache
+
+When MongoDB is enabled, the parent provides a `LocalSubscriptionCache` in addition to the existing Hazelcast-backed
+`JsonCacheService<SubscriptionResource>`. The snapshot cache loads the complete subscription collection into a prepared,
+immutable snapshot and makes it visible to readers only after an explicit atomic activation.
+
+The two caches intentionally have separate APIs. `JsonCacheService` also supports Hazelcast writes and listeners, while the
+snapshot cache has an explicit `prepare()`/`activate()` lifecycle. Applications keep using `JsonCacheService` by default and
+may explicitly inject and select `LocalSubscriptionCache` with a pod-specific feature flag. This allows individual pods to
+migrate independently without changing the behavior of existing consumers.
+
+```java
+localSubscriptionCache.prepare();
+localSubscriptionCache.activate();
+
+localSubscriptionCache.getById(subscriptionId);
+localSubscriptionCache.getByQuery(environment, eventType);
+```
+
+See [Local Subscription Cache](docs/local-subscription-cache.md) for lifecycle, consistency guarantees, failure
+behavior, and pod integration guidance.
+
 ### Configuration parameters
 
 ```yaml
