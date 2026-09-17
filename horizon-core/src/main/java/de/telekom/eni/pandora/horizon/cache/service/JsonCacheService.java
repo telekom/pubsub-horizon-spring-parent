@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Slf4j
-public class JsonCacheService<T> {
+public class JsonCacheService<T> implements CacheReader<T> {
 
     private final Class<T> mapClass;
 
@@ -54,6 +54,7 @@ public class JsonCacheService<T> {
         this.cacheMapName = cacheMapName;
     }
 
+    @Override
     public Optional<T> getByKey(String key) throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
 
@@ -77,7 +78,8 @@ public class JsonCacheService<T> {
         return Optional.empty();
     }
 
-     public List<T> getQuery(Query query) throws JsonCacheException {
+    @Override
+    public List<T> getQuery(Query query) throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
         Collection<HazelcastJsonValue> values;
 
@@ -94,6 +96,7 @@ public class JsonCacheService<T> {
         return null;
     }
 
+    @Override
     public List<T> getAll() throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
         Collection<HazelcastJsonValue> values;
@@ -126,6 +129,11 @@ public class JsonCacheService<T> {
         if (map != null) {
             map.remove(key);
         }
+    }
+
+    @Override
+    public boolean isReady() {
+        return getCacheMap() != null;
     }
 
     private List<T> mapAll(Collection<HazelcastJsonValue> values) throws JsonCacheException {

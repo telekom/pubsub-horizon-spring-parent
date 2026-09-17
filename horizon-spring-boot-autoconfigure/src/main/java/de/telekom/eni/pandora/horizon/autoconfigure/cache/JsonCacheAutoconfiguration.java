@@ -12,7 +12,11 @@ import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
+import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
+import de.telekom.eni.pandora.horizon.cache.service.CacheReader;
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
+import de.telekom.eni.pandora.horizon.cache.service.FallbackCacheService;
+import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
@@ -22,9 +26,11 @@ import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 @Slf4j
 @Configuration
@@ -34,8 +40,6 @@ public class JsonCacheAutoconfiguration {
     private static final String SUBSCRIPTION_RESOURCE_V1 = "subscriptions.subscriber.horizon.telekom.de.v1";
 
     private static final String CIRCUITBREAKER_MAP = "circuit-breakers";
-
-    private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
 
     @Bean
     public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo, MongoProperties mongoProperties) {
@@ -60,6 +64,24 @@ public class JsonCacheAutoconfiguration {
         svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
         svc.setJsonEntryMapEventBroadcaster(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher));
         return svc;
+    }
+
+    @Bean(name = "subscriptionCacheReader")
+    @Primary
+    @ConditionalOnProperty(value = "horizon.cache.enabled")
+    public CacheReader<SubscriptionResource> subscriptionCacheWithLocalPrimary(
+            ObjectProvider<LocalSubscriptionCache> localSubscriptionCacheProvider,
+            @org.springframework.beans.factory.annotation.Qualifier("subscriptionCache") JsonCacheService<SubscriptionResource> subscriptionCache,
+            CacheProperties cacheProperties) {
+        var localSubscriptionCache = localSubscriptionCacheProvider.getIfAvailable();
+        if (cacheProperties.getSubscriptionFallback() == CacheProperties.SubscriptionFallback.NONE) {
+            if (localSubscriptionCache == null) {
+                throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.subscription-fallback is NONE");
+            }
+            return localSubscriptionCache;
+        }
+        var primary = localSubscriptionCache == null ? subscriptionCache : localSubscriptionCache;
+        return new FallbackCacheService<>(primary, subscriptionCache);
     }
 
     @Bean

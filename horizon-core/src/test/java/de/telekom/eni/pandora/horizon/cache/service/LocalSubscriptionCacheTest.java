@@ -37,8 +37,10 @@ class LocalSubscriptionCacheTest {
 
         assertTrue(cache.getById("old-id").isEmpty());
         assertTrue(cache.getByQuery("production", "old-event").isEmpty());
+        assertFalse(cache.isReady());
 
         cache.activate();
+        assertTrue(cache.isReady());
         cache.prepare();
 
         assertTrue(cache.getById("old-id").isPresent());

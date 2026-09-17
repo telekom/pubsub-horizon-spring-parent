@@ -22,9 +22,16 @@ public class CacheProperties {
 
     private boolean enabled = false;
 
+    private SubscriptionFallback subscriptionFallback = SubscriptionFallback.JSON_CACHE;
+
     private DeDuplicationProperties deDuplication = new DeDuplicationProperties();
 
     private Map<String, String> attributes = new HashMap<>();
+
+    public enum SubscriptionFallback {
+        JSON_CACHE,
+        NONE
+    }
 
     @Getter
     @Setter
