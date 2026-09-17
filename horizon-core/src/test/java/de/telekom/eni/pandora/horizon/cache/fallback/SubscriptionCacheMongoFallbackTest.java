@@ -8,6 +8,7 @@ import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
+import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionTrigger;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
@@ -24,7 +25,7 @@ class SubscriptionCacheMongoFallbackTest {
 
     private SubscriptionsMongoRepo subscriptionsMongoRepo;
     
-    private JsonCacheFallback<SubscriptionResource> subscriptionCacheMongoFallback;
+    private SubscriptionCacheMongoFallback subscriptionCacheMongoFallback;
     
     private static final String TEST_SUBSCRIPTION_ID = "123";
     
@@ -44,17 +45,18 @@ class SubscriptionCacheMongoFallbackTest {
 
         // Prepare test data and simulate mongo db
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(subscriptionsMongoRepo.findByType(any())).thenReturn(List.of(mockDocument));
+        when(subscriptionsMongoRepo.findByTypeAndEnvironment(any(), any())).thenReturn(List.of(mockDocument));
 
         // Call method to test
         Query query = Query.builder(SubscriptionMongoDocument.class)
                 .addMatcher("spec.subscription.type", TEST_SUBSCRIPTION_TYPE)
+                .addMatcher("spec.environment", "integration")
                 .build();
 
         List<SubscriptionResource> cacheResult = subscriptionCacheMongoFallback.getQuery(query);
 
         // Verify result
-        verify(subscriptionsMongoRepo, times(1)).findByType(any());
+        verify(subscriptionsMongoRepo, times(1)).findByTypeAndEnvironment(TEST_SUBSCRIPTION_TYPE, "integration");
         assertFalse(cacheResult. isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, cacheResult.getFirst().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
@@ -122,6 +124,26 @@ class SubscriptionCacheMongoFallbackTest {
         assertEquals(mockSubscription.getCallback(), resultSubscription.getCallback(), "Callback should match");
     }
 
+    @Test
+    void testMapSubscriptionsPreservesTriggersAndEnvironment() {
+        var document = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
+        var trigger = new SubscriptionTrigger();
+        trigger.setResponseFilter(List.of("response.id"));
+        trigger.setSelectionFilter(java.util.Map.of("method", "POST"));
+        var publisherTrigger = new SubscriptionTrigger();
+        publisherTrigger.setResponseFilterMode(SubscriptionTrigger.ResponseFilterMode.EXCLUDE);
+        document.getSpec().getSubscription().setTrigger(trigger);
+        document.getSpec().getSubscription().setPublisherTrigger(publisherTrigger);
+        document.getSpec().setEnvironment("integration");
+
+        var result = subscriptionCacheMongoFallback.mapMongoSubscriptions(List.of(document)).getFirst();
+
+        assertSame(trigger, result.getSpec().getSubscription().getTrigger());
+        assertSame(publisherTrigger, result.getSpec().getSubscription().getPublisherTrigger());
+        assertEquals("integration", result.getSpec().getEnvironment());
+        assertEquals("POST", result.getSpec().getSubscription().getTrigger().getSelectionFilter().get("method"));
+    }
+
     // Helper method to create a mocked SubscriptionMongoDocument
     @SuppressWarnings("SameParameterValue")
     private SubscriptionMongoDocument createMockSubscriptionDocument(String subscriptionId, String type) {
@@ -135,6 +157,7 @@ class SubscriptionCacheMongoFallbackTest {
         subscription.setSubscriberId("testSubscriberId");
         subscription.setPublisherId("testPublisherId");
         spec.setSubscription(subscription);
+        spec.setEnvironment("integration");
         document.setSpec(spec);
         return document;
     }

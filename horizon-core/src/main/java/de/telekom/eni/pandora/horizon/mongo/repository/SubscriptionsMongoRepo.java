@@ -16,6 +16,9 @@ public interface SubscriptionsMongoRepo extends MongoRepository<SubscriptionMong
     @Query(value = "{ \"spec.subscription.type\": ?0}")
     List<SubscriptionMongoDocument> findByType(String type);
 
+    @Query(value = "{ \"spec.subscription.type\": ?0, \"spec.environment\": ?1}")
+    List<SubscriptionMongoDocument> findByTypeAndEnvironment(String type, String environment);
+
     @Query(value = "{ \"_id\": ?0}")
     List<SubscriptionMongoDocument> findBySubscriptionId(String subscriptionId);
     

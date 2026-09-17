@@ -7,9 +7,7 @@ package de.telekom.eni.pandora.horizon.cache.fallback;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoTimeoutException;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
-import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
-import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
@@ -53,7 +51,9 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
 
     @Override
     public List<SubscriptionResource> getQuery(Query query) {
-        List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findByType(query.getEventType());
+        List<SubscriptionMongoDocument> docs = query.getEnvironment() == null
+            ? subscriptionsMongoRepo.findByType(query.getEventType())
+            : subscriptionsMongoRepo.findByTypeAndEnvironment(query.getEventType(), query.getEnvironment());
         List<SubscriptionResource> result = mapMongoSubscriptions(docs);
         log.debug("MongoDB fallback getQuery result: {}", result);
         return result;
@@ -66,26 +66,8 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
     }
 
     public List<SubscriptionResource> mapMongoSubscriptions(List<SubscriptionMongoDocument> docs) {
-        List<SubscriptionResource> mappedValues = new ArrayList<>();
-
-        for (SubscriptionMongoDocument doc : docs) {
-            SubscriptionResourceSpec spec = new SubscriptionResourceSpec();
-            SubscriptionResource resource = new SubscriptionResource();
-            Subscription sub = new Subscription();
-
-            sub.setSubscriptionId(doc.getSpec().getSubscription().getSubscriptionId());
-            sub.setSubscriberId(doc.getSpec().getSubscription().getSubscriberId());
-            sub.setPublisherId(doc.getSpec().getSubscription().getPublisherId());
-            sub.setDeliveryType(doc.getSpec().getSubscription().getDeliveryType());
-            sub.setType(doc.getSpec().getSubscription().getType());
-            sub.setCallback(doc.getSpec().getSubscription().getCallback());
-
-            spec.setSubscription(sub);
-
-            resource.setSpec(spec);
-            mappedValues.add(resource);
-        }
-
+        List<SubscriptionResource> mappedValues = new ArrayList<>(docs.size());
+        mappedValues.addAll(docs);
         return mappedValues;
     }
 
