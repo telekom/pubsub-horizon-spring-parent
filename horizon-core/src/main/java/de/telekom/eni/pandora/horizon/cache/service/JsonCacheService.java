@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Slf4j
-public class JsonCacheService<T> implements CacheReader<T> {
+public class JsonCacheService<T> {
 
     private final Class<T> mapClass;
 
@@ -54,7 +54,6 @@ public class JsonCacheService<T> implements CacheReader<T> {
         this.cacheMapName = cacheMapName;
     }
 
-    @Override
     public Optional<T> getByKey(String key) throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
 
@@ -78,7 +77,6 @@ public class JsonCacheService<T> implements CacheReader<T> {
         return Optional.empty();
     }
 
-    @Override
     public List<T> getQuery(Query query) throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
         Collection<HazelcastJsonValue> values;
@@ -96,7 +94,6 @@ public class JsonCacheService<T> implements CacheReader<T> {
         return null;
     }
 
-    @Override
     public List<T> getAll() throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
         Collection<HazelcastJsonValue> values;
@@ -131,7 +128,6 @@ public class JsonCacheService<T> implements CacheReader<T> {
         }
     }
 
-    @Override
     public boolean isReady() {
         return getCacheMap() != null;
     }
@@ -159,7 +155,7 @@ public class JsonCacheService<T> implements CacheReader<T> {
                 }
 
                 map = hazelcastInstance.getMap(cacheMapName);
-                int mapSize = map.size();
+                map.size();
 
                 if (!listenerAdded && jsonEntryMapEventBroadcaster != null) {
                     map.addEntryListener(jsonEntryMapEventBroadcaster, true);

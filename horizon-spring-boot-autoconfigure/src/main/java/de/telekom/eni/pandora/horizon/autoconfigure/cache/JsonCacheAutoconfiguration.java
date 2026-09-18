@@ -13,10 +13,11 @@ import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
-import de.telekom.eni.pandora.horizon.cache.service.CacheReader;
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
-import de.telekom.eni.pandora.horizon.cache.service.FallbackCacheService;
+import de.telekom.eni.pandora.horizon.cache.service.FallbackSubscriptionCacheReader;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
+import de.telekom.eni.pandora.horizon.cache.service.SharedSubscriptionCacheReader;
+import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
@@ -69,14 +70,15 @@ public class JsonCacheAutoconfiguration {
     @Bean(name = "subscriptionCacheReader")
     @Primary
     @ConditionalOnProperty(value = "horizon.cache.enabled")
-    public CacheReader<SubscriptionResource> subscriptionCacheWithLocalPrimary(
+    public SubscriptionCacheReader subscriptionCacheWithLocalPrimary(
             ObjectProvider<LocalSubscriptionCache> localSubscriptionCacheProvider,
             @org.springframework.beans.factory.annotation.Qualifier("subscriptionCache") JsonCacheService<SubscriptionResource> subscriptionCache,
             CacheProperties cacheProperties) {
         var localSubscriptionCache = localSubscriptionCacheProvider.getIfAvailable();
         var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+        var sharedSubscriptionCacheReader = new SharedSubscriptionCacheReader(subscriptionCache);
         if (!localCacheProperties.isEnabled()) {
-            return subscriptionCache;
+            return sharedSubscriptionCacheReader;
         }
         if (localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
             if (localSubscriptionCache == null) {
@@ -84,8 +86,10 @@ public class JsonCacheAutoconfiguration {
             }
             return localSubscriptionCache;
         }
-        var primary = localSubscriptionCache == null ? subscriptionCache : localSubscriptionCache;
-        return new FallbackCacheService<>(primary, subscriptionCache);
+        if (localSubscriptionCache == null) {
+            return sharedSubscriptionCacheReader;
+        }
+        return new FallbackSubscriptionCacheReader(localSubscriptionCache, sharedSubscriptionCacheReader);
     }
 
     @Bean

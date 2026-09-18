@@ -10,15 +10,15 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
-public class SubscriptionSnapshotLoader {
+public class MongoSubscriptionSnapshotLoader {
 
     private final MongoTemplate mongoTemplate;
     private final String snapshotCollectionName;
     private final String snapshotHeadCollectionName;
 
-    public SubscriptionSnapshotLoader(MongoTemplate mongoTemplate,
-                                      String snapshotCollectionName,
-                                      String snapshotHeadCollectionName) {
+    public MongoSubscriptionSnapshotLoader(MongoTemplate mongoTemplate,
+                                           String snapshotCollectionName,
+                                           String snapshotHeadCollectionName) {
         this.mongoTemplate = mongoTemplate;
         this.snapshotCollectionName = snapshotCollectionName;
         this.snapshotHeadCollectionName = snapshotHeadCollectionName;

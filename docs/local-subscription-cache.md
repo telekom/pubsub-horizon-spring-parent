@@ -8,27 +8,64 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Purpose
 
-`LocalSubscriptionCache` provides a pod-local read cache for subscriptions. It loads a complete subscription snapshot from
-MongoDB, prepares indexed lookup structures without changing the active cache, and publishes the new state with one atomic
-reference update.
+`LocalSubscriptionCache` provides a pod-local read cache for subscriptions. It prepares indexed lookup structures without
+changing the active cache, then publishes the new state with one atomic reference update. It can load a complete snapshot
+from MongoDB through `MongoSubscriptionSnapshotLoader`; without a `MongoTemplate`, it builds the snapshot from
+`SubscriptionsMongoRepo` instead.
 
 The existing Hazelcast-backed `JsonCacheService<SubscriptionResource>` remains unchanged. The Spring Boot autoconfiguration
 selects the local cache as primary when enabled and can retain the existing service as fallback.
 
+Applications access subscriptions through `SubscriptionCacheReader`. Its intentionally limited API exposes lookups by
+subscription ID and by environment plus event type. The Shared Cache implementation translates the latter into a Hazelcast
+`Query`; additional query shapes require an explicit implementation for every cache variant.
+
 ## Architecture
 
 ```mermaid
-flowchart LR
-    MongoDB[(MongoDB<br/>subscriptions)]
-    Repo[SubscriptionsMongoRepo]
-    Prepared[Prepared snapshot]
-    Active[Active snapshot]
-    Pod[Pod business logic]
+classDiagram
+    direction LR
 
-    MongoDB -->|findAll| Repo
-    Repo -->|prepare| Prepared
-    Prepared -->|atomic activate| Active
-    Active -->|getById / getByQuery| Pod
+    class SubscriptionCacheReader {
+        <<interface>>
+        +getById(subscriptionId)
+        +findByEnvironmentAndEventType(environment, eventType)
+        +isReady()
+    }
+    class LocalSubscriptionCache {
+        -activeSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
+        -preparedSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
+        +prepare()
+        +activate()
+    }
+    class SharedSubscriptionCacheReader
+    class FallbackSubscriptionCacheReader
+    class IndexedSubscriptionSnapshot {
+        -byId
+        -byEnvironmentAndEventType
+    }
+    class EnvironmentEventTypeKey {
+        <<record>>
+        environment
+        eventType
+    }
+    class MongoSubscriptionSnapshotLoader {
+        +readSnapshotHead()
+        +load(snapshotHead)
+    }
+    class JsonCacheService~SubscriptionResource~
+    class LocalSubscriptionCacheInitializer
+
+    SubscriptionCacheReader <|.. LocalSubscriptionCache
+    SubscriptionCacheReader <|.. SharedSubscriptionCacheReader
+    SubscriptionCacheReader <|.. FallbackSubscriptionCacheReader
+    LocalSubscriptionCache *-- IndexedSubscriptionSnapshot
+    IndexedSubscriptionSnapshot *-- EnvironmentEventTypeKey
+    LocalSubscriptionCache --> MongoSubscriptionSnapshotLoader
+    SharedSubscriptionCacheReader --> JsonCacheService~SubscriptionResource~
+    FallbackSubscriptionCacheReader --> SubscriptionCacheReader : primary
+    FallbackSubscriptionCacheReader --> SubscriptionCacheReader : fallback
+    LocalSubscriptionCacheInitializer --> LocalSubscriptionCache
 ```
 
 Each snapshot contains two indexes:
@@ -36,7 +73,7 @@ Each snapshot contains two indexes:
 | Index | Key | Value | Purpose |
 |---|---|---|---|
 | `byId` | `subscriptionId` | one `SubscriptionResource` | Direct lookup by subscription ID |
-| `byQuery` | `(environment, eventType)` | list of `SubscriptionResource` | Lookup for event processing |
+| `byEnvironmentAndEventType` | `EnvironmentEventTypeKey(environment, eventType)` | list of `SubscriptionResource` | Lookup for event processing |
 
 The maps and query result lists are structurally immutable. They cannot be changed through the cache API. The contained
 `SubscriptionResource` objects are the objects returned by the MongoDB repository and remain mutable model objects; consumers
@@ -54,9 +91,10 @@ fallback remains available.
 
 Calling `prepare()` performs the following steps:
 
-1. Load the complete collection with `SubscriptionsMongoRepo.findAll()`.
+1. Load a complete snapshot through `MongoSubscriptionSnapshotLoader`, or load the complete collection with
+    `SubscriptionsMongoRepo.findAll()` when the repository-backed mode is used.
 2. Validate every document.
-3. Build the ID and query indexes in local temporary maps.
+3. Build the ID and environment/event-type indexes in local temporary maps.
 4. Convert the maps and lists to unmodifiable collections.
 5. Store the completed snapshot as `preparedSnapshot`.
 
@@ -79,11 +117,11 @@ sequenceDiagram
     Cache->>Mongo: findAll()
     Mongo-->>Cache: complete subscription collection
     Cache->>Cache: validate and build immutable indexes
-    Reader->>Cache: getByQuery(...)
+    Reader->>Cache: findByEnvironmentAndEventType(...)
     Cache-->>Reader: old active snapshot
     Coordinator->>Cache: activate()
     Cache->>Cache: atomic active reference update
-    Reader->>Cache: getByQuery(...)
+    Reader->>Cache: findByEnvironmentAndEventType(...)
     Cache-->>Reader: new active snapshot
 ```
 
@@ -94,7 +132,7 @@ Activation without a prepared snapshot throws `IllegalStateException`. A prepare
 ```java
 Optional<SubscriptionResource> getById(String subscriptionId);
 
-List<SubscriptionResource> getByQuery(
+List<SubscriptionResource> findByEnvironmentAndEventType(
         String environment,
         String eventType
 );
@@ -144,7 +182,7 @@ horizon:
     cache:
         local-subscription-cache:
             enabled: true
-            fallback-mode: shared-cache-mongo
+            fallback-mode: hazelcast-with-mongo-fallback
             snapshot-collection: subscriptions.subscriber.horizon.telekom.de.v1-snapshots
             head-collection: subscriptions.subscriber.horizon.telekom.de.v1-head
             head-polling:

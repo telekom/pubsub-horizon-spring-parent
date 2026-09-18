@@ -35,7 +35,7 @@ public class CacheProperties {
 
         private boolean enabled = false;
 
-        private LocalSubscriptionCacheFallback fallbackMode = LocalSubscriptionCacheFallback.SHARED_CACHE_MONGO;
+        private LocalSubscriptionCacheFallback fallbackMode = LocalSubscriptionCacheFallback.HAZELCAST_WITH_MONGO_FALLBACK;
 
         private String snapshotCollection = "subscriptions.subscriber.horizon.telekom.de.v1-snapshots";
 
@@ -54,7 +54,7 @@ public class CacheProperties {
     }
 
     public enum LocalSubscriptionCacheFallback {
-        SHARED_CACHE_MONGO,
+        HAZELCAST_WITH_MONGO_FALLBACK,
         NONE
     }
 

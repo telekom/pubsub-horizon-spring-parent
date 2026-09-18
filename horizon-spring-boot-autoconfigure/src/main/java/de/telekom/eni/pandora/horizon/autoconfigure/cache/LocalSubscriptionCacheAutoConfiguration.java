@@ -6,7 +6,7 @@ package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
-import de.telekom.eni.pandora.horizon.cache.service.SubscriptionSnapshotLoader;
+import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoader;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -34,23 +34,23 @@ public class LocalSubscriptionCacheAutoConfiguration {
             return new LocalSubscriptionCache(subscriptionsMongoRepo);
         }
         var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
-        return new LocalSubscriptionCache(new SubscriptionSnapshotLoader(
+        return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
             mongoConfigTemplate,
             localCacheProperties.getSnapshotCollection(),
             localCacheProperties.getHeadCollection()));
     }
 
-            @Bean
-            @ConditionalOnMissingBean(LocalSubscriptionCacheInitializer.class)
-            @ConditionalOnProperty(
-                prefix = "horizon.cache.local-subscription-cache",
-                name = "enabled",
-                havingValue = "true")
-            public LocalSubscriptionCacheInitializer localSubscriptionCacheInitializer(
-                LocalSubscriptionCache localSubscriptionCache,
-                ObjectProvider<CacheProperties> cachePropertiesProvider) {
-            return new LocalSubscriptionCacheInitializer(
-                localSubscriptionCache,
-                cachePropertiesProvider.getIfAvailable(CacheProperties::new));
-            }
+    @Bean
+    @ConditionalOnMissingBean(LocalSubscriptionCacheInitializer.class)
+    @ConditionalOnProperty(
+        prefix = "horizon.cache.local-subscription-cache",
+        name = "enabled",
+        havingValue = "true")
+    public LocalSubscriptionCacheInitializer localSubscriptionCacheInitializer(
+        LocalSubscriptionCache localSubscriptionCache,
+        ObjectProvider<CacheProperties> cachePropertiesProvider) {
+        return new LocalSubscriptionCacheInitializer(
+            localSubscriptionCache,
+            cachePropertiesProvider.getIfAvailable(CacheProperties::new));
+    }
 }

@@ -73,7 +73,7 @@ localSubscriptionCache.prepare();
 localSubscriptionCache.activate();
 
 localSubscriptionCache.getById(subscriptionId);
-localSubscriptionCache.getByQuery(environment, eventType);
+localSubscriptionCache.findByEnvironmentAndEventType(environment, eventType);
 ```
 
 See [Local Subscription Cache](docs/local-subscription-cache.md) for lifecycle, consistency guarantees, failure

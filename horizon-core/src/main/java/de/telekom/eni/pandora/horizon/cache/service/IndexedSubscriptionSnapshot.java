@@ -16,7 +16,7 @@ import java.util.Optional;
 
 record IndexedSubscriptionSnapshot(String snapshotId,
                                    Map<String, SubscriptionResource> byId,
-                                   Map<QueryKey, List<SubscriptionResource>> byQuery) {
+                                   Map<EnvironmentEventTypeKey, List<SubscriptionResource>> byEnvironmentAndEventType) {
 
     static IndexedSubscriptionSnapshot empty() {
         return new IndexedSubscriptionSnapshot(null, Map.of(), Map.of());
@@ -41,11 +41,11 @@ record IndexedSubscriptionSnapshot(String snapshotId,
         return Optional.ofNullable(byId.get(subscriptionId));
     }
 
-    List<SubscriptionResource> getByQuery(String environment, String eventType) {
+    List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType) {
         if (environment == null || eventType == null) {
             return List.of();
         }
-        return byQuery.getOrDefault(new QueryKey(environment, eventType), List.of());
+        return byEnvironmentAndEventType.getOrDefault(new EnvironmentEventTypeKey(environment, eventType), List.of());
     }
 
     List<SubscriptionResource> getAll() {
@@ -55,7 +55,7 @@ record IndexedSubscriptionSnapshot(String snapshotId,
     private static IndexedSubscriptionSnapshot fromResources(String snapshotId,
                                                               List<? extends SubscriptionResource> resources) {
         var byId = new HashMap<String, SubscriptionResource>();
-        var mutableByQuery = new HashMap<QueryKey, List<SubscriptionResource>>();
+        var mutableByEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
 
         for (var resource : resources) {
             validate(resource);
@@ -65,13 +65,13 @@ record IndexedSubscriptionSnapshot(String snapshotId,
                 throw new IllegalStateException("Duplicate subscription id: " + subscription.getSubscriptionId());
             }
 
-            var queryKey = new QueryKey(resource.getSpec().getEnvironment(), subscription.getType());
-            mutableByQuery.computeIfAbsent(queryKey, ignored -> new ArrayList<>()).add(resource);
+            var lookupKey = new EnvironmentEventTypeKey(resource.getSpec().getEnvironment(), subscription.getType());
+            mutableByEnvironmentAndEventType.computeIfAbsent(lookupKey, ignored -> new ArrayList<>()).add(resource);
         }
 
-        var byQuery = new HashMap<QueryKey, List<SubscriptionResource>>();
-        mutableByQuery.forEach((key, value) -> byQuery.put(key, List.copyOf(value)));
-        return new IndexedSubscriptionSnapshot(snapshotId, Map.copyOf(byId), Map.copyOf(byQuery));
+        var byEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
+        mutableByEnvironmentAndEventType.forEach((key, value) -> byEnvironmentAndEventType.put(key, List.copyOf(value)));
+        return new IndexedSubscriptionSnapshot(snapshotId, Map.copyOf(byId), Map.copyOf(byEnvironmentAndEventType));
     }
 
     private static void validate(SubscriptionResource resource) {
@@ -84,6 +84,6 @@ record IndexedSubscriptionSnapshot(String snapshotId,
         }
     }
 
-    private record QueryKey(String environment, String eventType) {
+    private record EnvironmentEventTypeKey(String environment, String eventType) {
     }
 }

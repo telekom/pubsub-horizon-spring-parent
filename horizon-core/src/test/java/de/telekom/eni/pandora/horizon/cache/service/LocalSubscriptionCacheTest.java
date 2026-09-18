@@ -38,7 +38,7 @@ class LocalSubscriptionCacheTest {
         cache.prepare();
 
         assertTrue(cache.getById("old-id").isEmpty());
-        assertTrue(cache.getByQuery("production", "old-event").isEmpty());
+        assertTrue(cache.findByEnvironmentAndEventType("production", "old-event").isEmpty());
         assertFalse(cache.isReady());
 
         cache.activate();
@@ -51,7 +51,7 @@ class LocalSubscriptionCacheTest {
         cache.activate();
 
         assertTrue(cache.getById("old-id").isEmpty());
-        assertEquals(List.of(newSubscription), cache.getByQuery("production", "new-event"));
+        assertEquals(List.of(newSubscription), cache.findByEnvironmentAndEventType("production", "new-event"));
     }
 
     @Test
@@ -78,9 +78,9 @@ class LocalSubscriptionCacheTest {
     void shouldReturnEmptyResultsForUnknownOrInvalidLookups() {
         assertTrue(cache.getById("unknown").isEmpty());
         assertTrue(cache.getById(null).isEmpty());
-        assertTrue(cache.getByQuery("production", "unknown").isEmpty());
-        assertTrue(cache.getByQuery(null, "event").isEmpty());
-        assertTrue(cache.getByQuery("production", null).isEmpty());
+        assertTrue(cache.findByEnvironmentAndEventType("production", "unknown").isEmpty());
+        assertTrue(cache.findByEnvironmentAndEventType(null, "event").isEmpty());
+        assertTrue(cache.findByEnvironmentAndEventType("production", null).isEmpty());
     }
 
     @Test
@@ -99,7 +99,7 @@ class LocalSubscriptionCacheTest {
 
     @Test
     void shouldDiscardPreparedSnapshotWhenNewPreparationFails() {
-        var snapshotLoader = mock(SubscriptionSnapshotLoader.class);
+        var snapshotLoader = mock(MongoSubscriptionSnapshotLoader.class);
         var snapshotCache = new LocalSubscriptionCache(snapshotLoader);
         var firstHead = snapshotHead("snapshot-1");
         var secondHead = snapshotHead("snapshot-2");
@@ -119,7 +119,7 @@ class LocalSubscriptionCacheTest {
 
     @Test
     void shouldSkipPreparationForActiveSnapshot() {
-        var snapshotLoader = mock(SubscriptionSnapshotLoader.class);
+        var snapshotLoader = mock(MongoSubscriptionSnapshotLoader.class);
         var snapshotCache = new LocalSubscriptionCache(snapshotLoader);
         var activeHead = snapshotHead("snapshot-1");
         when(snapshotLoader.load(activeHead)).thenReturn(new IndexedSubscriptionSnapshot("snapshot-1", Map.of(), Map.of()));
@@ -143,7 +143,7 @@ class LocalSubscriptionCacheTest {
             var observedSnapshots = executor.submit(() -> {
                 var observations = new ArrayList<List<SubscriptionResource>>();
                 for (int index = 0; index < 10_000; index++) {
-                    observations.add(cache.getByQuery("production", "event"));
+                    observations.add(cache.findByEnvironmentAndEventType("production", "event"));
                 }
                 return observations;
             });
