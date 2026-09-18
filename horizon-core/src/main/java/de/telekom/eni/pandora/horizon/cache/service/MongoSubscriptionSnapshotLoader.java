@@ -10,12 +10,26 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
+/**
+ * Loads versioned subscription snapshots from MongoDB.
+ *
+ * <p>The snapshot head identifies the active snapshot and declares the expected
+ * number of entries. A loaded snapshot is validated before it is converted into
+ * an indexed in-memory representation.</p>
+ */
 public class MongoSubscriptionSnapshotLoader {
 
     private final MongoTemplate mongoTemplate;
     private final String snapshotCollectionName;
     private final String snapshotHeadCollectionName;
 
+    /**
+     * Creates a loader for the configured snapshot collections.
+     *
+     * @param mongoTemplate MongoDB template for the configuration database
+     * @param snapshotCollectionName collection containing snapshot entries
+     * @param snapshotHeadCollectionName collection containing the snapshot head
+     */
     public MongoSubscriptionSnapshotLoader(MongoTemplate mongoTemplate,
                                            String snapshotCollectionName,
                                            String snapshotHeadCollectionName) {
@@ -24,6 +38,12 @@ public class MongoSubscriptionSnapshotLoader {
         this.snapshotHeadCollectionName = snapshotHeadCollectionName;
     }
 
+    /**
+     * Reads and validates the currently published snapshot head.
+     *
+     * @return the valid snapshot head
+     * @throws IllegalStateException if no valid head exists
+     */
     public SubscriptionSnapshotHead readSnapshotHead() {
         var snapshotHead = mongoTemplate.findById(
                 "head", SubscriptionSnapshotHead.class, snapshotHeadCollectionName);
@@ -31,6 +51,14 @@ public class MongoSubscriptionSnapshotLoader {
         return snapshotHead;
     }
 
+    /**
+     * Loads and indexes all entries belonging to the supplied snapshot.
+     *
+     * @param snapshotHead validated snapshot metadata
+     * @return an indexed, immutable snapshot representation
+     * @throws IllegalStateException if the head is invalid or the entry count differs
+     *                               from the expected document count
+     */
     public IndexedSubscriptionSnapshot load(SubscriptionSnapshotHead snapshotHead) {
         validateSnapshotHead(snapshotHead);
 
@@ -40,7 +68,7 @@ public class MongoSubscriptionSnapshotLoader {
             throw new IllegalStateException("Subscription snapshot document count mismatch: expected "
                     + snapshotHead.getDocumentCount() + ", actual " + entries.size());
         }
-        return IndexedSubscriptionSnapshot.fromEntries(snapshotHead.getSnapshotId(), entries);
+        return IndexedSubscriptionSnapshot.fromSnapshotEntries(snapshotHead.getSnapshotId(), entries);
     }
 
     private static void validateSnapshotHead(SubscriptionSnapshotHead snapshotHead) {

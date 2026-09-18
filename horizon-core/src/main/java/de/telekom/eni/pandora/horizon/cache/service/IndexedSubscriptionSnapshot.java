@@ -14,19 +14,44 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * Immutable lookup indexes for one complete subscription snapshot.
+ *
+ * <p>The snapshot supports direct lookup by subscription ID and lookup by
+ * environment plus event type. Duplicate IDs and invalid subscription data
+ * are rejected while the snapshot is built.</p>
+ */
 record IndexedSubscriptionSnapshot(String snapshotId,
-                                   Map<String, SubscriptionResource> byId,
-                                   Map<EnvironmentEventTypeKey, List<SubscriptionResource>> byEnvironmentAndEventType) {
+                                   Map<String, SubscriptionResource> subscriptionsById,
+                                   Map<EnvironmentEventTypeKey, List<SubscriptionResource>> subscriptionsByEnvironmentAndEventType) {
 
+    /**
+     * Creates the initial empty snapshot.
+     *
+     * @return an empty snapshot that has not been activated
+     */
     static IndexedSubscriptionSnapshot empty() {
         return new IndexedSubscriptionSnapshot(null, Map.of(), Map.of());
     }
 
-    static IndexedSubscriptionSnapshot fromSubscriptionDocuments(List<SubscriptionMongoDocument> documents) {
-        return fromResources("repository", new ArrayList<>(documents));
+    /**
+     * Builds an indexed snapshot from the current live repository documents.
+     *
+     * @param documents current subscription documents
+     * @return an indexed snapshot
+     */
+    static IndexedSubscriptionSnapshot fromSubscriptionMongoDocuments(List<SubscriptionMongoDocument> documents) {
+        return fromSubscriptionResources("repository", new ArrayList<>(documents));
     }
 
-    static IndexedSubscriptionSnapshot fromEntries(String snapshotId, List<SubscriptionSnapshotEntry> entries) {
+    /**
+     * Builds an indexed snapshot from persisted snapshot entries.
+     *
+     * @param snapshotId identifier of the persisted snapshot
+     * @param entries persisted subscription entries
+     * @return an indexed snapshot
+     */
+    static IndexedSubscriptionSnapshot fromSnapshotEntries(String snapshotId, List<SubscriptionSnapshotEntry> entries) {
         var resources = new ArrayList<SubscriptionResource>(entries.size());
         for (var entry : entries) {
             if (entry == null || entry.getResource() == null) {
@@ -34,44 +59,76 @@ record IndexedSubscriptionSnapshot(String snapshotId,
             }
             resources.add(entry.getResource());
         }
-        return fromResources(snapshotId, resources);
+        return fromSubscriptionResources(snapshotId, resources);
     }
 
+    /**
+     * Looks up one subscription by its subscription ID.
+     *
+     * @param subscriptionId subscription ID
+     * @return the matching subscription, if present
+     */
     Optional<SubscriptionResource> getById(String subscriptionId) {
-        return Optional.ofNullable(byId.get(subscriptionId));
+        return Optional.ofNullable(subscriptionsById.get(subscriptionId));
     }
 
+    /**
+     * Looks up subscriptions for one environment and event type.
+     *
+     * @param environment subscription environment
+     * @param eventType subscription event type
+     * @return matching subscriptions, or an empty list
+     */
     List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType) {
         if (environment == null || eventType == null) {
             return List.of();
         }
-        return byEnvironmentAndEventType.getOrDefault(new EnvironmentEventTypeKey(environment, eventType), List.of());
+        return subscriptionsByEnvironmentAndEventType.getOrDefault(
+            new EnvironmentEventTypeKey(environment, eventType), List.of());
     }
 
+    /**
+     * Returns a copy of all indexed subscriptions.
+     *
+     * @return all subscriptions in this snapshot
+     */
     List<SubscriptionResource> getAll() {
-        return new ArrayList<>(byId.values());
+        return new ArrayList<>(subscriptionsById.values());
     }
 
-    private static IndexedSubscriptionSnapshot fromResources(String snapshotId,
+    /**
+     * Indicates whether this snapshot contains no subscriptions.
+     *
+     * @return {@code true} if no subscription is indexed
+     */
+    boolean isEmpty() {
+        return subscriptionsById.isEmpty();
+    }
+
+    private static IndexedSubscriptionSnapshot fromSubscriptionResources(String snapshotId,
                                                               List<? extends SubscriptionResource> resources) {
-        var byId = new HashMap<String, SubscriptionResource>();
-        var mutableByEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
+        var subscriptionsById = new HashMap<String, SubscriptionResource>();
+        var subscriptionsByEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
 
         for (var resource : resources) {
             validate(resource);
             var subscription = resource.getSpec().getSubscription();
-            var previous = byId.put(subscription.getSubscriptionId(), resource);
+            var previous = subscriptionsById.putIfAbsent(subscription.getSubscriptionId(), resource);
             if (previous != null) {
                 throw new IllegalStateException("Duplicate subscription id: " + subscription.getSubscriptionId());
             }
 
             var lookupKey = new EnvironmentEventTypeKey(resource.getSpec().getEnvironment(), subscription.getType());
-            mutableByEnvironmentAndEventType.computeIfAbsent(lookupKey, ignored -> new ArrayList<>()).add(resource);
+            subscriptionsByEnvironmentAndEventType.computeIfAbsent(lookupKey, ignored -> new ArrayList<>()).add(resource);
         }
 
-        var byEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
-        mutableByEnvironmentAndEventType.forEach((key, value) -> byEnvironmentAndEventType.put(key, List.copyOf(value)));
-        return new IndexedSubscriptionSnapshot(snapshotId, Map.copyOf(byId), Map.copyOf(byEnvironmentAndEventType));
+        var immutableSubscriptionsByEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
+        subscriptionsByEnvironmentAndEventType.forEach((key, value) ->
+            immutableSubscriptionsByEnvironmentAndEventType.put(key, List.copyOf(value)));
+        return new IndexedSubscriptionSnapshot(
+            snapshotId,
+            Map.copyOf(subscriptionsById),
+            Map.copyOf(immutableSubscriptionsByEnvironmentAndEventType));
     }
 
     private static void validate(SubscriptionResource resource) {

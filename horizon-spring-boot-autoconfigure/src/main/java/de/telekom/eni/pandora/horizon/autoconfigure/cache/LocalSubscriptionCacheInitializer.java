@@ -20,6 +20,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
+/**
+ * Initializes and optionally refreshes the local subscription cache.
+ *
+ * <p>The initializer prepares and activates the first snapshot during startup.
+ * If a fallback is configured, initialization failures are logged and the
+ * application can continue using the fallback cache. Without a fallback, the
+ * initialization exception is propagated and startup fails.</p>
+ */
 public class LocalSubscriptionCacheInitializer implements ApplicationRunner, HealthIndicator {
 
     private final LocalSubscriptionCache localSubscriptionCache;
@@ -27,6 +35,12 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
     private final AtomicBoolean initialized = new AtomicBoolean();
     private ScheduledExecutorService headPollingExecutor;
 
+    /**
+     * Creates an initializer for the local cache and its polling configuration.
+     *
+     * @param localSubscriptionCache cache to initialize and refresh
+     * @param cacheProperties cache and fallback configuration
+     */
     public LocalSubscriptionCacheInitializer(LocalSubscriptionCache localSubscriptionCache,
                                              CacheProperties cacheProperties) {
         this.localSubscriptionCache = localSubscriptionCache;
@@ -34,6 +48,12 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
     }
 
     @Override
+    /**
+     * Loads and activates the initial local subscription snapshot.
+     *
+     * @param args application startup arguments
+     * @throws RuntimeException if initialization fails and no fallback is configured
+     */
     public void run(ApplicationArguments args) {
         try {
             localSubscriptionCache.prepare();
@@ -41,6 +61,10 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
             initialized.set(true);
         } catch (RuntimeException exception) {
             initialized.set(false);
+            if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
+                    == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
+                throw exception;
+            }
             log.warn("Local subscription cache initialization failed; using fallback cache", exception);
         }
         startHeadPolling();
@@ -62,10 +86,14 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
             this::pollHead, intervalMillis, intervalMillis, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Checks for a newer snapshot head and activates it when loading succeeds.
+     * A polling failure leaves the currently active snapshot unchanged.
+     */
     void pollHead() {
         try {
             var snapshotHead = localSubscriptionCache.readSnapshotHead();
-            if (localSubscriptionCache.prepare(snapshotHead)) {
+            if (localSubscriptionCache.prepareFromSubscriptionSnapshot(snapshotHead)) {
                 localSubscriptionCache.activate();
                 initialized.set(true);
             }
@@ -81,6 +109,7 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
     }
 
     @PreDestroy
+    /** Stops the background snapshot-head polling executor. */
     void stopHeadPolling() {
         if (headPollingExecutor != null) {
             headPollingExecutor.shutdownNow();
@@ -88,6 +117,11 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
     }
 
     @Override
+    /**
+     * Reports whether the local cache was initialized successfully.
+     *
+     * @return {@code UP} after successful initialization, otherwise {@code DOWN}
+     */
     public Health health() {
         if (initialized.get()) {
             return Health.up().build();

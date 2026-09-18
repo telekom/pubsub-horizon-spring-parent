@@ -13,33 +13,73 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * Pod-local subscription cache with an explicit prepare/activate lifecycle.
+ *
+ * <p>A prepared snapshot becomes visible only after a successful call to
+ * {@link #activate()}.</p>
+ */
 public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
-    private final SubscriptionsMongoRepo subscriptionsMongoRepo;
+    private final SubscriptionsMongoRepo liveSubscriptionsRepository;
     private final MongoSubscriptionSnapshotLoader snapshotLoader;
     private final AtomicReference<IndexedSubscriptionSnapshot> activeSnapshot = new AtomicReference<>(IndexedSubscriptionSnapshot.empty());
     private final AtomicReference<IndexedSubscriptionSnapshot> preparedSnapshot = new AtomicReference<>();
     private final AtomicBoolean snapshotUpToDate = new AtomicBoolean();
 
-    public LocalSubscriptionCache(SubscriptionsMongoRepo subscriptionsMongoRepo) {
-        this.subscriptionsMongoRepo = subscriptionsMongoRepo;
+    /**
+     * Creates a cache backed by the current live subscription repository.
+     *
+     * @param liveSubscriptionsRepository repository containing current subscriptions
+     */
+    public LocalSubscriptionCache(SubscriptionsMongoRepo liveSubscriptionsRepository) {
+        this.liveSubscriptionsRepository = liveSubscriptionsRepository;
         this.snapshotLoader = null;
     }
 
+    /**
+     * Creates a cache backed by persisted subscription snapshots.
+     *
+     * @param snapshotLoader loader for snapshot metadata and entries
+     */
     public LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader) {
-        this.subscriptionsMongoRepo = null;
+        this.liveSubscriptionsRepository = null;
         this.snapshotLoader = snapshotLoader;
     }
 
-    public void prepare() {
+    /**
+     * Prepares a cache snapshot from live subscriptions or a persisted subscription snapshot.
+     *
+     * @return {@code true} if a new snapshot was prepared
+     */
+    public boolean prepare() {
         if (snapshotLoader == null) {
-            preparedSnapshot.set(IndexedSubscriptionSnapshot.fromSubscriptionDocuments(subscriptionsMongoRepo.findAll()));
-            return;
+            return prepareFromLiveSubscriptions();
         }
-        prepare(readSnapshotHead());
+        return prepareFromSubscriptionSnapshot(readSnapshotHead());
     }
 
-    public boolean prepare(SubscriptionSnapshotHead snapshotHead) {
+    /**
+     * Prepares a cache snapshot from the live subscription repository.
+     *
+     * @return {@code true} after preparing a snapshot
+     */
+    public boolean prepareFromLiveSubscriptions() {
+        if (snapshotLoader != null) {
+            throw new IllegalStateException("Mongo repository preparation is unavailable for snapshot-backed cache");
+        }
+        var snapshot = IndexedSubscriptionSnapshot.fromSubscriptionMongoDocuments(liveSubscriptionsRepository.findAll());
+        preparedSnapshot.set(snapshot);
+        return true;
+    }
+
+    /**
+     * Prepares a cache snapshot from a persisted subscription snapshot.
+     *
+     * @param snapshotHead metadata identifying the snapshot to load
+     * @return {@code true} if a new snapshot was prepared, otherwise {@code false}
+     */
+    public boolean prepareFromSubscriptionSnapshot(SubscriptionSnapshotHead snapshotHead) {
         if (snapshotLoader == null) {
             throw new IllegalStateException("Snapshot-head-based preparation is unavailable for repository-backed cache");
         }
@@ -49,10 +89,17 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
         snapshotUpToDate.set(false);
 
-        preparedSnapshot.set(snapshotLoader.load(snapshotHead));
+        var snapshot = snapshotLoader.load(snapshotHead);
+        preparedSnapshot.set(snapshot);
         return true;
     }
 
+    /**
+     * Reads the currently published snapshot metadata.
+     *
+     * @return the current snapshot head
+     * @throws IllegalStateException if this cache uses the live source
+     */
     public SubscriptionSnapshotHead readSnapshotHead() {
         if (snapshotLoader == null) {
             throw new IllegalStateException("Snapshot head is unavailable for repository-backed cache");
@@ -60,10 +107,18 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         return snapshotLoader.readSnapshotHead();
     }
 
+    /**
+     * Atomically publishes the prepared snapshot to readers.
+     *
+     * @throws IllegalStateException if no snapshot was prepared or the snapshot is empty
+     */
     public void activate() {
         var snapshot = preparedSnapshot.getAndSet(null);
         if (snapshot == null) {
             throw new IllegalStateException("No prepared subscription snapshot available");
+        }
+        if (snapshot.isEmpty()) {
+            throw new IllegalStateException("Cannot activate empty subscription snapshot");
         }
         activeSnapshot.set(snapshot);
         snapshotUpToDate.set(true);
@@ -74,7 +129,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         if (subscriptionId == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(activeSnapshot.get().byId().get(subscriptionId));
+        return Optional.ofNullable(activeSnapshot.get().subscriptionsById().get(subscriptionId));
     }
 
     @Override
@@ -86,10 +141,20 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     }
 
     @Override
+    /**
+     * Indicates whether a the cache has an active snapshot and is ready for use.
+     *
+     * @return {@code true} if an active snapshot with an ID exists
+     */
     public boolean isReady() {
         return activeSnapshot.get().snapshotId() != null;
     }
 
+    /**
+     * Indicates whether the cache is up to date with the latest activated snapshot.
+     *
+     * @return {@code true} after successful activation of the latest prepared snapshot
+     */
     public boolean isCacheUpToDate() {
         return snapshotUpToDate.get();
     }

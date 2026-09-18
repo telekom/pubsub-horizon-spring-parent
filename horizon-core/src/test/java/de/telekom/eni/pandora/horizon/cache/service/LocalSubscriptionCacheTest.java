@@ -62,6 +62,18 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
+    void shouldRejectActivationOfEmptySnapshot() {
+        when(subscriptionsMongoRepo.findAll()).thenReturn(List.of());
+
+        cache.prepare();
+
+        var exception = assertThrows(IllegalStateException.class, cache::activate);
+
+        assertEquals("Cannot activate empty subscription snapshot", exception.getMessage());
+        assertFalse(cache.isReady());
+    }
+
+    @Test
     void shouldKeepActiveSnapshotWhenPreparationFails() {
         var activeSubscription = subscription("active-id", "production", "event");
         var invalidSubscription = subscription(null, "production", "event");
@@ -104,14 +116,16 @@ class LocalSubscriptionCacheTest {
         var firstHead = snapshotHead("snapshot-1");
         var secondHead = snapshotHead("snapshot-2");
         var failingHead = snapshotHead("snapshot-3");
-        when(snapshotLoader.load(firstHead)).thenReturn(new IndexedSubscriptionSnapshot("snapshot-1", Map.of(), Map.of()));
-        when(snapshotLoader.load(secondHead)).thenReturn(new IndexedSubscriptionSnapshot("snapshot-2", Map.of(), Map.of()));
+        when(snapshotLoader.load(firstHead)).thenReturn(new IndexedSubscriptionSnapshot(
+            "snapshot-1", Map.of("active-id", subscription("active-id", "production", "event")), Map.of()));
+        when(snapshotLoader.load(secondHead)).thenReturn(new IndexedSubscriptionSnapshot(
+            "snapshot-2", Map.of("active-id", subscription("active-id", "production", "event")), Map.of()));
         when(snapshotLoader.load(failingHead)).thenThrow(new IllegalStateException("Snapshot loading failed"));
-        assertTrue(snapshotCache.prepare(firstHead));
+        assertTrue(snapshotCache.prepareFromSubscriptionSnapshot(firstHead));
         snapshotCache.activate();
-        assertTrue(snapshotCache.prepare(secondHead));
+        assertTrue(snapshotCache.prepareFromSubscriptionSnapshot(secondHead));
 
-        assertThrows(IllegalStateException.class, () -> snapshotCache.prepare(failingHead));
+        assertThrows(IllegalStateException.class, () -> snapshotCache.prepareFromSubscriptionSnapshot(failingHead));
         assertThrows(IllegalStateException.class, snapshotCache::activate);
         assertTrue(snapshotCache.isReady());
         assertFalse(snapshotCache.isCacheUpToDate());
@@ -122,11 +136,12 @@ class LocalSubscriptionCacheTest {
         var snapshotLoader = mock(MongoSubscriptionSnapshotLoader.class);
         var snapshotCache = new LocalSubscriptionCache(snapshotLoader);
         var activeHead = snapshotHead("snapshot-1");
-        when(snapshotLoader.load(activeHead)).thenReturn(new IndexedSubscriptionSnapshot("snapshot-1", Map.of(), Map.of()));
-        assertTrue(snapshotCache.prepare(activeHead));
+        when(snapshotLoader.load(activeHead)).thenReturn(new IndexedSubscriptionSnapshot(
+            "snapshot-1", Map.of("active-id", subscription("active-id", "production", "event")), Map.of()));
+        assertTrue(snapshotCache.prepareFromSubscriptionSnapshot(activeHead));
         snapshotCache.activate();
 
-        assertFalse(snapshotCache.prepare(activeHead));
+        assertFalse(snapshotCache.prepareFromSubscriptionSnapshot(activeHead));
         assertThrows(IllegalStateException.class, snapshotCache::activate);
     }
 

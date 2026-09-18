@@ -12,17 +12,34 @@ import java.util.List;
 import java.util.Optional;
 
 @Slf4j
+/**
+ * Subscription reader that tries a primary source first and falls back to a secondary source
+ * when the primary is unavailable or fails during a read.
+ */
 public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader {
 
     private final SubscriptionCacheReader primary;
     private final SubscriptionCacheReader fallback;
 
+    /**
+     * Creates a primary/fallback reader chain.
+     *
+     * @param primary source preferred for reads
+     * @param fallback source used when the primary is not ready or fails
+     */
     public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback) {
         this.primary = primary;
         this.fallback = fallback;
     }
 
     @Override
+    /**
+     * Reads by ID, falling back when the primary cannot serve the request.
+     *
+     * @param subscriptionId subscription ID
+     * @return the subscription if present
+     * @throws JsonCacheException if both readers fail
+     */
     public Optional<SubscriptionResource> getById(String subscriptionId) throws JsonCacheException {
         if (primary.isReady()) {
             try {
@@ -35,6 +52,14 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     }
 
     @Override
+    /**
+     * Reads by environment and event type, falling back when the primary cannot serve the request.
+     *
+     * @param environment subscription environment
+     * @param eventType subscription event type
+     * @return matching subscriptions
+     * @throws JsonCacheException if both readers fail
+     */
     public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
             throws JsonCacheException {
         if (primary.isReady()) {
@@ -48,6 +73,11 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     }
 
     @Override
+    /**
+     * Reports readiness when either source can serve requests.
+     *
+     * @return {@code true} if the primary or fallback is ready
+     */
     public boolean isReady() {
         return primary.isReady() || fallback.isReady();
     }

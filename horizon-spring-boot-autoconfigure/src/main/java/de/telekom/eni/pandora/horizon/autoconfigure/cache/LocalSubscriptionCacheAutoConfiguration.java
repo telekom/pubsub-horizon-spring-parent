@@ -10,7 +10,6 @@ import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoa
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -18,11 +17,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 @Configuration
-@ConditionalOnBean(SubscriptionsMongoRepo.class)
 public class LocalSubscriptionCacheAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(LocalSubscriptionCache.class)
+    @ConditionalOnProperty(
+        prefix = "horizon.cache.local-subscription-cache",
+        name = "enabled",
+        havingValue = "true")
     public LocalSubscriptionCache localSubscriptionCache(
             @Qualifier("getSubscriptionsRepo") ObjectProvider<SubscriptionsMongoRepo> subscriptionsMongoRepoProvider,
             @Qualifier("mongoConfigTemplate") ObjectProvider<MongoTemplate> mongoTemplateProvider,
@@ -30,10 +32,16 @@ public class LocalSubscriptionCacheAutoConfiguration {
         var subscriptionsMongoRepo = subscriptionsMongoRepoProvider.getIfAvailable();
         var mongoConfigTemplate = mongoTemplateProvider.getIfAvailable();
         var cacheProperties = cachePropertiesProvider.getIfAvailable(CacheProperties::new);
-        if (mongoConfigTemplate == null) {
+        var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+        if (localCacheProperties.getSource() == CacheProperties.LocalSubscriptionCacheSource.LIVE) {
+            if (subscriptionsMongoRepo == null) {
+                throw new IllegalStateException("SubscriptionsMongoRepo is required for local cache from Live subscriptions source");
+            }
             return new LocalSubscriptionCache(subscriptionsMongoRepo);
         }
-        var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+        if (mongoConfigTemplate == null) {
+            throw new IllegalStateException("MongoTemplate is required for local cache from snapshot subscriptions source");
+        }
         return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
             mongoConfigTemplate,
             localCacheProperties.getSnapshotCollection(),

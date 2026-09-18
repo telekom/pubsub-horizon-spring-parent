@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.actuate.health.Status;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -48,10 +49,21 @@ class LocalSubscriptionCacheInitializerTest {
     }
 
     @Test
+    void shouldFailStartupWhenCacheInitializationFailsWithoutFallback() {
+        cacheProperties.getLocalSubscriptionCache().setFallbackMode(
+                CacheProperties.LocalSubscriptionCacheFallback.NONE);
+        doThrow(new IllegalStateException("Mongo unavailable")).when(cache).prepare();
+
+        assertThrows(IllegalStateException.class, () -> initializer.run(null));
+        assertEquals(Status.DOWN, initializer.health().getStatus());
+        verify(cache, never()).activate();
+    }
+
+    @Test
     void shouldActivateChangedSnapshotDuringPolling() {
         var snapshotHead = new SubscriptionSnapshotHead();
         when(cache.readSnapshotHead()).thenReturn(snapshotHead);
-        when(cache.prepare(snapshotHead)).thenReturn(true);
+        when(cache.prepareFromSubscriptionSnapshot(snapshotHead)).thenReturn(true);
 
         initializer.pollHead();
 
@@ -63,7 +75,7 @@ class LocalSubscriptionCacheInitializerTest {
     void shouldNotActivateUnchangedSnapshotDuringPolling() {
         var snapshotHead = new SubscriptionSnapshotHead();
         when(cache.readSnapshotHead()).thenReturn(snapshotHead);
-        when(cache.prepare(snapshotHead)).thenReturn(false);
+        when(cache.prepareFromSubscriptionSnapshot(snapshotHead)).thenReturn(false);
 
         initializer.pollHead();
 

@@ -11,15 +11,33 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Subscription reader backed by the shared Hazelcast/JSON cache.
+ *
+ * <p>It translates the domain lookup by environment and event type into the
+ * underlying cache query.</p>
+ */
 public class SharedSubscriptionCacheReader implements SubscriptionCacheReader {
 
     private final JsonCacheService<SubscriptionResource> subscriptionCache;
 
+    /**
+     * Creates a reader backed by the shared subscription cache service.
+     *
+     * @param subscriptionCache shared JSON cache service
+     */
     public SharedSubscriptionCacheReader(JsonCacheService<SubscriptionResource> subscriptionCache) {
         this.subscriptionCache = subscriptionCache;
     }
 
     @Override
+    /**
+     * Reads a subscription by ID from the shared cache.
+     *
+     * @param subscriptionId subscription ID
+     * @return the subscription if present
+     * @throws JsonCacheException if the shared cache cannot be read
+     */
     public Optional<SubscriptionResource> getById(String subscriptionId) throws JsonCacheException {
         if (subscriptionId == null) {
             return Optional.empty();
@@ -28,6 +46,14 @@ public class SharedSubscriptionCacheReader implements SubscriptionCacheReader {
     }
 
     @Override
+    /**
+     * Reads subscriptions matching an environment and event type.
+     *
+     * @param environment subscription environment
+     * @param eventType subscription event type
+     * @return matching subscriptions
+     * @throws JsonCacheException if the shared cache cannot be read
+     */
     public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
             throws JsonCacheException {
         if (environment == null || eventType == null) {
@@ -41,6 +67,11 @@ public class SharedSubscriptionCacheReader implements SubscriptionCacheReader {
     }
 
     @Override
+    /**
+     * Delegates readiness to the shared cache service.
+     *
+     * @return {@code true} when the shared cache is available
+     */
     public boolean isReady() {
         return subscriptionCache.isReady();
     }
