@@ -8,11 +8,13 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
+import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -96,6 +98,39 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
+    void shouldDiscardPreparedSnapshotWhenNewPreparationFails() {
+        var snapshotLoader = mock(SubscriptionSnapshotLoader.class);
+        var snapshotCache = new LocalSubscriptionCache(snapshotLoader);
+        var firstHead = snapshotHead("snapshot-1");
+        var secondHead = snapshotHead("snapshot-2");
+        var failingHead = snapshotHead("snapshot-3");
+        when(snapshotLoader.load(firstHead)).thenReturn(new IndexedSubscriptionSnapshot("snapshot-1", Map.of(), Map.of()));
+        when(snapshotLoader.load(secondHead)).thenReturn(new IndexedSubscriptionSnapshot("snapshot-2", Map.of(), Map.of()));
+        when(snapshotLoader.load(failingHead)).thenThrow(new IllegalStateException("Snapshot loading failed"));
+        assertTrue(snapshotCache.prepare(firstHead));
+        snapshotCache.activate();
+        assertTrue(snapshotCache.prepare(secondHead));
+
+        assertThrows(IllegalStateException.class, () -> snapshotCache.prepare(failingHead));
+        assertThrows(IllegalStateException.class, snapshotCache::activate);
+        assertTrue(snapshotCache.isReady());
+        assertFalse(snapshotCache.isCacheUpToDate());
+    }
+
+    @Test
+    void shouldSkipPreparationForActiveSnapshot() {
+        var snapshotLoader = mock(SubscriptionSnapshotLoader.class);
+        var snapshotCache = new LocalSubscriptionCache(snapshotLoader);
+        var activeHead = snapshotHead("snapshot-1");
+        when(snapshotLoader.load(activeHead)).thenReturn(new IndexedSubscriptionSnapshot("snapshot-1", Map.of(), Map.of()));
+        assertTrue(snapshotCache.prepare(activeHead));
+        snapshotCache.activate();
+
+        assertFalse(snapshotCache.prepare(activeHead));
+        assertThrows(IllegalStateException.class, snapshotCache::activate);
+    }
+
+    @Test
     void concurrentReadersShouldOnlySeeCompleteSnapshots() throws Exception {
         var oldSubscriptions = subscriptions("old", 100);
         var newSubscriptions = subscriptions("new", 100);
@@ -147,6 +182,12 @@ class LocalSubscriptionCacheTest {
             subscriptions.add(subscription(prefix + "-" + index, "production", "event"));
         }
         return subscriptions;
+    }
+
+    private SubscriptionSnapshotHead snapshotHead(String snapshotId) {
+        var snapshotHead = new SubscriptionSnapshotHead();
+        snapshotHead.setSnapshotId(snapshotId);
+        return snapshotHead;
     }
 
     private SubscriptionMongoDocument subscription(String subscriptionId, String environment, String eventType) {

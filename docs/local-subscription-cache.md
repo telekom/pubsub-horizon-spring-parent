@@ -8,12 +8,12 @@ SPDX-License-Identifier: Apache-2.0
 
 ## Purpose
 
-`LocalSubscriptionCache` provides a pod-local read cache for subscriptions. It loads the complete subscription collection
-from MongoDB, prepares indexed lookup structures without changing the active cache, and publishes the new state with one
-atomic reference update.
+`LocalSubscriptionCache` provides a pod-local read cache for subscriptions. It loads a complete subscription snapshot from
+MongoDB, prepares indexed lookup structures without changing the active cache, and publishes the new state with one atomic
+reference update.
 
-The existing Hazelcast-backed `JsonCacheService<SubscriptionResource>` remains unchanged. Applications can migrate one pod
-at a time and explicitly decide whether a read uses the existing service or the snapshot cache.
+The existing Hazelcast-backed `JsonCacheService<SubscriptionResource>` remains unchanged. The Spring Boot autoconfiguration
+selects the local cache as primary when enabled and can retain the existing service as fallback.
 
 ## Architecture
 
@@ -46,8 +46,9 @@ must treat them as read-only.
 
 ### Initial state
 
-The active snapshot is empty after construction. Reads are valid immediately and return `Optional.empty()` or an empty list.
-No automatic MongoDB load or activation takes place.
+The active snapshot is empty after construction. When the local cache is enabled, the autoconfigured initializer loads and
+activates the first snapshot during application startup. If initialization fails, health remains down and the configured
+fallback remains available.
 
 ### Prepare
 
@@ -133,28 +134,27 @@ horizon:
     enabled: true
 ```
 
-The bean is registered in addition to the existing `JsonCacheService`. It is not marked as `@Primary`, and a custom
-`LocalSubscriptionCache` bean overrides the auto-configured one.
+The bean is registered in addition to the existing `JsonCacheService`. A custom `LocalSubscriptionCache` or
+`LocalSubscriptionCacheInitializer` bean overrides the corresponding auto-configured bean.
 
-The parent deliberately does not choose the cache used by business logic. That decision belongs to each consuming pod.
+Enable the cache and optional snapshot-head polling with:
 
-## Pod integration example
-
-The pod should keep the existing cache path as its default and introduce its own feature flag for controlled migration:
-
-```java
-if (cacheProperties.isSubscriptionSnapshotEnabled()) {
-    return localSubscriptionCache.getByQuery(environment, eventType);
-}
-
-return jsonCacheService.getQuery(query);
+```yaml
+horizon:
+    cache:
+        local-subscription-cache:
+            enabled: true
+            fallback-mode: shared-cache-mongo
+            snapshot-collection: subscriptions.subscriber.horizon.telekom.de.v1-snapshots
+            head-collection: subscriptions.subscriber.horizon.telekom.de.v1-head
+            head-polling:
+                enabled: true
+                interval: 30s
 ```
 
-The pod is also responsible for coordinating `prepare()` and `activate()`. For example, a coordinator can prepare a snapshot
-after detecting a new published snapshot version and activate it at the agreed activation time.
-
-Before enabling snapshot reads, the pod must successfully perform an initial `prepare()` and `activate()`. Otherwise reads use
-the intentionally empty initial snapshot.
+The initializer performs the initial `prepare()` and `activate()` automatically. When head polling is enabled, it periodically
+reads the published snapshot head and atomically activates a newly prepared snapshot. Unchanged heads are ignored, and load
+failures preserve the active snapshot.
 
 ## Guarantees and boundaries
 
@@ -168,12 +168,10 @@ The implementation guarantees:
 
 The implementation does not provide:
 
-- automatic refresh scheduling;
 - cross-pod activation coordination;
-- snapshot version, checksum, or activation-time handling;
+- checksum or activation-time handling;
 - deep immutability of `SubscriptionResource` objects;
-- automatic fallback from an empty or unavailable snapshot to Hazelcast;
-- transparent switching between the old and new cache APIs.
+- fallback based on snapshot freshness after a previously successful activation.
 
 These concerns remain with the consuming pod or a future coordination component.
 

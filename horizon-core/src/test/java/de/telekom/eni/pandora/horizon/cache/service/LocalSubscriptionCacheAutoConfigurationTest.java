@@ -5,6 +5,8 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCacheAutoConfiguration;
+import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCacheInitializer;
+import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -40,5 +42,20 @@ class LocalSubscriptionCacheAutoConfigurationTest {
                     assertEquals(1, context.getBeansOfType(LocalSubscriptionCache.class).size());
                     assertSame(customCache, context.getBean(LocalSubscriptionCache.class));
                 });
+    }
+
+    @Test
+    void shouldCreateInitializerWhenLocalCacheIsEnabled() {
+        contextRunner
+                .withBean(CacheProperties.class, CacheProperties::new)
+                .withPropertyValues("horizon.cache.local-subscription-cache.enabled=true")
+                .run(context -> assertEquals(
+                        1, context.getBeansOfType(LocalSubscriptionCacheInitializer.class).size()));
+    }
+
+    @Test
+    void shouldNotCreateInitializerWhenLocalCacheIsDisabled() {
+        contextRunner.run(context -> assertEquals(
+                0, context.getBeansOfType(LocalSubscriptionCacheInitializer.class).size()));
     }
 }

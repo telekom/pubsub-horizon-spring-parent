@@ -74,9 +74,13 @@ public class JsonCacheAutoconfiguration {
             @org.springframework.beans.factory.annotation.Qualifier("subscriptionCache") JsonCacheService<SubscriptionResource> subscriptionCache,
             CacheProperties cacheProperties) {
         var localSubscriptionCache = localSubscriptionCacheProvider.getIfAvailable();
-        if (cacheProperties.getSubscriptionFallback() == CacheProperties.SubscriptionFallback.NONE) {
+        var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+        if (!localCacheProperties.isEnabled()) {
+            return subscriptionCache;
+        }
+        if (localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
             if (localSubscriptionCache == null) {
-                throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.subscription-fallback is NONE");
+                throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.local-subscription-cache is true");
             }
             return localSubscriptionCache;
         }
