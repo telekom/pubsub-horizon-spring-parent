@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
-import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
@@ -67,7 +67,7 @@ class MongoSubscriptionSnapshotLoaderTest {
         when(mongoTemplate.find(any(Query.class), eq(SubscriptionSnapshotEntry.class), eq(SNAPSHOT_COLLECTION)))
                 .thenReturn(List.of(snapshotEntry("snapshot-1", "subscription-1")));
 
-        var exception = assertThrows(SubscriptionSnapshotException.class, () -> loader.load(head));
+        var exception = assertThrows(SubscriptionCacheSnapshotException.class, () -> loader.load(head));
 
         assertEquals("Subscription snapshot document count mismatch: expected 2, actual 1", exception.getMessage());
     }
@@ -76,14 +76,14 @@ class MongoSubscriptionSnapshotLoaderTest {
     void shouldRejectMissingHead() {
         when(mongoTemplate.findById("head", SubscriptionSnapshotHead.class, HEAD_COLLECTION)).thenReturn(null);
 
-        assertThrows(SubscriptionSnapshotException.class, loader::readSnapshotHead);
+        assertThrows(SubscriptionCacheSnapshotException.class, loader::readSnapshotHead);
     }
 
     @Test
     void shouldRejectInvalidHeadBeforeQueryingEntries() {
         var head = snapshotHead(" ", 1L);
 
-        assertThrows(SubscriptionSnapshotException.class, () -> loader.load(head));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> loader.load(head));
         verify(mongoTemplate, never()).find(any(Query.class), eq(SubscriptionSnapshotEntry.class), eq(SNAPSHOT_COLLECTION));
     }
 

@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
-import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 
 import java.util.List;
@@ -20,9 +20,9 @@ public interface SubscriptionCacheReader {
      *
      * @param subscriptionId subscription ID
      * @return the subscription if present
-     * @throws JsonCacheException if the underlying cache cannot be read
+    * @throws SubscriptionCacheReadException if the underlying cache cannot be read
      */
-    Optional<SubscriptionResource> getById(String subscriptionId) throws JsonCacheException;
+    Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException;
 
     /**
      * Looks up subscriptions for an environment and event type.
@@ -30,9 +30,10 @@ public interface SubscriptionCacheReader {
      * @param environment subscription environment
      * @param eventType subscription event type
      * @return matching subscriptions
-     * @throws JsonCacheException if the underlying cache cannot be read
+         * @throws SubscriptionCacheReadException if the underlying cache cannot be read
      */
-    List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType) throws JsonCacheException;
+        List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
+            throws SubscriptionCacheReadException;
 
     /**
      * Indicates whether this reader can currently serve requests.

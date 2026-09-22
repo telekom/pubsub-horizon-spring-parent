@@ -7,7 +7,7 @@ package de.telekom.eni.pandora.horizon.cache.service;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
-import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
@@ -85,7 +85,7 @@ class LocalSubscriptionCacheTest {
 
         cache.prepare(head);
 
-        var exception = assertThrows(SubscriptionSnapshotException.class, () -> cache.activate("snapshot-1"));
+        var exception = assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.activate("snapshot-1"));
 
         assertEquals("Cannot activate empty subscription snapshot", exception.getMessage());
         assertFalse(cache.isReady());
@@ -97,11 +97,11 @@ class LocalSubscriptionCacheTest {
         var activeHead = snapshotHead("snapshot-1");
         var failingHead = snapshotHead("snapshot-2");
         when(snapshotLoader.load(activeHead)).thenReturn(snapshot("snapshot-1", List.of(activeSubscription)));
-        when(snapshotLoader.load(failingHead)).thenThrow(new SubscriptionSnapshotException("Snapshot loading failed"));
+        when(snapshotLoader.load(failingHead)).thenThrow(new SubscriptionCacheSnapshotException("Snapshot loading failed"));
         cache.prepare(activeHead);
         cache.activate("snapshot-1");
 
-        assertThrows(SubscriptionSnapshotException.class, () -> cache.prepare(failingHead));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.prepare(failingHead));
 
         assertTrue(cache.getById("active-id").isPresent());
     }
@@ -263,7 +263,7 @@ class LocalSubscriptionCacheTest {
         cache.prepare(activeHead);
         cache.activate("snapshot-1");
 
-        assertThrows(SubscriptionSnapshotException.class, () -> cache.prepare(duplicateHead));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.prepare(duplicateHead));
 
         assertTrue(cache.getById("active-id").isPresent());
         assertFalse(cache.getById("duplicate-id").isPresent());

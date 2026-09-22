@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
-import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import org.junit.jupiter.api.Test;
 
@@ -25,7 +25,7 @@ class FallbackSubscriptionCacheReaderTest {
     private final FallbackSubscriptionCacheReader reader = new FallbackSubscriptionCacheReader(primary, fallback);
 
     @Test
-    void shouldUseFallbackWhenPrimaryIsNotReady() throws JsonCacheException {
+    void shouldUseFallbackWhenPrimaryIsNotReady() throws SubscriptionCacheReadException {
         var expected = List.of(new SubscriptionResource());
         when(primary.isReady()).thenReturn(false);
         when(fallback.findByEnvironmentAndEventType("production", "event-type")).thenReturn(expected);
@@ -36,18 +36,18 @@ class FallbackSubscriptionCacheReaderTest {
     }
 
     @Test
-    void shouldUseFallbackWhenPrimaryQueryFails() throws JsonCacheException {
+    void shouldUseFallbackWhenPrimaryQueryFails() throws SubscriptionCacheReadException {
         var expected = List.of(new SubscriptionResource());
         when(primary.isReady()).thenReturn(true);
         when(primary.findByEnvironmentAndEventType("production", "event-type"))
-                .thenThrow(new JsonCacheException("primary unavailable", new RuntimeException()));
+                .thenThrow(new SubscriptionCacheReadException("primary unavailable", new RuntimeException()));
         when(fallback.findByEnvironmentAndEventType("production", "event-type")).thenReturn(expected);
 
         assertEquals(expected, reader.findByEnvironmentAndEventType("production", "event-type"));
     }
 
     @Test
-    void shouldReturnPrimaryIdLookupResultWithoutFallback() throws JsonCacheException {
+    void shouldReturnPrimaryIdLookupResultWithoutFallback() throws SubscriptionCacheReadException {
         var expected = Optional.of(new SubscriptionResource());
         when(primary.isReady()).thenReturn(true);
         when(primary.getById("subscription-id")).thenReturn(expected);

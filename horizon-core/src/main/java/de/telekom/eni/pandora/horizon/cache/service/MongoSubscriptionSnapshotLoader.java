@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
-import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -43,7 +43,7 @@ public class MongoSubscriptionSnapshotLoader {
      * Reads and validates the currently published snapshot head.
      *
      * @return the valid snapshot head
-    * @throws SubscriptionSnapshotException if no valid head exists
+    * @throws SubscriptionCacheSnapshotException if no valid head exists
      */
     public SubscriptionSnapshotHead readSnapshotHead() {
         var snapshotHead = mongoTemplate.findById(
@@ -58,7 +58,7 @@ public class MongoSubscriptionSnapshotLoader {
      * @param snapshotHead validated snapshot metadata
      * @return an indexed, immutable snapshot representation
     * @throws IllegalArgumentException if the head is {@code null}
-    * @throws SubscriptionSnapshotException if the head is invalid or the entry count differs
+    * @throws SubscriptionCacheSnapshotException if the head is invalid or the entry count differs
     *                                       from the expected document count
      */
     public IndexedSubscriptionSnapshot load(SubscriptionSnapshotHead snapshotHead) {
@@ -70,7 +70,7 @@ public class MongoSubscriptionSnapshotLoader {
         var query = Query.query(Criteria.where("snapshotId").is(snapshotHead.getSnapshotId()));
         var entries = mongoTemplate.find(query, SubscriptionSnapshotEntry.class, snapshotCollectionName);
         if (entries.size() != snapshotHead.getDocumentCount()) {
-            throw new SubscriptionSnapshotException("Subscription snapshot document count mismatch: expected "
+            throw new SubscriptionCacheSnapshotException("Subscription snapshot document count mismatch: expected "
                     + snapshotHead.getDocumentCount() + ", actual " + entries.size());
         }
         return IndexedSubscriptionSnapshot.fromSnapshotEntries(snapshotHead, entries);
@@ -78,10 +78,10 @@ public class MongoSubscriptionSnapshotLoader {
 
     private static void validateSnapshotHead(SubscriptionSnapshotHead snapshotHead) {
         if (snapshotHead == null || snapshotHead.getSnapshotId() == null || snapshotHead.getSnapshotId().isBlank()) {
-            throw new SubscriptionSnapshotException("No valid subscription snapshot head available");
+            throw new SubscriptionCacheSnapshotException("No valid subscription snapshot head available");
         }
         if (snapshotHead.getDocumentCount() == null || snapshotHead.getDocumentCount() < 0) {
-            throw new SubscriptionSnapshotException("Invalid documentCount in subscription snapshot head");
+            throw new SubscriptionCacheSnapshotException("Invalid documentCount in subscription snapshot head");
         }
     }
 }

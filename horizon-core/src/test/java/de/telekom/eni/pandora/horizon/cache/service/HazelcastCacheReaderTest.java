@@ -6,6 +6,7 @@ package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -14,6 +15,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
@@ -35,7 +38,7 @@ class HazelcastCacheReaderTest {
     }
 
     @Test
-    void shouldDelegateIdLookupToSharedCache() throws JsonCacheException {
+    void shouldDelegateIdLookupToSharedCache() throws JsonCacheException, SubscriptionCacheReadException {
         var subscriptionCache = mock(JsonCacheService.class);
         var expected = Optional.of(new SubscriptionResource());
         when(subscriptionCache.getByKey("subscription-id")).thenReturn(expected);
@@ -47,7 +50,8 @@ class HazelcastCacheReaderTest {
     }
 
     @Test
-    void shouldTranslateEnvironmentAndEventTypeToSharedCacheQuery() throws JsonCacheException {
+        void shouldTranslateEnvironmentAndEventTypeToSharedCacheQuery()
+            throws JsonCacheException, SubscriptionCacheReadException {
         var subscriptionCache = mock(JsonCacheService.class);
         var expected = List.of(new SubscriptionResource());
         when(subscriptionCache.getQuery(org.mockito.ArgumentMatchers.any(Query.class))).thenReturn(expected);
@@ -62,12 +66,25 @@ class HazelcastCacheReaderTest {
     }
 
     @Test
-    void shouldReturnEmptyResultsForInvalidLookupArguments() throws JsonCacheException {
+    void shouldReturnEmptyResultsForInvalidLookupArguments() throws SubscriptionCacheReadException {
         var subscriptionCache = mock(JsonCacheService.class);
         var reader = new HazelcastCacheReader(subscriptionCache);
 
         assertEquals(Optional.empty(), reader.getById(null));
         assertEquals(List.of(), reader.findByEnvironmentAndEventType(null, "event-type"));
         assertEquals(List.of(), reader.findByEnvironmentAndEventType("production", null));
+    }
+
+    @Test
+    void shouldTranslateJsonCacheFailure() throws JsonCacheException {
+        var subscriptionCache = mock(JsonCacheService.class);
+        var cause = new JsonCacheException("invalid json", new RuntimeException());
+        when(subscriptionCache.getQuery(org.mockito.ArgumentMatchers.any(Query.class))).thenThrow(cause);
+        var reader = new HazelcastCacheReader(subscriptionCache);
+
+        var exception = assertThrows(SubscriptionCacheReadException.class,
+                () -> reader.findByEnvironmentAndEventType("production", "event-type"));
+
+        assertInstanceOf(JsonCacheException.class, exception.getCause());
     }
 }

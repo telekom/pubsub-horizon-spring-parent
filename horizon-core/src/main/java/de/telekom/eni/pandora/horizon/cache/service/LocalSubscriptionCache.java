@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
-import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 
@@ -42,7 +42,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      *
      * @param snapshotHead metadata identifying the snapshot to load
     * @throws IllegalArgumentException if the head has no snapshot ID
-    * @throws SubscriptionSnapshotException if the snapshot cannot be validated
+    * @throws SubscriptionCacheSnapshotException if the snapshot cannot be validated
      */
     public synchronized void prepare(SubscriptionSnapshotHead snapshotHead) {
         if (snapshotHead == null || snapshotHead.getSnapshotId() == null
@@ -76,7 +76,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * @param snapshotId expected prepared snapshot ID
      * @throws IllegalArgumentException if the snapshot ID is blank
      * @throws IllegalStateException if the prepared snapshot does not match the requested ID, or no snapshot was prepared
-    * @throws SubscriptionSnapshotException if the prepared snapshot is empty
+    * @throws SubscriptionCacheSnapshotException if the prepared snapshot is empty
      */
     public synchronized void activate(String snapshotId) {
         if (snapshotId == null || snapshotId.isBlank()) {
@@ -95,7 +95,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             throw new IllegalStateException("Prepared subscription snapshot does not match snapshotId to activate");
         }
         if (prepared.isEmpty()) {
-            throw new SubscriptionSnapshotException("Cannot activate empty subscription snapshot");
+            throw new SubscriptionCacheSnapshotException("Cannot activate empty subscription snapshot");
         }
         if (Objects.equals(prepared.metadata(), activeSnapshot.get().metadata())) {
             return;

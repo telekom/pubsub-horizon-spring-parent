@@ -5,7 +5,7 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
-import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 
@@ -48,7 +48,7 @@ record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
         var resources = new ArrayList<SubscriptionResource>(entries.size());
         for (var entry : entries) {
             if (entry == null || entry.getResource() == null) {
-                throw new SubscriptionSnapshotException("Invalid subscription snapshot entry without resource");
+                throw new SubscriptionCacheSnapshotException("Invalid subscription snapshot entry without resource");
             }
             resources.add(entry.getResource());
         }
@@ -113,7 +113,7 @@ record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
             var subscription = resource.getSpec().getSubscription();
             var previous = subscriptionsById.putIfAbsent(subscription.getSubscriptionId(), resource);
             if (previous != null) {
-                throw new SubscriptionSnapshotException("Duplicate subscription id: " + subscription.getSubscriptionId());
+                throw new SubscriptionCacheSnapshotException("Duplicate subscription id: " + subscription.getSubscriptionId());
             }
 
             var lookupKey = new EnvironmentEventTypeKey(resource.getSpec().getEnvironment(), subscription.getType());
@@ -131,11 +131,11 @@ record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
 
     private static void validate(SubscriptionResource resource) {
         if (resource == null || resource.getSpec() == null || resource.getSpec().getSubscription() == null) {
-            throw new SubscriptionSnapshotException("Invalid subscription document without subscription data");
+            throw new SubscriptionCacheSnapshotException("Invalid subscription document without subscription data");
         }
         var subscription = resource.getSpec().getSubscription();
         if (subscription.getSubscriptionId() == null || resource.getSpec().getEnvironment() == null || subscription.getType() == null) {
-            throw new SubscriptionSnapshotException("Invalid subscription document without id, environment or event type");
+            throw new SubscriptionCacheSnapshotException("Invalid subscription document without id, environment or event type");
         }
     }
 

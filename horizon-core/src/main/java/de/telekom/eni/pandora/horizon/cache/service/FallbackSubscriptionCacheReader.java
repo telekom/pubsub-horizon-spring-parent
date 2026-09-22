@@ -4,7 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
-import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,13 +38,13 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      *
      * @param subscriptionId subscription ID
      * @return the subscription if present
-     * @throws JsonCacheException if both readers fail
+     * @throws SubscriptionCacheReadException if both readers fail
      */
-    public Optional<SubscriptionResource> getById(String subscriptionId) throws JsonCacheException {
+    public Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException {
         if (primary.isReady()) {
             try {
                 return primary.getById(subscriptionId);
-            } catch (RuntimeException | JsonCacheException exception) {
+            } catch (RuntimeException | SubscriptionCacheReadException exception) {
                 log.warn("Primary subscription cache getById failed, using fallback", exception);
             }
         }
@@ -58,14 +58,14 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      * @param environment subscription environment
      * @param eventType subscription event type
      * @return matching subscriptions
-     * @throws JsonCacheException if both readers fail
+     * @throws SubscriptionCacheReadException if both readers fail
      */
     public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
-            throws JsonCacheException {
+            throws SubscriptionCacheReadException {
         if (primary.isReady()) {
             try {
                 return primary.findByEnvironmentAndEventType(environment, eventType);
-            } catch (RuntimeException | JsonCacheException exception) {
+            } catch (RuntimeException | SubscriptionCacheReadException exception) {
                 log.warn("Primary subscription cache query failed, using fallback", exception);
             }
         }
