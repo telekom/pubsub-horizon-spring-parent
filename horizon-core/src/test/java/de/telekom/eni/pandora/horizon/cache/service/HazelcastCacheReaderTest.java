@@ -103,6 +103,16 @@ class HazelcastCacheReaderTest {
     }
 
     @Test
+    void shouldRejectNullIdLookupResult() throws JsonCacheException {
+        var subscriptionCache = mock(JsonCacheService.class);
+        when(subscriptionCache.getByKey("subscription-id")).thenReturn(null);
+        var reader = new HazelcastCacheReader(subscriptionCache);
+
+        assertThrows(SubscriptionCacheReadException.class,
+                () -> reader.getById("subscription-id"));
+    }
+
+    @Test
     void shouldRejectNullQueryResult() throws JsonCacheException {
         var subscriptionCache = mock(JsonCacheService.class);
         when(subscriptionCache.getQuery(org.mockito.ArgumentMatchers.any(Query.class))).thenReturn(null);

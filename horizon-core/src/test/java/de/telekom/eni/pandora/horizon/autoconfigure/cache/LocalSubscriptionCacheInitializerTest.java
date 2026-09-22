@@ -121,6 +121,21 @@ class LocalSubscriptionCacheInitializerTest {
         verify(cache, never()).activate(anyString());
     }
 
+    @Test
+    void shouldRetryPollingAfterFailure() {
+        var snapshotHead = snapshotHead("snapshot-42");
+        when(cache.readSnapshotHead())
+                .thenThrow(new DataAccessResourceFailureException("Mongo unavailable"))
+                .thenReturn(snapshotHead);
+        when(cache.hasPendingSnapshot()).thenReturn(true);
+
+        initializer.pollHead();
+        initializer.pollHead();
+
+        verify(cache).prepare(snapshotHead);
+        verify(cache).activate("snapshot-42");
+    }
+
     private SubscriptionSnapshotHead snapshotHead(String snapshotId) {
         var snapshotHead = new SubscriptionSnapshotHead();
         snapshotHead.setSnapshotId(snapshotId);

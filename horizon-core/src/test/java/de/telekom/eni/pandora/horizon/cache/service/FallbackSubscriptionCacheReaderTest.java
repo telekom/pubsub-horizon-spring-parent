@@ -82,6 +82,30 @@ class FallbackSubscriptionCacheReaderTest {
     }
 
     @Test
+    void shouldTranslateFallbackRuntimeFailureForIdLookup() throws SubscriptionCacheReadException {
+        var cause = new IllegalStateException("fallback unavailable");
+        when(primary.isReady()).thenReturn(false);
+        when(fallback.getById("subscription-id")).thenThrow(cause);
+
+        var exception = assertThrows(SubscriptionCacheReadException.class,
+                () -> reader.getById("subscription-id"));
+
+        assertSame(cause, exception.getCause());
+    }
+
+    @Test
+    void shouldPropagateTypedFallbackFailureUnchanged() throws SubscriptionCacheReadException {
+        var failure = new SubscriptionCacheReadException("fallback unavailable");
+        when(primary.isReady()).thenReturn(false);
+        when(fallback.getById("subscription-id")).thenThrow(failure);
+
+        var exception = assertThrows(SubscriptionCacheReadException.class,
+                () -> reader.getById("subscription-id"));
+
+        assertSame(failure, exception);
+    }
+
+    @Test
     void shouldReportNotReadyWhenBothReadinessChecksFail() {
         when(primary.isReady()).thenThrow(new IllegalStateException("primary unavailable"));
         when(fallback.isReady()).thenThrow(new IllegalStateException("fallback unavailable"));
