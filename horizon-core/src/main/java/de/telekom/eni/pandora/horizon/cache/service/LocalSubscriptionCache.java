@@ -7,6 +7,7 @@ package de.telekom.eni.pandora.horizon.cache.service;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.Objects;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link #prepare(SubscriptionSnapshotHead)}. A prepared snapshot becomes visible
  * to readers only after a successful call to {@link #activate(String)}.</p>
  */
+@Slf4j
 public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
     private final MongoSubscriptionSnapshotLoader snapshotLoader;
@@ -56,7 +58,10 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             return;
         }
 
-        preparedSnapshot.set(snapshotLoader.load(snapshotHead));
+        var snapshot = snapshotLoader.load(snapshotHead);
+        preparedSnapshot.set(snapshot);
+        log.debug("Prepared local subscription snapshot {} with {} subscriptions",
+            snapshot.snapshotId(), snapshot.subscriptionsById().size());
     }
 
     /**
@@ -101,6 +106,8 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             return;
         }
         activeSnapshot.set(prepared);
+        log.debug("Activated local subscription snapshot {} with {} subscriptions",
+            prepared.snapshotId(), prepared.subscriptionsById().size());
     }
 
     /**
@@ -126,7 +133,11 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         if (subscriptionId == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(activeSnapshot.get().subscriptionsById().get(subscriptionId));
+        var snapshot = activeSnapshot.get();
+        var result = snapshot.getById(subscriptionId);
+        log.debug("Read local subscription snapshot {} by subscription ID: found={}",
+            snapshot.snapshotId(), result.isPresent());
+        return result;
     }
 
     @Override
@@ -134,7 +145,11 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         if (environment == null || eventType == null) {
             return List.of();
         }
-        return activeSnapshot.get().findByEnvironmentAndEventType(environment, eventType);
+        var snapshot = activeSnapshot.get();
+        var result = snapshot.findByEnvironmentAndEventType(environment, eventType);
+        log.debug("Read local subscription snapshot {} by environment and event type: matches={}",
+            snapshot.snapshotId(), result.size());
+        return result;
     }
 
     /**
