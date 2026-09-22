@@ -7,6 +7,7 @@ package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -14,6 +15,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.dao.DataAccessException;
 
 import java.time.Duration;
 import java.util.concurrent.Executors;
@@ -67,7 +69,7 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
             var snapshotHead = localSubscriptionCache.readSnapshotHead();
             localSubscriptionCache.prepare(snapshotHead);
             localSubscriptionCache.activate(snapshotHead.getSnapshotId());
-        } catch (RuntimeException exception) {
+        } catch (SubscriptionCacheSnapshotException | DataAccessException exception) {
             if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
                     == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
                 throw exception;

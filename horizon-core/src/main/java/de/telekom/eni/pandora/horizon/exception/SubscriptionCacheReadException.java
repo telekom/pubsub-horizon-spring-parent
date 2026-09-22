@@ -6,6 +6,10 @@ package de.telekom.eni.pandora.horizon.exception;
 
 public class SubscriptionCacheReadException extends Exception {
 
+    public SubscriptionCacheReadException(String message) {
+        super(message);
+    }
+
     public SubscriptionCacheReadException(String message, Throwable cause) {
         super(message, cause);
     }

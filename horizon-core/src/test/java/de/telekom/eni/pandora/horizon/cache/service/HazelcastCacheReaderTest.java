@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -86,5 +87,37 @@ class HazelcastCacheReaderTest {
                 () -> reader.findByEnvironmentAndEventType("production", "event-type"));
 
         assertInstanceOf(JsonCacheException.class, exception.getCause());
+    }
+
+    @Test
+    void shouldTranslateRuntimeCacheFailure() throws JsonCacheException {
+        var subscriptionCache = mock(JsonCacheService.class);
+        var cause = new IllegalStateException("cache unavailable");
+        when(subscriptionCache.getByKey("subscription-id")).thenThrow(cause);
+        var reader = new HazelcastCacheReader(subscriptionCache);
+
+        var exception = assertThrows(SubscriptionCacheReadException.class,
+                () -> reader.getById("subscription-id"));
+
+        assertSame(cause, exception.getCause());
+    }
+
+    @Test
+    void shouldRejectNullQueryResult() throws JsonCacheException {
+        var subscriptionCache = mock(JsonCacheService.class);
+        when(subscriptionCache.getQuery(org.mockito.ArgumentMatchers.any(Query.class))).thenReturn(null);
+        var reader = new HazelcastCacheReader(subscriptionCache);
+
+        assertThrows(SubscriptionCacheReadException.class,
+                () -> reader.findByEnvironmentAndEventType("production", "event-type"));
+    }
+
+    @Test
+    void shouldReportNotReadyWhenReadinessCheckFails() {
+        var subscriptionCache = mock(JsonCacheService.class);
+        when(subscriptionCache.isReady()).thenThrow(new IllegalStateException("cache unavailable"));
+        var reader = new HazelcastCacheReader(subscriptionCache);
+
+        assertFalse(reader.isReady());
     }
 }

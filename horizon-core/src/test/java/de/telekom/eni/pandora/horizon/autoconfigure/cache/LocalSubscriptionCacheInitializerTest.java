@@ -7,10 +7,12 @@ package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.health.Status;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -50,7 +52,7 @@ class LocalSubscriptionCacheInitializerTest {
 
     @Test
     void shouldReportUpWhenFallbackHandlesCacheInitializationFailure() {
-        doThrow(new IllegalStateException("Mongo unavailable")).when(cache).readSnapshotHead();
+        doThrow(new SubscriptionCacheSnapshotException("Snapshot invalid")).when(cache).readSnapshotHead();
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
         when(subscriptionCacheReader.isReady()).thenReturn(true);
 
@@ -63,7 +65,7 @@ class LocalSubscriptionCacheInitializerTest {
 
     @Test
     void shouldReportDownWhenNeitherLocalCacheNorFallbackIsReady() {
-        doThrow(new IllegalStateException("Mongo unavailable")).when(cache).readSnapshotHead();
+        doThrow(new DataAccessResourceFailureException("Mongo unavailable")).when(cache).readSnapshotHead();
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
         when(subscriptionCacheReader.isReady()).thenReturn(false);
 
@@ -76,10 +78,18 @@ class LocalSubscriptionCacheInitializerTest {
     void shouldFailStartupWhenCacheInitializationFailsWithoutFallback() {
         cacheProperties.getLocalSubscriptionCache().setFallbackMode(
                 CacheProperties.LocalSubscriptionCacheFallback.NONE);
-        doThrow(new IllegalStateException("Mongo unavailable")).when(cache).readSnapshotHead();
+        doThrow(new DataAccessResourceFailureException("Mongo unavailable")).when(cache).readSnapshotHead();
+
+        assertThrows(DataAccessResourceFailureException.class, () -> initializer.run(null));
+        assertEquals(Status.DOWN, initializer.health().getStatus());
+        verify(cache, never()).activate(anyString());
+    }
+
+    @Test
+    void shouldFailStartupOnUnexpectedRuntimeExceptionDespiteFallback() {
+        doThrow(new IllegalStateException("Unexpected cache state")).when(cache).readSnapshotHead();
 
         assertThrows(IllegalStateException.class, () -> initializer.run(null));
-        assertEquals(Status.DOWN, initializer.health().getStatus());
         verify(cache, never()).activate(anyString());
     }
 

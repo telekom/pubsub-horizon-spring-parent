@@ -41,14 +41,20 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      * @throws SubscriptionCacheReadException if both readers fail
      */
     public Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException {
-        if (primary.isReady()) {
+        if (isPrimaryReady()) {
             try {
                 return primary.getById(subscriptionId);
             } catch (RuntimeException | SubscriptionCacheReadException exception) {
                 log.warn("Primary subscription cache getById failed, using fallback", exception);
             }
         }
-        return fallback.getById(subscriptionId);
+        try {
+            return fallback.getById(subscriptionId);
+        } catch (SubscriptionCacheReadException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new SubscriptionCacheReadException("Fallback subscription cache getById failed", exception);
+        }
     }
 
     @Override
@@ -62,14 +68,20 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      */
     public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
             throws SubscriptionCacheReadException {
-        if (primary.isReady()) {
+        if (isPrimaryReady()) {
             try {
                 return primary.findByEnvironmentAndEventType(environment, eventType);
             } catch (RuntimeException | SubscriptionCacheReadException exception) {
                 log.warn("Primary subscription cache query failed, using fallback", exception);
             }
         }
-        return fallback.findByEnvironmentAndEventType(environment, eventType);
+        try {
+            return fallback.findByEnvironmentAndEventType(environment, eventType);
+        } catch (SubscriptionCacheReadException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new SubscriptionCacheReadException("Fallback subscription cache query failed", exception);
+        }
     }
 
     @Override
@@ -79,6 +91,23 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      * @return {@code true} if the primary or fallback is ready
      */
     public boolean isReady() {
-        return primary.isReady() || fallback.isReady();
+        if (isPrimaryReady()) {
+            return true;
+        }
+        try {
+            return fallback.isReady();
+        } catch (RuntimeException exception) {
+            log.warn("Failed to determine fallback subscription cache readiness", exception);
+            return false;
+        }
+    }
+
+    private boolean isPrimaryReady() {
+        try {
+            return primary.isReady();
+        } catch (RuntimeException exception) {
+            log.warn("Failed to determine primary subscription cache readiness, using fallback", exception);
+            return false;
+        }
     }
 }

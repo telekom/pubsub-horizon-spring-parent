@@ -8,6 +8,7 @@ import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +19,7 @@ import java.util.Optional;
  * <p>It translates the domain lookup by environment and event type into the
  * underlying cache query.</p>
  */
+@Slf4j
 public class HazelcastCacheReader implements SubscriptionCacheReader {
 
     private final JsonCacheService<SubscriptionResource> subscriptionCache;
@@ -44,8 +46,13 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
             return Optional.empty();
         }
         try {
-            return subscriptionCache.getByKey(subscriptionId);
-        } catch (JsonCacheException exception) {
+            var result = subscriptionCache.getByKey(subscriptionId);
+            if (result == null) {
+                throw new SubscriptionCacheReadException(
+                        "Subscription cache returned no result container for id: " + subscriptionId);
+            }
+            return result;
+        } catch (JsonCacheException | RuntimeException exception) {
             throw new SubscriptionCacheReadException(
                     "Failed to read subscription with id: " + subscriptionId, exception);
         }
@@ -70,8 +77,14 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
                 .addMatcher("spec.subscription.type", eventType)
                 .build();
         try {
-            return subscriptionCache.getQuery(query);
-        } catch (JsonCacheException exception) {
+            var result = subscriptionCache.getQuery(query);
+            if (result == null) {
+                throw new SubscriptionCacheReadException(
+                        "Subscription cache returned no result for environment: " + environment
+                                + " and event type: " + eventType);
+            }
+            return result;
+        } catch (JsonCacheException | RuntimeException exception) {
             throw new SubscriptionCacheReadException(
                 "Failed to read subscriptions for environment: " + environment
                     + " and event type: " + eventType,
@@ -86,6 +99,11 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
      * @return {@code true} when the shared cache is available
      */
     public boolean isReady() {
-        return subscriptionCache.isReady();
+        try {
+            return subscriptionCache.isReady();
+        } catch (RuntimeException exception) {
+            log.warn("Failed to determine subscription cache readiness", exception);
+            return false;
+        }
     }
 }
