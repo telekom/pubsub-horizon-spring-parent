@@ -6,8 +6,10 @@ package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
+import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.actuate.health.Health;
@@ -17,50 +19,55 @@ import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-@Slf4j
 /**
  * Initializes and optionally refreshes the local subscription cache.
  *
- * <p>The initializer prepares and activates the first snapshot during startup.
- * If a fallback is configured, initialization failures are logged and the
- * application can continue using the fallback cache. Without a fallback, the
- * initialization exception is propagated and startup fails.</p>
+ * <p>The initializer prepares and activates the published snapshot during startup.
+ * If a fallback is configured, snapshot initialization failures are logged and the
+ * application can continue using the fallback reader. When polling is enabled, later
+ * polling attempts can initialize or refresh the local cache. Without a fallback, a
+ * snapshot initialization failure is propagated and startup fails.</p>
  */
+@Slf4j
 public class LocalSubscriptionCacheInitializer implements ApplicationRunner, HealthIndicator {
 
     private final LocalSubscriptionCache localSubscriptionCache;
+    private final ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider;
     private final CacheProperties cacheProperties;
-    private final AtomicBoolean initialized = new AtomicBoolean();
     private ScheduledExecutorService headPollingExecutor;
 
     /**
      * Creates an initializer for the local cache and its polling configuration.
      *
      * @param localSubscriptionCache cache to initialize and refresh
+     * @param subscriptionCacheReaderProvider provider for the effective reader including fallback
      * @param cacheProperties cache and fallback configuration
      */
     public LocalSubscriptionCacheInitializer(LocalSubscriptionCache localSubscriptionCache,
+                                             ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider,
                                              CacheProperties cacheProperties) {
         this.localSubscriptionCache = localSubscriptionCache;
+        this.subscriptionCacheReaderProvider = subscriptionCacheReaderProvider;
         this.cacheProperties = cacheProperties;
     }
 
-    @Override
     /**
-     * Loads and activates the initial local subscription snapshot.
+    * Loads and activates the published subscription snapshot, then starts optional
+    * snapshot-head polling. With a configured fallback, a snapshot initialization
+    * failure does not prevent polling from starting.
      *
      * @param args application startup arguments
-     * @throws RuntimeException if initialization fails and no fallback is configured
+    * @throws RuntimeException if snapshot initialization fails without a configured fallback,
+    *                          or if polling cannot be configured
      */
+    @Override
     public void run(ApplicationArguments args) {
         try {
-            localSubscriptionCache.prepare();
-            localSubscriptionCache.activate();
-            initialized.set(true);
+            var snapshotHead = localSubscriptionCache.readSnapshotHead();
+            localSubscriptionCache.prepare(snapshotHead);
+            localSubscriptionCache.activate(snapshotHead.getSnapshotId());
         } catch (RuntimeException exception) {
-            initialized.set(false);
             if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
                     == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
                 throw exception;
@@ -87,15 +94,16 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
     }
 
     /**
-     * Checks for a newer snapshot head and activates it when loading succeeds.
-     * A polling failure leaves the currently active snapshot unchanged.
+    * Reads the published snapshot head and activates it when its ID differs from the
+    * active snapshot. A polling failure leaves an existing active snapshot unchanged;
+    * if no snapshot is active yet, the next polling run retries initialization.
      */
     void pollHead() {
         try {
             var snapshotHead = localSubscriptionCache.readSnapshotHead();
-            if (localSubscriptionCache.prepareFromSubscriptionSnapshot(snapshotHead)) {
-                localSubscriptionCache.activate();
-                initialized.set(true);
+            localSubscriptionCache.prepare(snapshotHead);
+            if (localSubscriptionCache.hasPendingSnapshot()) {
+                localSubscriptionCache.activate(snapshotHead.getSnapshotId());
             }
         } catch (RuntimeException exception) {
             log.warn("Subscription cache head polling failed; keeping active snapshot", exception);
@@ -108,24 +116,36 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
         }
     }
 
-    @PreDestroy
     /** Stops the background snapshot-head polling executor. */
+    @PreDestroy
     void stopHeadPolling() {
         if (headPollingExecutor != null) {
             headPollingExecutor.shutdownNow();
         }
     }
 
-    @Override
     /**
-     * Reports whether the local cache was initialized successfully.
+    * Reports whether the local cache or its configured fallback reader can serve requests.
      *
-     * @return {@code UP} after successful initialization, otherwise {@code DOWN}
+     * @return {@code UP} when the local cache or fallback is ready, otherwise {@code DOWN}
      */
+    @Override
     public Health health() {
-        if (initialized.get()) {
-            return Health.up().build();
+        if (localSubscriptionCache.isReady()) {
+            return Health.up().withDetail("source", "local").build();
         }
-        return Health.down().withDetail("reason", "Local subscription cache is not initialized").build();
+        if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
+                != CacheProperties.LocalSubscriptionCacheFallback.NONE) {
+            var subscriptionCacheReader = subscriptionCacheReaderProvider.getIfAvailable();
+            if (subscriptionCacheReader != null && subscriptionCacheReader.isReady()) {
+                return Health.up()
+                        .withDetail("source", "fallback")
+                        .withDetail("localCache", "not initialized")
+                        .build();
+            }
+        }
+        return Health.down()
+                .withDetail("reason", "No subscription cache reader is ready")
+                .build();
     }
 }

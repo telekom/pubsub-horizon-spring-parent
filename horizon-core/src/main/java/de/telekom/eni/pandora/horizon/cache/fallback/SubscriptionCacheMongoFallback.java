@@ -22,8 +22,21 @@ import java.util.Optional;
 @AllArgsConstructor
 public class SubscriptionCacheMongoFallback implements JsonCacheFallback<SubscriptionResource> {
 
+    private static final String READINESS_CHECK_ID = "__horizon_cache_readiness__";
+
     private final SubscriptionsMongoRepo subscriptionsMongoRepo;
     private final MongoProperties mongoProperties;
+
+    @Override
+    public boolean isReady() {
+        try {
+            subscriptionsMongoRepo.existsById(READINESS_CHECK_ID);
+            return true;
+        } catch (RuntimeException exception) {
+            log.warn("MongoDB subscription cache fallback is not available: {}", exception.getMessage());
+            return false;
+        }
+    }
 
     @Override
     public Optional<SubscriptionResource> getByKey(String key) {

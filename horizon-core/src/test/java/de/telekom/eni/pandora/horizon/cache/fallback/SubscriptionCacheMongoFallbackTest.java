@@ -14,6 +14,7 @@ import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +39,21 @@ class SubscriptionCacheMongoFallbackTest {
     void setUp() {
         subscriptionsMongoRepo = mock(SubscriptionsMongoRepo.class);
         subscriptionCacheMongoFallback = new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties);
+    }
+
+    @Test
+    void shouldBeReadyWhenMongoDbIsReachable() {
+        assertTrue(subscriptionCacheMongoFallback.isReady());
+
+        verify(subscriptionsMongoRepo).existsById("__horizon_cache_readiness__");
+    }
+
+    @Test
+    void shouldNotBeReadyWhenMongoDbIsNotReachable() {
+        when(subscriptionsMongoRepo.existsById(anyString()))
+                .thenThrow(new DataAccessResourceFailureException("MongoDB unavailable"));
+
+        assertFalse(subscriptionCacheMongoFallback.isReady());
     }
 
     @Test

@@ -14,20 +14,32 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SuppressWarnings("unchecked")
-class SharedSubscriptionCacheReaderTest {
+class HazelcastCacheReaderTest {
+
+    @Test
+    void shouldDelegateReadinessToSharedCache() {
+        var subscriptionCache = mock(JsonCacheService.class);
+        when(subscriptionCache.isReady()).thenReturn(true);
+        var reader = new HazelcastCacheReader(subscriptionCache);
+
+        assertTrue(reader.isReady());
+
+        verify(subscriptionCache).isReady();
+    }
 
     @Test
     void shouldDelegateIdLookupToSharedCache() throws JsonCacheException {
         var subscriptionCache = mock(JsonCacheService.class);
         var expected = Optional.of(new SubscriptionResource());
         when(subscriptionCache.getByKey("subscription-id")).thenReturn(expected);
-        var reader = new SharedSubscriptionCacheReader(subscriptionCache);
+        var reader = new HazelcastCacheReader(subscriptionCache);
 
         assertSame(expected, reader.getById("subscription-id"));
 
@@ -39,7 +51,7 @@ class SharedSubscriptionCacheReaderTest {
         var subscriptionCache = mock(JsonCacheService.class);
         var expected = List.of(new SubscriptionResource());
         when(subscriptionCache.getQuery(org.mockito.ArgumentMatchers.any(Query.class))).thenReturn(expected);
-        var reader = new SharedSubscriptionCacheReader(subscriptionCache);
+        var reader = new HazelcastCacheReader(subscriptionCache);
 
         assertSame(expected, reader.findByEnvironmentAndEventType("production", "event-type"));
 
@@ -52,7 +64,7 @@ class SharedSubscriptionCacheReaderTest {
     @Test
     void shouldReturnEmptyResultsForInvalidLookupArguments() throws JsonCacheException {
         var subscriptionCache = mock(JsonCacheService.class);
-        var reader = new SharedSubscriptionCacheReader(subscriptionCache);
+        var reader = new HazelcastCacheReader(subscriptionCache);
 
         assertEquals(Optional.empty(), reader.getById(null));
         assertEquals(List.of(), reader.findByEnvironmentAndEventType(null, "event-type"));

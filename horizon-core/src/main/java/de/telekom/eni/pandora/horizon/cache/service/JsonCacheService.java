@@ -129,7 +129,8 @@ public class JsonCacheService<T> {
     }
 
     public boolean isReady() {
-        return getCacheMap() != null;
+        return getCacheMap() != null
+                || jsonCacheFallback != null && jsonCacheFallback.isReady();
     }
 
     private List<T> mapAll(Collection<HazelcastJsonValue> values) throws JsonCacheException {

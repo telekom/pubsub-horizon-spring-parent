@@ -4,38 +4,27 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Pod-local subscription cache with an explicit prepare/activate lifecycle.
+ * Pod-local subscription cache backed by persisted subscription snapshots.
  *
- * <p>A prepared snapshot becomes visible only after a successful call to
- * {@link #activate()}.</p>
+ * <p>Snapshots are loaded into an immutable set of indexes during
+ * {@link #prepare(SubscriptionSnapshotHead)}. A prepared snapshot becomes visible
+ * to readers only after a successful call to {@link #activate(String)}.</p>
  */
 public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
-    private final SubscriptionsMongoRepo liveSubscriptionsRepository;
     private final MongoSubscriptionSnapshotLoader snapshotLoader;
     private final AtomicReference<IndexedSubscriptionSnapshot> activeSnapshot = new AtomicReference<>(IndexedSubscriptionSnapshot.empty());
     private final AtomicReference<IndexedSubscriptionSnapshot> preparedSnapshot = new AtomicReference<>();
-    private final AtomicBoolean snapshotUpToDate = new AtomicBoolean();
-
-    /**
-     * Creates a cache backed by the current live subscription repository.
-     *
-     * @param liveSubscriptionsRepository repository containing current subscriptions
-     */
-    public LocalSubscriptionCache(SubscriptionsMongoRepo liveSubscriptionsRepository) {
-        this.liveSubscriptionsRepository = liveSubscriptionsRepository;
-        this.snapshotLoader = null;
-    }
 
     /**
      * Creates a cache backed by persisted subscription snapshots.
@@ -43,85 +32,93 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * @param snapshotLoader loader for snapshot metadata and entries
      */
     public LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader) {
-        this.liveSubscriptionsRepository = null;
-        this.snapshotLoader = snapshotLoader;
+        this.snapshotLoader = Objects.requireNonNull(snapshotLoader, "snapshotLoader must not be null");
     }
 
     /**
-     * Prepares a cache snapshot from live subscriptions or a persisted subscription snapshot.
-     *
-     * @return {@code true} if a new snapshot was prepared
-     */
-    public boolean prepare() {
-        if (snapshotLoader == null) {
-            return prepareFromLiveSubscriptions();
-        }
-        return prepareFromSubscriptionSnapshot(readSnapshotHead());
-    }
-
-    /**
-     * Prepares a cache snapshot from the live subscription repository.
-     *
-     * @return {@code true} after preparing a snapshot
-     */
-    public boolean prepareFromLiveSubscriptions() {
-        if (snapshotLoader != null) {
-            throw new IllegalStateException("Mongo repository preparation is unavailable for snapshot-backed cache");
-        }
-        var snapshot = IndexedSubscriptionSnapshot.fromSubscriptionMongoDocuments(liveSubscriptionsRepository.findAll());
-        preparedSnapshot.set(snapshot);
-        return true;
-    }
-
-    /**
-     * Prepares a cache snapshot from a persisted subscription snapshot.
+    * Loads and prepares the persisted snapshot identified by the supplied head.
+    * Preparation is skipped only when all head metadata matches the already
+    * prepared snapshot. The active snapshot remains unchanged.
      *
      * @param snapshotHead metadata identifying the snapshot to load
-     * @return {@code true} if a new snapshot was prepared, otherwise {@code false}
+    * @throws IllegalArgumentException if the head has no snapshot ID
+    * @throws SubscriptionSnapshotException if the snapshot cannot be validated
      */
-    public boolean prepareFromSubscriptionSnapshot(SubscriptionSnapshotHead snapshotHead) {
-        if (snapshotLoader == null) {
-            throw new IllegalStateException("Snapshot-head-based preparation is unavailable for repository-backed cache");
+    public synchronized void prepare(SubscriptionSnapshotHead snapshotHead) {
+        if (snapshotHead == null || snapshotHead.getSnapshotId() == null
+                || snapshotHead.getSnapshotId().isBlank()) {
+            throw new IllegalArgumentException("SnapshotHead must contain a snapshotId");
         }
-        preparedSnapshot.set(null);
-        if (snapshotHead.getSnapshotId().equals(activeSnapshot.get().snapshotId())) {
-            return false;
-        }
-        snapshotUpToDate.set(false);
 
-        var snapshot = snapshotLoader.load(snapshotHead);
-        preparedSnapshot.set(snapshot);
-        return true;
+        var requestedMetadata = IndexedSubscriptionSnapshot.SnapshotMetadata.from(snapshotHead);
+        var prepared = preparedSnapshot.get();
+        if (prepared != null && Objects.equals(requestedMetadata, prepared.metadata())) {
+            return;
+        }
+
+        preparedSnapshot.set(snapshotLoader.load(snapshotHead));
     }
 
     /**
      * Reads the currently published snapshot metadata.
      *
      * @return the current snapshot head
-     * @throws IllegalStateException if this cache uses the live source
      */
     public SubscriptionSnapshotHead readSnapshotHead() {
-        if (snapshotLoader == null) {
-            throw new IllegalStateException("Snapshot head is unavailable for repository-backed cache");
-        }
         return snapshotLoader.readSnapshotHead();
     }
 
     /**
-     * Atomically publishes the prepared snapshot to readers.
+    * Atomically publishes the prepared snapshot when it matches the expected snapshot ID.
+    * Reusing an ID with changed head metadata is supported because activation compares
+    * the complete immutable metadata before treating the operation as idempotent.
      *
-     * @throws IllegalStateException if no snapshot was prepared or the snapshot is empty
+     * @param snapshotId expected prepared snapshot ID
+     * @throws IllegalArgumentException if the snapshot ID is blank
+     * @throws IllegalStateException if the prepared snapshot does not match the requested ID, or no snapshot was prepared
+    * @throws SubscriptionSnapshotException if the prepared snapshot is empty
      */
-    public void activate() {
-        var snapshot = preparedSnapshot.getAndSet(null);
-        if (snapshot == null) {
+    public synchronized void activate(String snapshotId) {
+        if (snapshotId == null || snapshotId.isBlank()) {
+            throw new IllegalArgumentException("SnapshotId must not be blank");
+        }
+
+        var prepared = preparedSnapshot.get();
+        if (prepared == null) {
+            if (isReady() && Objects.equals(activeSnapshot.get().snapshotId(), snapshotId)) {
+                return;
+            }
             throw new IllegalStateException("No prepared subscription snapshot available");
         }
-        if (snapshot.isEmpty()) {
-            throw new IllegalStateException("Cannot activate empty subscription snapshot");
+
+        if (!Objects.equals(prepared.snapshotId(), snapshotId)) {
+            throw new IllegalStateException("Prepared subscription snapshot does not match snapshotId to activate");
         }
-        activeSnapshot.set(snapshot);
-        snapshotUpToDate.set(true);
+        if (prepared.isEmpty()) {
+            throw new SubscriptionSnapshotException("Cannot activate empty subscription snapshot");
+        }
+        if (Objects.equals(prepared.metadata(), activeSnapshot.get().metadata())) {
+            return;
+        }
+        activeSnapshot.set(prepared);
+    }
+
+    /**
+     * Discards the currently prepared snapshot without changing the active snapshot.
+     */
+    public synchronized void discardPreparedSnapshot() {
+        preparedSnapshot.set(null);
+    }
+
+    /**
+     * Indicates whether a prepared snapshot differs from the active snapshot.
+     *
+     * @return {@code true} if activation is still pending
+     */
+    public boolean hasPendingSnapshot() {
+        var prepared = preparedSnapshot.get();
+        return prepared != null
+            && !Objects.equals(prepared.metadata(), activeSnapshot.get().metadata());
     }
 
     @Override
@@ -140,23 +137,14 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         return activeSnapshot.get().findByEnvironmentAndEventType(environment, eventType);
     }
 
-    @Override
     /**
-     * Indicates whether a the cache has an active snapshot and is ready for use.
+        * Indicates whether the cache has an active snapshot and is ready for use.
      *
      * @return {@code true} if an active snapshot with an ID exists
      */
+        @Override
     public boolean isReady() {
         return activeSnapshot.get().snapshotId() != null;
-    }
-
-    /**
-     * Indicates whether the cache is up to date with the latest activated snapshot.
-     *
-     * @return {@code true} after successful activation of the latest prepared snapshot
-     */
-    public boolean isCacheUpToDate() {
-        return snapshotUpToDate.get();
     }
 
 }

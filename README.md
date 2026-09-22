@@ -64,16 +64,13 @@ When MongoDB is enabled, the parent provides a `LocalSubscriptionCache` in addit
 immutable snapshot and makes it visible to readers only after an explicit atomic activation.
 
 The two caches intentionally have separate APIs. `JsonCacheService` also supports Hazelcast writes and listeners, while the
-snapshot cache has an explicit `prepare()`/`activate()` lifecycle. Applications keep using `JsonCacheService` by default and
-may explicitly inject and select `LocalSubscriptionCache` with a pod-specific feature flag. This allows individual pods to
-migrate independently without changing the behavior of existing consumers.
+snapshot cache has an explicit prepare/activate lifecycle. When enabled, the auto-configured initializer reads the published
+snapshot head, prepares the corresponding snapshot, and activates it atomically. Applications access subscriptions through
+the auto-configured `SubscriptionCacheReader`.
 
 ```java
-localSubscriptionCache.prepare();
-localSubscriptionCache.activate();
-
-localSubscriptionCache.getById(subscriptionId);
-localSubscriptionCache.findByEnvironmentAndEventType(environment, eventType);
+subscriptionCacheReader.getById(subscriptionId);
+subscriptionCacheReader.findByEnvironmentAndEventType(environment, eventType);
 ```
 
 See [Local Subscription Cache](docs/local-subscription-cache.md) for lifecycle, consistency guarantees, failure

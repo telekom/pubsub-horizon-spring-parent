@@ -7,7 +7,6 @@ package de.telekom.eni.pandora.horizon.cache.service;
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCacheAutoConfiguration;
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCacheInitializer;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -21,7 +20,6 @@ class LocalSubscriptionCacheAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(LocalSubscriptionCacheAutoConfiguration.class))
-            .withBean("getSubscriptionsRepo", SubscriptionsMongoRepo.class, () -> mock(SubscriptionsMongoRepo.class))
             .withBean("mongoConfigTemplate", MongoTemplate.class, () -> mock(MongoTemplate.class));
 
     @Test

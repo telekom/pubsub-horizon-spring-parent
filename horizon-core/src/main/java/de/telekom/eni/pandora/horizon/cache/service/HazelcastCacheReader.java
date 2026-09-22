@@ -17,7 +17,7 @@ import java.util.Optional;
  * <p>It translates the domain lookup by environment and event type into the
  * underlying cache query.</p>
  */
-public class SharedSubscriptionCacheReader implements SubscriptionCacheReader {
+public class HazelcastCacheReader implements SubscriptionCacheReader {
 
     private final JsonCacheService<SubscriptionResource> subscriptionCache;
 
@@ -26,7 +26,7 @@ public class SharedSubscriptionCacheReader implements SubscriptionCacheReader {
      *
      * @param subscriptionCache shared JSON cache service
      */
-    public SharedSubscriptionCacheReader(JsonCacheService<SubscriptionResource> subscriptionCache) {
+    public HazelcastCacheReader(JsonCacheService<SubscriptionResource> subscriptionCache) {
         this.subscriptionCache = subscriptionCache;
     }
 

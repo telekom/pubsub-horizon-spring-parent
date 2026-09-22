@@ -7,7 +7,7 @@ package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoader;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
+import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -26,21 +26,13 @@ public class LocalSubscriptionCacheAutoConfiguration {
         name = "enabled",
         havingValue = "true")
     public LocalSubscriptionCache localSubscriptionCache(
-            @Qualifier("getSubscriptionsRepo") ObjectProvider<SubscriptionsMongoRepo> subscriptionsMongoRepoProvider,
             @Qualifier("mongoConfigTemplate") ObjectProvider<MongoTemplate> mongoTemplateProvider,
             ObjectProvider<CacheProperties> cachePropertiesProvider) {
-        var subscriptionsMongoRepo = subscriptionsMongoRepoProvider.getIfAvailable();
         var mongoConfigTemplate = mongoTemplateProvider.getIfAvailable();
         var cacheProperties = cachePropertiesProvider.getIfAvailable(CacheProperties::new);
         var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
-        if (localCacheProperties.getSource() == CacheProperties.LocalSubscriptionCacheSource.LIVE) {
-            if (subscriptionsMongoRepo == null) {
-                throw new IllegalStateException("SubscriptionsMongoRepo is required for local cache from Live subscriptions source");
-            }
-            return new LocalSubscriptionCache(subscriptionsMongoRepo);
-        }
         if (mongoConfigTemplate == null) {
-            throw new IllegalStateException("MongoTemplate is required for local cache from snapshot subscriptions source");
+            throw new IllegalStateException("MongoTemplate is required for local subscription cache");
         }
         return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
             mongoConfigTemplate,
@@ -56,9 +48,11 @@ public class LocalSubscriptionCacheAutoConfiguration {
         havingValue = "true")
     public LocalSubscriptionCacheInitializer localSubscriptionCacheInitializer(
         LocalSubscriptionCache localSubscriptionCache,
+        ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider,
         ObjectProvider<CacheProperties> cachePropertiesProvider) {
         return new LocalSubscriptionCacheInitializer(
             localSubscriptionCache,
+            subscriptionCacheReaderProvider,
             cachePropertiesProvider.getIfAvailable(CacheProperties::new));
     }
 }

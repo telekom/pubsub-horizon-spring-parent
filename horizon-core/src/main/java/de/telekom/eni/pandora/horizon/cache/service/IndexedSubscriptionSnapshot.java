@@ -5,9 +5,11 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
-import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
+import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -21,7 +23,7 @@ import java.util.Optional;
  * environment plus event type. Duplicate IDs and invalid subscription data
  * are rejected while the snapshot is built.</p>
  */
-record IndexedSubscriptionSnapshot(String snapshotId,
+record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
                                    Map<String, SubscriptionResource> subscriptionsById,
                                    Map<EnvironmentEventTypeKey, List<SubscriptionResource>> subscriptionsByEnvironmentAndEventType) {
 
@@ -35,31 +37,26 @@ record IndexedSubscriptionSnapshot(String snapshotId,
     }
 
     /**
-     * Builds an indexed snapshot from the current live repository documents.
-     *
-     * @param documents current subscription documents
-     * @return an indexed snapshot
-     */
-    static IndexedSubscriptionSnapshot fromSubscriptionMongoDocuments(List<SubscriptionMongoDocument> documents) {
-        return fromSubscriptionResources("repository", new ArrayList<>(documents));
-    }
-
-    /**
      * Builds an indexed snapshot from persisted snapshot entries.
      *
-     * @param snapshotId identifier of the persisted snapshot
+     * @param snapshotHead metadata of the persisted snapshot
      * @param entries persisted subscription entries
      * @return an indexed snapshot
      */
-    static IndexedSubscriptionSnapshot fromSnapshotEntries(String snapshotId, List<SubscriptionSnapshotEntry> entries) {
+    static IndexedSubscriptionSnapshot fromSnapshotEntries(SubscriptionSnapshotHead snapshotHead,
+                                                             List<SubscriptionSnapshotEntry> entries) {
         var resources = new ArrayList<SubscriptionResource>(entries.size());
         for (var entry : entries) {
             if (entry == null || entry.getResource() == null) {
-                throw new IllegalStateException("Invalid subscription snapshot entry without resource");
+                throw new SubscriptionSnapshotException("Invalid subscription snapshot entry without resource");
             }
             resources.add(entry.getResource());
         }
-        return fromSubscriptionResources(snapshotId, resources);
+        return fromSubscriptionResources(SnapshotMetadata.from(snapshotHead), resources);
+    }
+
+    String snapshotId() {
+        return metadata == null ? null : metadata.snapshotId();
     }
 
     /**
@@ -105,8 +102,9 @@ record IndexedSubscriptionSnapshot(String snapshotId,
         return subscriptionsById.isEmpty();
     }
 
-    private static IndexedSubscriptionSnapshot fromSubscriptionResources(String snapshotId,
-                                                              List<? extends SubscriptionResource> resources) {
+        private static IndexedSubscriptionSnapshot fromSubscriptionResources(
+            SnapshotMetadata metadata,
+            List<? extends SubscriptionResource> resources) {
         var subscriptionsById = new HashMap<String, SubscriptionResource>();
         var subscriptionsByEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
 
@@ -115,7 +113,7 @@ record IndexedSubscriptionSnapshot(String snapshotId,
             var subscription = resource.getSpec().getSubscription();
             var previous = subscriptionsById.putIfAbsent(subscription.getSubscriptionId(), resource);
             if (previous != null) {
-                throw new IllegalStateException("Duplicate subscription id: " + subscription.getSubscriptionId());
+                throw new SubscriptionSnapshotException("Duplicate subscription id: " + subscription.getSubscriptionId());
             }
 
             var lookupKey = new EnvironmentEventTypeKey(resource.getSpec().getEnvironment(), subscription.getType());
@@ -126,21 +124,39 @@ record IndexedSubscriptionSnapshot(String snapshotId,
         subscriptionsByEnvironmentAndEventType.forEach((key, value) ->
             immutableSubscriptionsByEnvironmentAndEventType.put(key, List.copyOf(value)));
         return new IndexedSubscriptionSnapshot(
-            snapshotId,
+            metadata,
             Map.copyOf(subscriptionsById),
             Map.copyOf(immutableSubscriptionsByEnvironmentAndEventType));
     }
 
     private static void validate(SubscriptionResource resource) {
         if (resource == null || resource.getSpec() == null || resource.getSpec().getSubscription() == null) {
-            throw new IllegalStateException("Invalid subscription document without subscription data");
+            throw new SubscriptionSnapshotException("Invalid subscription document without subscription data");
         }
         var subscription = resource.getSpec().getSubscription();
         if (subscription.getSubscriptionId() == null || resource.getSpec().getEnvironment() == null || subscription.getType() == null) {
-            throw new IllegalStateException("Invalid subscription document without id, environment or event type");
+            throw new SubscriptionSnapshotException("Invalid subscription document without id, environment or event type");
         }
     }
 
     private record EnvironmentEventTypeKey(String environment, String eventType) {
+    }
+
+    record SnapshotMetadata(String id,
+                            String snapshotId,
+                            Long documentCount,
+                            Long revision,
+                            String sourceHash,
+                            Instant createdAt) {
+
+        static SnapshotMetadata from(SubscriptionSnapshotHead snapshotHead) {
+            return new SnapshotMetadata(
+                snapshotHead.getId(),
+                snapshotHead.getSnapshotId(),
+                snapshotHead.getDocumentCount(),
+                snapshotHead.getRevision(),
+                snapshotHead.getSourceHash(),
+                snapshotHead.getCreatedAt() == null ? null : snapshotHead.getCreatedAt().toInstant());
+        }
     }
 }

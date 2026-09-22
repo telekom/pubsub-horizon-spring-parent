@@ -253,6 +253,34 @@ class JsonCacheServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void shouldBeReadyWithoutCheckingMongoWhenHazelcastIsAvailable() {
+        IMap<String, HazelcastJsonValue> mockMap = mock(IMap.class);
+        when(hazelcastInstance.<String, HazelcastJsonValue>getMap(TEST_MAP_NAME)).thenReturn(mockMap);
+
+        assertTrue(jsonCacheService.isReady());
+
+        verify(subscriptionsMongoRepo, never()).existsById(anyString());
+    }
+
+    @Test
+    void shouldBeReadyWhenHazelcastIsUnavailableAndMongoIsReachable() {
+        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
+
+        assertTrue(jsonCacheService.isReady());
+
+        verify(subscriptionsMongoRepo).existsById("__horizon_cache_readiness__");
+    }
+
+    @Test
+    void shouldNotBeReadyWhenHazelcastAndMongoAreUnavailable() {
+        when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
+        when(subscriptionsMongoRepo.existsById(anyString())).thenThrow(new IllegalStateException("MongoDB unavailable"));
+
+        assertFalse(jsonCacheService.isReady());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void testMapSubscriptions() throws JsonCacheException, JsonProcessingException {
 
         // Prepare test data and simulate Hazelcast

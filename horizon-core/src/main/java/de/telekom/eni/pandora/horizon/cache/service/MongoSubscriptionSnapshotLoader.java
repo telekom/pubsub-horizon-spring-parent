@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import de.telekom.eni.pandora.horizon.exception.SubscriptionSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -42,7 +43,7 @@ public class MongoSubscriptionSnapshotLoader {
      * Reads and validates the currently published snapshot head.
      *
      * @return the valid snapshot head
-     * @throws IllegalStateException if no valid head exists
+    * @throws SubscriptionSnapshotException if no valid head exists
      */
     public SubscriptionSnapshotHead readSnapshotHead() {
         var snapshotHead = mongoTemplate.findById(
@@ -56,27 +57,31 @@ public class MongoSubscriptionSnapshotLoader {
      *
      * @param snapshotHead validated snapshot metadata
      * @return an indexed, immutable snapshot representation
-     * @throws IllegalStateException if the head is invalid or the entry count differs
-     *                               from the expected document count
+    * @throws IllegalArgumentException if the head is {@code null}
+    * @throws SubscriptionSnapshotException if the head is invalid or the entry count differs
+    *                                       from the expected document count
      */
     public IndexedSubscriptionSnapshot load(SubscriptionSnapshotHead snapshotHead) {
+        if (snapshotHead == null) {
+            throw new IllegalArgumentException("SnapshotHead must not be null");
+        }
         validateSnapshotHead(snapshotHead);
 
         var query = Query.query(Criteria.where("snapshotId").is(snapshotHead.getSnapshotId()));
         var entries = mongoTemplate.find(query, SubscriptionSnapshotEntry.class, snapshotCollectionName);
         if (entries.size() != snapshotHead.getDocumentCount()) {
-            throw new IllegalStateException("Subscription snapshot document count mismatch: expected "
+            throw new SubscriptionSnapshotException("Subscription snapshot document count mismatch: expected "
                     + snapshotHead.getDocumentCount() + ", actual " + entries.size());
         }
-        return IndexedSubscriptionSnapshot.fromSnapshotEntries(snapshotHead.getSnapshotId(), entries);
+        return IndexedSubscriptionSnapshot.fromSnapshotEntries(snapshotHead, entries);
     }
 
     private static void validateSnapshotHead(SubscriptionSnapshotHead snapshotHead) {
         if (snapshotHead == null || snapshotHead.getSnapshotId() == null || snapshotHead.getSnapshotId().isBlank()) {
-            throw new IllegalStateException("No valid subscription snapshot head available");
+            throw new SubscriptionSnapshotException("No valid subscription snapshot head available");
         }
         if (snapshotHead.getDocumentCount() == null || snapshotHead.getDocumentCount() < 0) {
-            throw new IllegalStateException("Invalid documentCount in subscription snapshot head");
+            throw new SubscriptionSnapshotException("Invalid documentCount in subscription snapshot head");
         }
     }
 }

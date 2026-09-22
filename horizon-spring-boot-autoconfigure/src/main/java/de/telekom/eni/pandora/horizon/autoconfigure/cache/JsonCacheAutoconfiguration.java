@@ -16,7 +16,7 @@ import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
 import de.telekom.eni.pandora.horizon.cache.service.FallbackSubscriptionCacheReader;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
-import de.telekom.eni.pandora.horizon.cache.service.SharedSubscriptionCacheReader;
+import de.telekom.eni.pandora.horizon.cache.service.HazelcastCacheReader;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
@@ -76,20 +76,23 @@ public class JsonCacheAutoconfiguration {
             CacheProperties cacheProperties) {
         var localSubscriptionCache = localSubscriptionCacheProvider.getIfAvailable();
         var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
-        var sharedSubscriptionCacheReader = new SharedSubscriptionCacheReader(subscriptionCache);
+        // If local subscription cache is not enabled, fall back to Hazelcast cache reader
         if (!localCacheProperties.isEnabled()) {
-            return sharedSubscriptionCacheReader;
+            return new HazelcastCacheReader(subscriptionCache);
         }
+        // If local subscription cache is enabled and fallback mode is NONE, use the local cache exclusively
         if (localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
             if (localSubscriptionCache == null) {
                 throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.local-subscription-cache is true");
             }
             return localSubscriptionCache;
         }
+        // Otherwise, use the local cache with Hazelcast as a fallback
+        var hazelcastCacheReader = new HazelcastCacheReader(subscriptionCache);
         if (localSubscriptionCache == null) {
-            return sharedSubscriptionCacheReader;
+            return hazelcastCacheReader;
         }
-        return new FallbackSubscriptionCacheReader(localSubscriptionCache, sharedSubscriptionCacheReader);
+        return new FallbackSubscriptionCacheReader(localSubscriptionCache, hazelcastCacheReader);
     }
 
     @Bean

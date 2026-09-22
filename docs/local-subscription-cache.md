@@ -9,11 +9,8 @@ SPDX-License-Identifier: Apache-2.0
 ## Purpose
 
 `LocalSubscriptionCache` provides a pod-local read cache for subscriptions. It prepares indexed lookup structures without
-changing the active cache, then publishes the new state with one atomic reference update. The source is explicit and
-defaults to `SNAPSHOT`:
-
-- `SNAPSHOT` loads a persisted snapshot through `MongoSubscriptionSnapshotLoader`.
-- `LIVE` loads current subscriptions through `SubscriptionsMongoRepo`.
+changing the active cache, then publishes the new state with one atomic reference update. It loads persisted snapshots
+through `MongoSubscriptionSnapshotLoader`.
 
 The existing Hazelcast-backed `JsonCacheService<SubscriptionResource>` remains unchanged. The Spring Boot autoconfiguration
 selects the local cache as primary when enabled and can retain the existing service as fallback.
@@ -37,10 +34,10 @@ classDiagram
     class LocalSubscriptionCache {
         -activeSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
         -preparedSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
-        +prepare()
-        +activate()
+        +prepare(snapshotHead)
+        +activate(snapshotId)
     }
-    class SharedSubscriptionCacheReader
+    class HazelcastCacheReader
     class FallbackSubscriptionCacheReader
     class IndexedSubscriptionSnapshot {
         -subscriptionsById
@@ -59,12 +56,12 @@ classDiagram
     class LocalSubscriptionCacheInitializer
 
     SubscriptionCacheReader <|.. LocalSubscriptionCache
-    SubscriptionCacheReader <|.. SharedSubscriptionCacheReader
+    SubscriptionCacheReader <|.. HazelcastCacheReader
     SubscriptionCacheReader <|.. FallbackSubscriptionCacheReader
     LocalSubscriptionCache *-- IndexedSubscriptionSnapshot
     IndexedSubscriptionSnapshot *-- EnvironmentEventTypeKey
     LocalSubscriptionCache --> MongoSubscriptionSnapshotLoader
-    SharedSubscriptionCacheReader --> JsonCacheService~SubscriptionResource~
+    HazelcastCacheReader --> JsonCacheService~SubscriptionResource~
     FallbackSubscriptionCacheReader --> SubscriptionCacheReader : primary
     FallbackSubscriptionCacheReader --> SubscriptionCacheReader : fallback
     LocalSubscriptionCacheInitializer --> LocalSubscriptionCache
@@ -78,7 +75,7 @@ Each snapshot contains two indexes:
 | `subscriptionsByEnvironmentAndEventType` | `EnvironmentEventTypeKey(environment, eventType)` | list of `SubscriptionResource` | Lookup for event processing |
 
 The maps and query result lists are structurally immutable. They cannot be changed through the cache API. The contained
-`SubscriptionResource` objects are the objects returned by the MongoDB repository and remain mutable model objects; consumers
+`SubscriptionResource` objects are loaded from the MongoDB snapshot entries and remain mutable model objects; consumers
 must treat them as read-only.
 
 ## Lifecycle
@@ -94,21 +91,23 @@ activates the first snapshot during application startup.
 
 ### Prepare
 
-Calling `prepare()` performs the following steps:
+Calling `prepare(snapshotHead)` performs the following steps:
 
-1. Load a complete snapshot from the configured source: persisted snapshot or live subscriptions.
+1. Load all entries for the snapshot identified by the published head.
 2. Validate every document.
 3. Build the ID and environment/event-type indexes in local temporary maps.
 4. Convert the maps and lists to unmodifiable collections.
 5. Store the completed snapshot as `preparedSnapshot`.
 
 The active snapshot is not modified during this process. If loading, validation, or index construction fails, readers continue
-to use the previous active snapshot. A later successful `prepare()` replaces an earlier prepared snapshot.
+to use the previous active snapshot. A later successful `prepare()` replaces an earlier prepared snapshot. Preparation is
+skipped only when all snapshot-head fields match the prepared snapshot. Changes to fields such as `revision`, `sourceHash`,
+or `documentCount` trigger a reload even when the `snapshotId` remains unchanged.
 
 ### Activate
 
-Calling `activate()` removes the current prepared snapshot from its slot and publishes it through the `activeSnapshot`
-`AtomicReference`.
+Calling `activate(snapshotId)` verifies that the prepared snapshot has the expected ID and publishes it through the
+`activeSnapshot` `AtomicReference`.
 
 ```mermaid
 sequenceDiagram
@@ -117,20 +116,24 @@ sequenceDiagram
     participant Mongo as MongoDB
     participant Reader as Concurrent reader
 
-    Coordinator->>Cache: prepare()
-    Cache->>Mongo: findAll()
-    Mongo-->>Cache: complete subscription collection
+    Coordinator->>Cache: readSnapshotHead()
+    Cache->>Mongo: read published head
+    Mongo-->>Cache: snapshot ID and document count
+    Coordinator->>Cache: prepare(snapshotHead)
+    Cache->>Mongo: load entries by snapshot ID
+    Mongo-->>Cache: complete snapshot entries
     Cache->>Cache: validate and build immutable indexes
     Reader->>Cache: findByEnvironmentAndEventType(...)
     Cache-->>Reader: old active snapshot
-    Coordinator->>Cache: activate()
+    Coordinator->>Cache: activate(snapshotId)
     Cache->>Cache: atomic active reference update
     Reader->>Cache: findByEnvironmentAndEventType(...)
     Cache-->>Reader: new active snapshot
 ```
 
 Activation without a prepared snapshot throws `IllegalStateException`. Empty snapshots are rejected as well. A prepared
-snapshot can be activated only once.
+snapshot remains available after activation. Repeated activation is idempotent only when all snapshot-head metadata is
+unchanged; the same snapshot ID with changed metadata publishes the newly prepared snapshot.
 
 ## Read API
 
@@ -168,11 +171,8 @@ Any such failure prevents the new snapshot from becoming prepared. The active sn
 
 ## Spring Boot integration
 
-`LocalSubscriptionCacheAutoConfiguration` creates the cache only when the local cache is enabled. The selected source then
-determines the required Mongo abstraction:
-
-- `SNAPSHOT` requires the qualified `mongoConfigTemplate` bean.
-- `LIVE` requires the qualified `SubscriptionsMongoRepo` bean.
+`LocalSubscriptionCacheAutoConfiguration` creates the cache only when the local cache is enabled. It requires the qualified
+`mongoConfigTemplate` bean to read the snapshot head and entries.
 
 MongoDB is normally enabled with:
 
@@ -192,7 +192,6 @@ horizon:
     cache:
         local-subscription-cache:
             enabled: true
-            source: snapshot
             fallback-mode: hazelcast-with-mongo-fallback
             snapshot-collection: subscriptions.subscriber.horizon.telekom.de.v1-snapshots
             head-collection: subscriptions.subscriber.horizon.telekom.de.v1-head
@@ -204,15 +203,6 @@ horizon:
 The initializer performs the initial `prepare()` and `activate()` automatically. When head polling is enabled, it periodically
 reads the published snapshot head and atomically activates a newly prepared snapshot. Unchanged heads are ignored, empty
 snapshots are rejected, and load failures preserve the active snapshot.
-
-To use the live repository source instead:
-
-```yaml
-horizon:
-    cache:
-        local-subscription-cache:
-            source: live
-```
 
 When `local-subscription-cache.enabled` is `false`, no local-cache bean is created. The regular shared
 `JsonCacheService` remains responsible for reads and its configured MongoDB fallback is used when Hazelcast is unavailable.
