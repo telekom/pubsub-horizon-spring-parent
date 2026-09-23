@@ -91,6 +91,7 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
             return thread;
         });
         var intervalMillis = polling.getInterval().toMillis();
+        log.debug("Starting subscription cache head polling with interval {}", polling.getInterval());
         headPollingExecutor.scheduleWithFixedDelay(
             this::pollHead, intervalMillis, intervalMillis, TimeUnit.MILLISECONDS);
     }
@@ -102,10 +103,14 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
      */
     void pollHead() {
         try {
+            log.debug("Polling subscription cache snapshot head");
             var snapshotHead = localSubscriptionCache.readSnapshotHead();
             localSubscriptionCache.prepare(snapshotHead);
             if (localSubscriptionCache.hasPendingSnapshot()) {
+                log.debug("New subscription cache snapshot {} detected", snapshotHead.getSnapshotId());
                 localSubscriptionCache.activate(snapshotHead.getSnapshotId());
+            } else {
+                log.debug("Subscription cache snapshot {} is already current", snapshotHead.getSnapshotId());
             }
         } catch (RuntimeException exception) {
             log.warn("Subscription cache head polling failed; keeping active snapshot", exception);
