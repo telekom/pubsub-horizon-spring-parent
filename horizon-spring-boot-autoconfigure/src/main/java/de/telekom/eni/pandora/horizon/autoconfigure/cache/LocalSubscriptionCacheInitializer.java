@@ -68,7 +68,7 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
         try {
             var snapshotHead = localSubscriptionCache.readSnapshotHead();
             localSubscriptionCache.prepare(snapshotHead);
-            localSubscriptionCache.activate(snapshotHead.getSnapshotId());
+            localSubscriptionCache.activate(snapshotHead);
         } catch (SubscriptionCacheSnapshotException | DataAccessException exception) {
             if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
                     == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
@@ -108,7 +108,7 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
             localSubscriptionCache.prepare(snapshotHead);
             if (localSubscriptionCache.hasPendingSnapshot()) {
                 log.debug("New subscription cache snapshot {} detected", snapshotHead.getSnapshotId());
-                localSubscriptionCache.activate(snapshotHead.getSnapshotId());
+                localSubscriptionCache.activate(snapshotHead);
             } else {
                 log.debug("Subscription cache snapshot {} is already current", snapshotHead.getSnapshotId());
             }

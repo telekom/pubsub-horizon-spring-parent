@@ -16,7 +16,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -46,7 +46,7 @@ class LocalSubscriptionCacheInitializerTest {
         var ordered = inOrder(cache);
         ordered.verify(cache).readSnapshotHead();
         ordered.verify(cache).prepare(snapshotHead);
-        ordered.verify(cache).activate("snapshot-1");
+        ordered.verify(cache).activate(snapshotHead);
         assertEquals(Status.UP, initializer.health().getStatus());
     }
 
@@ -60,7 +60,7 @@ class LocalSubscriptionCacheInitializerTest {
 
         assertEquals(Status.UP, initializer.health().getStatus());
         assertEquals("fallback", initializer.health().getDetails().get("source"));
-        verify(cache, never()).activate(anyString());
+        verify(cache, never()).activate(any(SubscriptionSnapshotHead.class));
     }
 
     @Test
@@ -82,7 +82,7 @@ class LocalSubscriptionCacheInitializerTest {
 
         assertThrows(DataAccessResourceFailureException.class, () -> initializer.run(null));
         assertEquals(Status.DOWN, initializer.health().getStatus());
-        verify(cache, never()).activate(anyString());
+        verify(cache, never()).activate(any(SubscriptionSnapshotHead.class));
     }
 
     @Test
@@ -90,7 +90,7 @@ class LocalSubscriptionCacheInitializerTest {
         doThrow(new IllegalStateException("Unexpected cache state")).when(cache).readSnapshotHead();
 
         assertThrows(IllegalStateException.class, () -> initializer.run(null));
-        verify(cache, never()).activate(anyString());
+        verify(cache, never()).activate(any(SubscriptionSnapshotHead.class));
     }
 
     @Test
@@ -104,7 +104,7 @@ class LocalSubscriptionCacheInitializerTest {
         initializer.pollHead();
 
         verify(cache).prepare(snapshotHead);
-        verify(cache).activate("snapshot-42");
+        verify(cache).activate(snapshotHead);
         assertEquals(Status.UP, initializer.health().getStatus());
     }
 
@@ -118,7 +118,7 @@ class LocalSubscriptionCacheInitializerTest {
         initializer.pollHead();
 
         verify(cache).prepare(snapshotHead);
-        verify(cache, never()).activate(anyString());
+        verify(cache, never()).activate(any(SubscriptionSnapshotHead.class));
     }
 
     @Test
@@ -133,7 +133,7 @@ class LocalSubscriptionCacheInitializerTest {
         initializer.pollHead();
 
         verify(cache).prepare(snapshotHead);
-        verify(cache).activate("snapshot-42");
+        verify(cache).activate(snapshotHead);
     }
 
     private SubscriptionSnapshotHead snapshotHead(String snapshotId) {

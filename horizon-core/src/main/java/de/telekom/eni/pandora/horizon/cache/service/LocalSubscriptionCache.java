@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Snapshots are loaded into an immutable set of indexes during
  * {@link #prepare(SubscriptionSnapshotHead)}. A prepared snapshot becomes visible
- * to readers only after a successful call to {@link #activate(String)}.</p>
+ * to readers only after a successful call to {@link #activate(SubscriptionSnapshotHead)}.</p>
  */
 @Slf4j
 public class LocalSubscriptionCache implements SubscriptionCacheReader {
@@ -75,29 +75,32 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
     /**
     * Atomically publishes the prepared snapshot when it matches the expected snapshot ID.
-    * Reusing an ID with changed head metadata is supported because activation compares
-    * the complete immutable metadata before treating the operation as idempotent.
+     * Activation compares the complete immutable head metadata before publishing
+     * the prepared snapshot.
      *
-     * @param snapshotId expected prepared snapshot ID
-     * @throws IllegalArgumentException if the snapshot ID is blank
-     * @throws IllegalStateException if the prepared snapshot does not match the requested ID, or no snapshot was prepared
+     * @param snapshotHead expected prepared snapshot head
+     * @throws IllegalArgumentException if the snapshot head is missing a snapshot ID
+     * @throws IllegalStateException if the prepared snapshot does not match the requested head, or no snapshot was prepared
     * @throws SubscriptionCacheSnapshotException if the prepared snapshot is empty
      */
-    public synchronized void activate(String snapshotId) {
-        if (snapshotId == null || snapshotId.isBlank()) {
-            throw new IllegalArgumentException("SnapshotId must not be blank");
+    public synchronized void activate(SubscriptionSnapshotHead snapshotHead) {
+        if (snapshotHead == null || snapshotHead.getSnapshotId() == null
+                || snapshotHead.getSnapshotId().isBlank()) {
+            throw new IllegalArgumentException("SnapshotHead must contain a snapshotId");
         }
 
         var prepared = preparedSnapshot.get();
         if (prepared == null) {
-            if (isReady() && Objects.equals(activeSnapshot.get().snapshotId(), snapshotId)) {
+            if (isReady() && Objects.equals(activeSnapshot.get().metadata(),
+                    IndexedSubscriptionSnapshot.SnapshotMetadata.from(snapshotHead))) {
                 return;
             }
             throw new IllegalStateException("No prepared subscription snapshot available");
         }
 
-        if (!Objects.equals(prepared.snapshotId(), snapshotId)) {
-            throw new IllegalStateException("Prepared subscription snapshot does not match snapshotId to activate");
+        var requestedMetadata = IndexedSubscriptionSnapshot.SnapshotMetadata.from(snapshotHead);
+        if (!Objects.equals(prepared.metadata(), requestedMetadata)) {
+            throw new IllegalStateException("Prepared subscription snapshot does not match snapshot head to activate");
         }
         if (prepared.isEmpty()) {
             throw new SubscriptionCacheSnapshotException("Cannot activate empty subscription snapshot");

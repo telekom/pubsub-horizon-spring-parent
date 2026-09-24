@@ -35,7 +35,7 @@ classDiagram
         -activeSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
         -preparedSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
         +prepare(snapshotHead)
-        +activate(snapshotId)
+        +activate(snapshotHead)
     }
     class HazelcastCacheReader
     class FallbackSubscriptionCacheReader
@@ -62,8 +62,8 @@ classDiagram
     IndexedSubscriptionSnapshot *-- EnvironmentEventTypeKey
     LocalSubscriptionCache --> MongoSubscriptionSnapshotLoader
     HazelcastCacheReader --> JsonCacheService~SubscriptionResource~
-    FallbackSubscriptionCacheReader --> SubscriptionCacheReader : primary
-    FallbackSubscriptionCacheReader --> SubscriptionCacheReader : fallback
+    FallbackSubscriptionCacheReader --> LocalSubscriptionCache : primary
+    FallbackSubscriptionCacheReader --> HazelcastCacheReader : fallback
     LocalSubscriptionCacheInitializer --> LocalSubscriptionCache
 ```
 
@@ -87,7 +87,7 @@ activates the first snapshot during application startup.
 
 - With a configured fallback, an initialization failure is logged and the shared cache can serve requests.
 - With fallback mode `NONE`, the initialization exception is propagated and application startup fails.
-- An empty snapshot is rejected by `activate()`; the previous active snapshot remains unchanged.
+- An empty snapshot is rejected by `activate(snapshotHead)`; the previous active snapshot remains unchanged.
 
 ### Prepare
 
@@ -104,10 +104,32 @@ to use the previous active snapshot. A later successful `prepare()` replaces an 
 skipped only when all snapshot-head fields match the prepared snapshot. Changes to fields such as `revision`, `sourceHash`,
 or `documentCount` trigger a reload even when the `snapshotId` remains unchanged.
 
+### How the coordinator obtains the snapshot head
+
+The coordinator must obtain a complete and valid `SubscriptionSnapshotHead` before calling `prepare(snapshotHead)`. The head is the
+published commit marker for the snapshot and contains more than the snapshot ID, including the expected `documentCount`, `revision`,
+and `sourceHash`.
+
+The provided initializer uses `LocalSubscriptionCache.readSnapshotHead()` as one way to read and validate the head from MongoDB. This
+method is optional for the coordinator contract, however. A coordinator may resolve the head through its own method or another trusted
+source and then call `prepare(snapshotHead)` directly. `prepare()` does not discover the current snapshot itself; it loads and validates
+the exact head supplied by the caller.
+
+Regardless of how the head is obtained, the lifecycle remains:
+
+1. Obtain and validate the currently published `snapshotHead`.
+2. `prepare(snapshotHead)` loads that snapshot and verifies its entry count before building indexes.
+3. `activate(snapshotHead)` publishes the prepared snapshot to readers.
+
+The coordinator must not use a hard-coded or stale snapshot ID as a substitute for the current head. Otherwise it could load an
+outdated snapshot, miss metadata changes for a reused snapshot ID, or skip the document-count consistency check against the published
+head.
+
 ### Activate
 
-Calling `activate(snapshotId)` verifies that the prepared snapshot has the expected ID and publishes it through the
-`activeSnapshot` `AtomicReference`.
+Calling `activate(snapshotHead)` verifies that the complete prepared metadata matches the supplied head and publishes it through
+the `activeSnapshot` `AtomicReference`. Passing the complete head keeps preparation and activation tied to the same snapshot version;
+comparing only the snapshot ID would not detect changed metadata for a reused ID.
 
 ```mermaid
 sequenceDiagram
@@ -116,16 +138,19 @@ sequenceDiagram
     participant Mongo as MongoDB
     participant Reader as Concurrent reader
 
-    Coordinator->>Cache: readSnapshotHead()
-    Cache->>Mongo: read published head
-    Mongo-->>Cache: snapshot ID and document count
+    opt Optional default head lookup
+        Coordinator->>Cache: readSnapshotHead()
+        Cache->>Mongo: read published head
+        Mongo-->>Cache: snapshot ID and document count
+    end
+    Note over Coordinator: Coordinator may resolve snapshotHead independently
     Coordinator->>Cache: prepare(snapshotHead)
     Cache->>Mongo: load entries by snapshot ID
     Mongo-->>Cache: complete snapshot entries
     Cache->>Cache: validate and build immutable indexes
     Reader->>Cache: findByEnvironmentAndEventType(...)
     Cache-->>Reader: old active snapshot
-    Coordinator->>Cache: activate(snapshotId)
+    Coordinator->>Cache: activate(snapshotHead)
     Cache->>Cache: atomic active reference update
     Reader->>Cache: findByEnvironmentAndEventType(...)
     Cache-->>Reader: new active snapshot
@@ -147,7 +172,6 @@ List<SubscriptionResource> findByEnvironmentAndEventType(
 ```
 
 Reads:
-
 - use only the current in-memory active snapshot;
 - never access MongoDB or Hazelcast;
 - do not acquire locks;
@@ -200,9 +224,10 @@ horizon:
                 interval: 30s
 ```
 
-The initializer performs the initial `prepare()` and `activate()` automatically. When head polling is enabled, it periodically
-reads the published snapshot head and atomically activates a newly prepared snapshot. Unchanged heads are ignored, empty
-snapshots are rejected, and load failures preserve the active snapshot.
+The initializer performs the initial `prepare(snapshotHead)` and `activate(snapshotHead)` automatically. When head polling is enabled,
+it periodically obtains the published snapshot head and atomically activates a newly prepared snapshot. Unchanged heads are ignored,
+empty snapshots are rejected, and load failures preserve the active snapshot. A custom coordinator may supply the head itself while
+using the same `prepare(snapshotHead)` and `activate(snapshotHead)` contract.
 
 When `local-subscription-cache.enabled` is `false`, no local-cache bean is created. The regular shared
 `JsonCacheService` remains responsible for reads and its configured MongoDB fallback is used when Hazelcast is unavailable.

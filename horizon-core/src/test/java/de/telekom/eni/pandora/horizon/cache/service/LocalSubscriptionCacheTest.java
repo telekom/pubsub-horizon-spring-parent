@@ -46,14 +46,14 @@ class LocalSubscriptionCacheTest {
         assertTrue(cache.findByEnvironmentAndEventType("production", "old-event").isEmpty());
         assertFalse(cache.isReady());
 
-        cache.activate("snapshot-1");
+        cache.activate(oldHead);
         assertTrue(cache.isReady());
         cache.prepare(newHead);
 
         assertTrue(cache.getById("old-id").isPresent());
         assertTrue(cache.getById("new-id").isEmpty());
 
-        cache.activate("snapshot-2");
+        cache.activate(newHead);
 
         assertTrue(cache.getById("old-id").isEmpty());
         assertEquals(List.of(newSubscription), cache.findByEnvironmentAndEventType("production", "new-event"));
@@ -61,7 +61,7 @@ class LocalSubscriptionCacheTest {
 
     @Test
     void shouldRejectActivationWithoutPreparedSnapshot() {
-        var exception = assertThrows(IllegalStateException.class, () -> cache.activate("snapshot-1"));
+        var exception = assertThrows(IllegalStateException.class, () -> cache.activate(snapshotHead("snapshot-1")));
 
         assertEquals("No prepared subscription snapshot available", exception.getMessage());
     }
@@ -74,8 +74,9 @@ class LocalSubscriptionCacheTest {
 
         cache.prepare(head);
 
-        var exception = assertThrows(IllegalStateException.class, () -> cache.activate("snapshot-2"));
-        assertEquals("Prepared subscription snapshot does not match snapshotId to activate", exception.getMessage());
+        var differentHead = snapshotHead("snapshot-2");
+        var exception = assertThrows(IllegalStateException.class, () -> cache.activate(differentHead));
+        assertEquals("Prepared subscription snapshot does not match snapshot head to activate", exception.getMessage());
     }
 
     @Test
@@ -85,7 +86,7 @@ class LocalSubscriptionCacheTest {
 
         cache.prepare(head);
 
-        var exception = assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.activate("snapshot-1"));
+        var exception = assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.activate(head));
 
         assertEquals("Cannot activate empty subscription snapshot", exception.getMessage());
         assertFalse(cache.isReady());
@@ -99,7 +100,7 @@ class LocalSubscriptionCacheTest {
         when(snapshotLoader.load(activeHead)).thenReturn(snapshot("snapshot-1", List.of(activeSubscription)));
         when(snapshotLoader.load(failingHead)).thenThrow(new SubscriptionCacheSnapshotException("Snapshot loading failed"));
         cache.prepare(activeHead);
-        cache.activate("snapshot-1");
+        cache.activate(activeHead);
 
         assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.prepare(failingHead));
 
@@ -126,7 +127,7 @@ class LocalSubscriptionCacheTest {
 
         cache.prepare(discardedHead);
         cache.prepare(activatedHead);
-        cache.activate("snapshot-2");
+        cache.activate(activatedHead);
 
         assertTrue(cache.getById("discarded-id").isEmpty());
         assertTrue(cache.getById("activated-id").isPresent());
@@ -145,11 +146,11 @@ class LocalSubscriptionCacheTest {
             List.of(subscription("active-id", "production", "event"))));
         when(snapshotLoader.load(failingHead)).thenThrow(new IllegalStateException("Snapshot loading failed"));
         snapshotCache.prepare(firstHead);
-        snapshotCache.activate("snapshot-1");
+        snapshotCache.activate(firstHead);
         snapshotCache.prepare(secondHead);
 
         assertThrows(IllegalStateException.class, () -> snapshotCache.prepare(failingHead));
-        snapshotCache.activate("snapshot-2");
+        snapshotCache.activate(secondHead);
         assertTrue(snapshotCache.isReady());
     }
 
@@ -161,11 +162,11 @@ class LocalSubscriptionCacheTest {
         when(snapshotLoader.load(activeHead)).thenReturn(snapshot(activeHead,
             List.of(subscription("active-id", "production", "event"))));
         snapshotCache.prepare(activeHead);
-        snapshotCache.activate("snapshot-1");
+        snapshotCache.activate(activeHead);
 
         snapshotCache.prepare(activeHead);
         assertFalse(snapshotCache.hasPendingSnapshot());
-        snapshotCache.activate("snapshot-1");
+        snapshotCache.activate(activeHead);
     }
 
     @Test
@@ -201,18 +202,18 @@ class LocalSubscriptionCacheTest {
         when(snapshotLoader.load(rehashedHead)).thenReturn(snapshot(rehashedHead, List.of(rehashedSubscription)));
 
         cache.prepare(initialHead);
-        cache.activate("snapshot-1");
+        cache.activate(initialHead);
         cache.prepare(revisedHead);
 
         assertTrue(cache.hasPendingSnapshot());
-        cache.activate("snapshot-1");
+        cache.activate(revisedHead);
         assertTrue(cache.getById("initial-id").isEmpty());
         assertTrue(cache.getById("revised-id").isPresent());
 
         cache.prepare(rehashedHead);
 
         assertTrue(cache.hasPendingSnapshot());
-        cache.activate("snapshot-1");
+        cache.activate(rehashedHead);
         assertTrue(cache.getById("revised-id").isEmpty());
         assertTrue(cache.getById("rehashed-id").isPresent());
     }
@@ -226,7 +227,7 @@ class LocalSubscriptionCacheTest {
         when(snapshotLoader.load(oldHead)).thenReturn(snapshot("snapshot-1", oldSubscriptions));
         when(snapshotLoader.load(newHead)).thenReturn(snapshot("snapshot-2", newSubscriptions));
         cache.prepare(oldHead);
-        cache.activate("snapshot-1");
+        cache.activate(oldHead);
         cache.prepare(newHead);
 
         try (var executor = Executors.newSingleThreadExecutor()) {
@@ -238,7 +239,7 @@ class LocalSubscriptionCacheTest {
                 return observations;
             });
 
-            cache.activate("snapshot-2");
+            cache.activate(newHead);
 
             for (var snapshot : observedSnapshots.get()) {
                 assertEquals(100, snapshot.size());
@@ -261,7 +262,7 @@ class LocalSubscriptionCacheTest {
         when(snapshotLoader.load(duplicateHead)).thenAnswer(ignored ->
             snapshot("snapshot-2", List.of(duplicateOne, duplicateTwo)));
         cache.prepare(activeHead);
-        cache.activate("snapshot-1");
+        cache.activate(activeHead);
 
         assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.prepare(duplicateHead));
 
