@@ -65,10 +65,16 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
      */
     @Override
     public void run(ApplicationArguments args) {
+        var localCache = cacheProperties.getLocalSubscriptionCache();
         try {
             var snapshotHead = localSubscriptionCache.readSnapshotHead();
             localSubscriptionCache.prepare(snapshotHead);
             localSubscriptionCache.activate(snapshotHead);
+            log.info("Local subscription cache initialized successfully: snapshotId={}, fallbackMode={}, "
+                    + "headPollingEnabled={}",
+                snapshotHead.getSnapshotId(),
+                localCache.getFallbackMode(),
+                localCache.getHeadPolling().isEnabled());
         } catch (SubscriptionCacheSnapshotException | DataAccessException exception) {
             if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
                     == CacheProperties.LocalSubscriptionCacheFallback.NONE) {

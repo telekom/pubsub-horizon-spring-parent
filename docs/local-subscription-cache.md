@@ -40,8 +40,32 @@ classDiagram
     class HazelcastCacheReader
     class FallbackSubscriptionCacheReader
     class IndexedSubscriptionSnapshot {
+        -metadata: SnapshotMetadata
         -subscriptionsById
         -subscriptionsByEnvironmentAndEventType
+        +empty()
+        +fromSnapshotEntries(snapshotHead, entries)
+        +snapshotId()
+        +getById(subscriptionId)
+        +findByEnvironmentAndEventType(environment, eventType)
+        +getAll()
+        +isEmpty()
+    }
+    class SnapshotMetadata {
+        +id
+        +snapshotId
+        +documentCount
+        +revision
+        +sourceHash
+        +createdAt
+    }
+    class SubscriptionSnapshotHead {
+        +id
+        +snapshotId
+        +documentCount
+        +revision
+        +sourceHash
+        +createdAt
     }
     class EnvironmentEventTypeKey {
         <<record>>
@@ -53,19 +77,58 @@ classDiagram
         +load(snapshotHead)
     }
     class JsonCacheService~SubscriptionResource~
-    class LocalSubscriptionCacheInitializer
+    class LocalSubscriptionCacheInitializer {
+        +run(args)
+        +health()
+        +startHeadPolling()
+        +pollHead()
+        +stopHeadPolling()
+    }
 
     SubscriptionCacheReader <|.. LocalSubscriptionCache
     SubscriptionCacheReader <|.. HazelcastCacheReader
     SubscriptionCacheReader <|.. FallbackSubscriptionCacheReader
     LocalSubscriptionCache *-- IndexedSubscriptionSnapshot
     IndexedSubscriptionSnapshot *-- EnvironmentEventTypeKey
+    IndexedSubscriptionSnapshot *-- SnapshotMetadata
+    SnapshotMetadata ..> SubscriptionSnapshotHead : created from
     LocalSubscriptionCache --> MongoSubscriptionSnapshotLoader
     HazelcastCacheReader --> JsonCacheService~SubscriptionResource~
     FallbackSubscriptionCacheReader --> LocalSubscriptionCache : primary
     FallbackSubscriptionCacheReader --> HazelcastCacheReader : fallback
     LocalSubscriptionCacheInitializer --> LocalSubscriptionCache
+    LocalSubscriptionCacheInitializer ..> MongoSubscriptionSnapshotLoader : optional head polling
 ```
+
+`LocalSubscriptionCache` verwaltet `IndexedSubscriptionSnapshot`-Instanzen und hält dabei zwei Referenzen:
+
+- `preparedSnapshot` enthält den neu geladenen und validierten Snapshot. Er ist für Leser noch nicht sichtbar.
+- `activeSnapshot` enthält den aktuell veröffentlichten Snapshot, den die Leseoperationen verwenden.
+
+`prepare(snapshotHead)` erstellt aus den Snapshot-Einträgen einen neuen `IndexedSubscriptionSnapshot` mit den vorbereiteten
+Lookup-Indizes. `activate(snapshotHead)` veröffentlicht diesen vorbereiteten Snapshot anschließend atomar als aktiven Snapshot.
+`IndexedSubscriptionSnapshot` selbst entscheidet nicht über den Lebenszyklus und wird nach seiner Erstellung nicht mehr verändert.
+Dadurch können Leser während des Vorbereitens weiterhin den alten vollständigen Snapshot verwenden und sehen nach der Aktivierung
+entweder den vollständigen alten oder den vollständigen neuen Snapshot.
+
+The `LocalSubscriptionCacheInitializer` always performs the initial snapshot loading during startup. The recurring `pollHead()`
+execution is optional and is started only when the pod configuration sets `head-polling.enabled: true`. During polling it obtains a
+`SubscriptionSnapshotHead`, calls `prepare(snapshotHead)`, and activates the prepared snapshot with `activate(snapshotHead)`. The
+head may be obtained through the default cache method or by a custom coordinator implementation; polling is not part of the reader
+API itself.
+
+The `LocalSubscriptionCacheInitializer` provides the following coordinator responsibilities:
+
+| Method | Responsibility |
+|---|---|
+| `run(args)` | Performs the initial head lookup, preparation, activation, and starts optional polling. |
+| `health()` | Reports `UP` when the local cache or an enabled fallback reader is ready; otherwise reports `DOWN`. |
+| `startHeadPolling()` | Optional polling lifecycle operation. It is called only when the pod configuration enables `head-polling.enabled: true` and starts the scheduled executor. |
+| `pollHead()` | Optional recurring polling operation. It reads a new head, prepares the corresponding snapshot, and activates it when a pending snapshot exists. A polling failure preserves the active snapshot. |
+| `stopHeadPolling()` | Optional polling lifecycle operation. It stops the scheduled polling executor during application shutdown when polling was enabled. |
+
+The initializer coordinates the snapshot lifecycle but does not provide subscription lookup methods itself. Readers use
+`SubscriptionCacheReader`, which delegates local lookups to the currently active snapshot.
 
 Each snapshot contains two indexes:
 
@@ -224,10 +287,40 @@ horizon:
                 interval: 30s
 ```
 
-The initializer performs the initial `prepare(snapshotHead)` and `activate(snapshotHead)` automatically. When head polling is enabled,
-it periodically obtains the published snapshot head and atomically activates a newly prepared snapshot. Unchanged heads are ignored,
-empty snapshots are rejected, and load failures preserve the active snapshot. A custom coordinator may supply the head itself while
-using the same `prepare(snapshotHead)` and `activate(snapshotHead)` contract.
+The initializer performs the initial `prepare(snapshotHead)` and `activate(snapshotHead)` automatically. When the pod configuration
+sets `head-polling.enabled: true`, it additionally obtains the published snapshot head periodically and atomically activates a newly
+prepared snapshot. If polling is disabled or not configured, no recurring `pollHead()` execution is started. Unchanged heads are
+ignored, empty snapshots are rejected, and load failures preserve the active snapshot. A custom coordinator may supply the head
+itself while using the same `prepare(snapshotHead)` and `activate(snapshotHead)` contract.
+
+### Runtime scenarios
+
+| Scenario | Local cache | Hazelcast/MongoDB fallback | Application startup | Health and readiness |
+|---|---|---|---|---|
+| Local snapshot loads and activates successfully | Ready | Not required | Succeeds | `UP`, source `local`; pod is ready |
+| Local snapshot initialization fails, fallback is disabled (`NONE`) | Not ready | Not used | Fails | Pod does not become ready |
+| Local snapshot initialization fails, fallback is available | Not ready | Ready through Hazelcast or MongoDB | Succeeds | `UP`, source `fallback`; pod is ready |
+| Local cache is active, polling finds an unchanged head | Ready | Not required | Already running | Remains `UP`, source `local` |
+| Local cache is active, polling activates a new snapshot | Ready | Not required | Already running | Remains `UP`, source `local` |
+| Polling fails while an active local snapshot exists | Ready with previous snapshot | Not required | Already running | Remains `UP`, source `local`; previous snapshot is preserved |
+| Local cache is not ready and all fallback checks fail | Not ready | Not ready | Depends on startup result | `DOWN`; pod is not ready |
+
+### `prepare` and `activate` scenarios
+
+The runtime scenarios above describe the complete pod behavior. The following table focuses on the two cache operations executed by
+the pod coordinator:
+
+| Operation | Scenario | Result | Active snapshot |
+|---|---|---|---|
+| `prepare` | Valid head and complete entries are available | Snapshot is validated, indexed, and stored as `preparedSnapshot` | Unchanged |
+| `prepare` | Same head metadata is already prepared | Preparation is skipped | Unchanged |
+| `prepare` | Same snapshot ID but changed metadata | Snapshot is loaded and prepared again | Unchanged |
+| `prepare` | Invalid head, invalid entry, duplicate ID, or document-count mismatch | Operation fails; prepared snapshot is not replaced | Unchanged |
+| `activate` | Prepared snapshot matches the complete supplied head and is non-empty | Prepared snapshot becomes active atomically | New snapshot |
+| `activate` | No prepared snapshot exists | Operation fails with `IllegalStateException` | Unchanged |
+| `activate` | Prepared snapshot does not match the supplied head | Operation fails with `IllegalStateException` | Unchanged |
+| `activate` | Prepared snapshot is empty | Operation fails with `SubscriptionCacheSnapshotException` | Unchanged |
+| `activate` | Supplied head matches the already active snapshot | Operation is idempotent | Unchanged |
 
 When `local-subscription-cache.enabled` is `false`, no local-cache bean is created. The regular shared
 `JsonCacheService` remains responsible for reads and its configured MongoDB fallback is used when Hazelcast is unavailable.

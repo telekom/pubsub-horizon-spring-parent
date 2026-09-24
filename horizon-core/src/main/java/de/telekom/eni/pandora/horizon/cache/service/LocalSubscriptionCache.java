@@ -138,8 +138,8 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
         var snapshot = activeSnapshot.get();
         var result = snapshot.getById(subscriptionId);
-        log.debug("Read local subscription snapshot {} by subscription ID: found={}",
-            snapshot.snapshotId(), result.isPresent());
+        log.debug("Read local subscription snapshot {} by subscription ID {}: found={}",
+            snapshot.snapshotId(), subscriptionId, result.isPresent());
         return result;
     }
 
@@ -150,8 +150,8 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
         var snapshot = activeSnapshot.get();
         var result = snapshot.findByEnvironmentAndEventType(environment, eventType);
-        log.debug("Read local subscription snapshot {} by environment and event type: matches={}",
-            snapshot.snapshotId(), result.size());
+        log.debug("Read local subscription snapshot {} by environment {} and event type {}: matches={}",
+            snapshot.snapshotId(), environment, eventType, result.size());
         return result;
     }
 
