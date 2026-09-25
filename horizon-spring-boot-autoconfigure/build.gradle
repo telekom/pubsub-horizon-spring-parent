@@ -38,8 +38,13 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-autoconfigure'
     implementation 'org.springframework.boot:spring-boot-actuator-autoconfigure'
+    implementation 'org.springframework.boot:spring-boot-micrometer-tracing'
+    implementation 'org.springframework.boot:spring-boot-micrometer-tracing-brave'
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'org.springframework.boot:spring-boot-micrometer-metrics'
+    implementation 'org.springframework.boot:spring-boot-hazelcast'
     implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
-    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'org.springframework.boot:spring-boot-starter-aspectj'
 
     implementation 'org.springframework.kafka:spring-kafka'
 

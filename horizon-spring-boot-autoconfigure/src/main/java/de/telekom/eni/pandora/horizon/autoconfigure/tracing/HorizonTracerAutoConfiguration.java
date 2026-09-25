@@ -11,7 +11,7 @@ import de.telekom.eni.pandora.horizon.tracing.PandoraTracer;
 import de.telekom.eni.pandora.horizon.tracing.TracingProperties;
 import jakarta.servlet.Filter;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.actuate.autoconfigure.tracing.BraveAutoConfiguration;
+import org.springframework.boot.micrometer.tracing.brave.autoconfigure.BraveAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -22,7 +22,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.kafka.core.KafkaTemplate;
 
 @Configuration
-@EnableConfigurationProperties({org.springframework.boot.actuate.autoconfigure.tracing.TracingProperties.class, TracingProperties.class})
+@EnableConfigurationProperties({org.springframework.boot.micrometer.tracing.autoconfigure.TracingProperties.class, TracingProperties.class})
 @Import(value = {
         BraveAutoConfiguration.class,
 })

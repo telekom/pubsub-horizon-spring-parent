@@ -21,12 +21,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
-import org.springframework.retry.annotation.EnableRetry;
+import org.springframework.resilience.annotation.EnableResilientMethods;
 
 @Slf4j
 @Configuration
 @ConditionalOnProperty(value = "horizon.mongo.enabled")
-@EnableRetry
+@EnableResilientMethods
 @EnableConfigurationProperties({MongoProperties.class})
 public class MongoAutoConfiguration {
 

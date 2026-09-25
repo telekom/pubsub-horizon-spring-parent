@@ -12,7 +12,7 @@ import de.telekom.eni.pandora.horizon.autoconfigure.mongo.MongoAutoConfiguration
 import de.telekom.eni.pandora.horizon.autoconfigure.tracing.HorizonTracerAutoConfiguration;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
-import org.springframework.boot.actuate.autoconfigure.tracing.TracingProperties;
+import org.springframework.boot.micrometer.tracing.autoconfigure.TracingProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;

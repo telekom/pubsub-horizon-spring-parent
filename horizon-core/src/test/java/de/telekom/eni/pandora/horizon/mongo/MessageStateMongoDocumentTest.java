@@ -17,7 +17,6 @@ import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,7 +28,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.junit4.SpringRunner;
 
 import java.sql.Time;
 import java.time.Instant;
@@ -38,7 +36,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@RunWith(SpringRunner.class)
 @SpringBootTest(classes={MongoAutoConfiguration.class})
 @EnableAutoConfiguration
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)

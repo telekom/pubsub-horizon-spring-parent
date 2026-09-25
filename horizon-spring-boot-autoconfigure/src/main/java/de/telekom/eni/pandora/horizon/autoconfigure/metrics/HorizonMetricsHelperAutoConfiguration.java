@@ -6,8 +6,8 @@ package de.telekom.eni.pandora.horizon.autoconfigure.metrics;
 
 import de.telekom.eni.pandora.horizon.metrics.HorizonMetricsHelper;
 import io.micrometer.core.instrument.MeterRegistry;
-import org.springframework.boot.actuate.autoconfigure.metrics.CompositeMeterRegistryAutoConfiguration;
-import org.springframework.boot.actuate.autoconfigure.tracing.TracingProperties;
+import org.springframework.boot.micrometer.metrics.autoconfigure.CompositeMeterRegistryAutoConfiguration;
+import org.springframework.boot.micrometer.tracing.autoconfigure.TracingProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
