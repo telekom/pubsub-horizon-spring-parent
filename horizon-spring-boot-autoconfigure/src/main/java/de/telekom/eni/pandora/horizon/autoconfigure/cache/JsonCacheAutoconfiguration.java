@@ -81,6 +81,10 @@ public class JsonCacheAutoconfiguration {
             log.info("Using Hazelcast subscription cache reader; local subscription cache is disabled");
             return new HazelcastCacheReader(subscriptionCache);
         }
+        if (localCacheProperties.getZooKeeper().isEnabled()
+                && localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
+            throw new IllegalStateException("ZooKeeper subscription cache requires a shared fallback reader");
+        }
         // If local subscription cache is enabled and fallback mode is NONE, use the local cache exclusively
         if (localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
             if (localSubscriptionCache == null) {
@@ -96,6 +100,10 @@ public class JsonCacheAutoconfiguration {
             return hazelcastCacheReader;
         }
         log.info("Using local subscription cache reader with Hazelcast/MongoDB fallback");
+        if (localCacheProperties.getZooKeeper().isEnabled()) {
+            return new FallbackSubscriptionCacheReader(
+                localSubscriptionCache, hazelcastCacheReader, localSubscriptionCache::isFresh);
+        }
         return new FallbackSubscriptionCacheReader(localSubscriptionCache, hazelcastCacheReader);
     }
 

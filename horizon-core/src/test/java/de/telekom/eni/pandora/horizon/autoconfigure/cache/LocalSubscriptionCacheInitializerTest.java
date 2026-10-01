@@ -21,6 +21,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,6 +34,27 @@ class LocalSubscriptionCacheInitializerTest {
     private final CacheProperties cacheProperties = new CacheProperties();
     private final LocalSubscriptionCacheInitializer initializer =
             new LocalSubscriptionCacheInitializer(cache, subscriptionCacheReaderProvider, cacheProperties);
+
+    @Test
+    void shouldLeaveInitializationToZooKeeperWhenEnabled() {
+        cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
+
+        initializer.run(null);
+
+        verifyNoInteractions(cache);
+    }
+
+    @Test
+    void zooKeeperHealthRequiresEffectiveReaderEvenWhenOldSnapshotExists() {
+        cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
+        when(cache.isReady()).thenReturn(true);
+        when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
+        when(subscriptionCacheReader.isReady()).thenReturn(false, true);
+
+        assertEquals(Status.DOWN, initializer.health().getStatus());
+        assertEquals(Status.UP, initializer.health().getStatus());
+        assertEquals("fallback", initializer.health().getDetails().get("source"));
+    }
 
     @Test
     void shouldPrepareAndActivateCacheBeforeReportingUp() {
@@ -91,49 +113,6 @@ class LocalSubscriptionCacheInitializerTest {
 
         assertThrows(IllegalStateException.class, () -> initializer.run(null));
         verify(cache, never()).activate(any(SubscriptionSnapshotHead.class));
-    }
-
-    @Test
-    void shouldActivateChangedSnapshotDuringPolling() {
-        var snapshotHead = new SubscriptionSnapshotHead();
-        snapshotHead.setSnapshotId("snapshot-42");
-        when(cache.readSnapshotHead()).thenReturn(snapshotHead);
-        when(cache.hasPendingSnapshot()).thenReturn(true);
-        when(cache.isReady()).thenReturn(true);
-
-        initializer.pollHead();
-
-        verify(cache).prepare(snapshotHead);
-        verify(cache).activate(snapshotHead);
-        assertEquals(Status.UP, initializer.health().getStatus());
-    }
-
-    @Test
-    void shouldNotActivateUnchangedSnapshotDuringPolling() {
-        var snapshotHead = new SubscriptionSnapshotHead();
-        snapshotHead.setSnapshotId("snapshot-42");
-        when(cache.readSnapshotHead()).thenReturn(snapshotHead);
-        when(cache.hasPendingSnapshot()).thenReturn(false);
-
-        initializer.pollHead();
-
-        verify(cache).prepare(snapshotHead);
-        verify(cache, never()).activate(any(SubscriptionSnapshotHead.class));
-    }
-
-    @Test
-    void shouldRetryPollingAfterFailure() {
-        var snapshotHead = snapshotHead("snapshot-42");
-        when(cache.readSnapshotHead())
-                .thenThrow(new DataAccessResourceFailureException("Mongo unavailable"))
-                .thenReturn(snapshotHead);
-        when(cache.hasPendingSnapshot()).thenReturn(true);
-
-        initializer.pollHead();
-        initializer.pollHead();
-
-        verify(cache).prepare(snapshotHead);
-        verify(cache).activate(snapshotHead);
     }
 
     private SubscriptionSnapshotHead snapshotHead(String snapshotId) {

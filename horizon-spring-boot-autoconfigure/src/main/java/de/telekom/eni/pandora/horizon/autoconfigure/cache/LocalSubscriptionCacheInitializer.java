@@ -8,7 +8,6 @@ import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationArguments;
@@ -17,19 +16,13 @@ import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.dao.DataAccessException;
 
-import java.time.Duration;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-
 /**
- * Initializes and optionally refreshes the local subscription cache.
+ * Initializes the local subscription cache.
  *
  * <p>The initializer prepares and activates the published snapshot during startup.
  * If a fallback is configured, snapshot initialization failures are logged and the
- * application can continue using the fallback reader. When polling is enabled, later
- * polling attempts can initialize or refresh the local cache. Without a fallback, a
- * snapshot initialization failure is propagated and startup fails.</p>
+ * application can continue using the fallback reader. Without a fallback, a snapshot
+ * initialization failure is propagated and startup fails.</p>
  */
 @Slf4j
 public class LocalSubscriptionCacheInitializer implements ApplicationRunner, HealthIndicator {
@@ -37,10 +30,8 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
     private final LocalSubscriptionCache localSubscriptionCache;
     private final ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider;
     private final CacheProperties cacheProperties;
-    private ScheduledExecutorService headPollingExecutor;
-
     /**
-     * Creates an initializer for the local cache and its polling configuration.
+        * Creates an initializer for the local cache.
      *
      * @param localSubscriptionCache cache to initialize and refresh
      * @param subscriptionCacheReaderProvider provider for the effective reader including fallback
@@ -55,85 +46,30 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
     }
 
     /**
-    * Loads and activates the published subscription snapshot, then starts optional
-    * snapshot-head polling. With a configured fallback, a snapshot initialization
-    * failure does not prevent polling from starting.
+    * Loads and activates the published subscription snapshot.
      *
      * @param args application startup arguments
-    * @throws RuntimeException if snapshot initialization fails without a configured fallback,
-    *                          or if polling cannot be configured
+    * @throws RuntimeException if snapshot initialization fails without a configured fallback
      */
     @Override
     public void run(ApplicationArguments args) {
         var localCache = cacheProperties.getLocalSubscriptionCache();
+        if (localCache.getZooKeeper().isEnabled()) {
+            log.info("ZooKeeper subscription head watcher owns local cache initialization");
+            return;
+        }
         try {
             var snapshotHead = localSubscriptionCache.readSnapshotHead();
             localSubscriptionCache.prepare(snapshotHead);
             localSubscriptionCache.activate(snapshotHead);
-            log.info("Local subscription cache initialized successfully: snapshotId={}, fallbackMode={}, "
-                    + "headPollingEnabled={}",
-                snapshotHead.getSnapshotId(),
-                localCache.getFallbackMode(),
-                localCache.getHeadPolling().isEnabled());
+            log.info("Local subscription cache initialized successfully: snapshotId={}, fallbackMode={}",
+                snapshotHead.getSnapshotId(), localCache.getFallbackMode());
         } catch (SubscriptionCacheSnapshotException | DataAccessException exception) {
             if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
                     == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
                 throw exception;
             }
             log.warn("Local subscription cache initialization failed; using fallback cache", exception);
-        }
-        startHeadPolling();
-    }
-
-    private void startHeadPolling() {
-        var polling = cacheProperties.getLocalSubscriptionCache().getHeadPolling();
-        if (!polling.isEnabled()) {
-            return;
-        }
-        validatePollingInterval(polling.getInterval());
-        headPollingExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            var thread = new Thread(runnable, "subscription-cache-head-poller");
-            thread.setDaemon(true);
-            return thread;
-        });
-        var intervalMillis = polling.getInterval().toMillis();
-        log.debug("Starting subscription cache head polling with interval {}", polling.getInterval());
-        headPollingExecutor.scheduleWithFixedDelay(
-            this::pollHead, intervalMillis, intervalMillis, TimeUnit.MILLISECONDS);
-    }
-
-    /**
-    * Reads the published snapshot head and activates it when its ID differs from the
-    * active snapshot. A polling failure leaves an existing active snapshot unchanged;
-    * if no snapshot is active yet, the next polling run retries initialization.
-     */
-    void pollHead() {
-        try {
-            log.debug("Polling subscription cache snapshot head");
-            var snapshotHead = localSubscriptionCache.readSnapshotHead();
-            localSubscriptionCache.prepare(snapshotHead);
-            if (localSubscriptionCache.hasPendingSnapshot()) {
-                log.debug("New subscription cache snapshot {} detected", snapshotHead.getSnapshotId());
-                localSubscriptionCache.activate(snapshotHead);
-            } else {
-                log.debug("Subscription cache snapshot {} is already current", snapshotHead.getSnapshotId());
-            }
-        } catch (RuntimeException exception) {
-            log.warn("Subscription cache head polling failed; keeping active snapshot", exception);
-        }
-    }
-
-    private static void validatePollingInterval(Duration interval) {
-        if (interval == null || interval.isZero() || interval.isNegative()) {
-            throw new IllegalArgumentException("Subscription cache head polling interval must be positive");
-        }
-    }
-
-    /** Stops the background snapshot-head polling executor. */
-    @PreDestroy
-    void stopHeadPolling() {
-        if (headPollingExecutor != null) {
-            headPollingExecutor.shutdownNow();
         }
     }
 
@@ -144,6 +80,13 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
      */
     @Override
     public Health health() {
+        if (cacheProperties.getLocalSubscriptionCache().getZooKeeper().isEnabled()) {
+            var reader = subscriptionCacheReaderProvider.getIfAvailable();
+            if (reader != null && reader.isReady()) {
+                return Health.up().withDetail("source", localSubscriptionCache.isFresh() ? "local" : "fallback").build();
+            }
+            return Health.down().withDetail("reason", "No subscription cache reader is ready").build();
+        }
         if (localSubscriptionCache.isReady()) {
             return Health.up().withDetail("source", "local").build();
         }

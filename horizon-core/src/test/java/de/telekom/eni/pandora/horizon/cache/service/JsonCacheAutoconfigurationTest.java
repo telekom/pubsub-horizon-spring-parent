@@ -15,10 +15,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class JsonCacheAutoconfigurationTest {
@@ -54,6 +57,40 @@ class JsonCacheAutoconfigurationTest {
                 .withBean(LocalSubscriptionCache.class, () -> localCache)
                 .run(context -> assertSame(localCache, context.getBean(SubscriptionCacheReader.class)));
     }
+
+        @Test
+        void zooKeeperReaderUsesSharedUntilLocalCacheIsFresh() throws Exception {
+                var cacheProperties = new CacheProperties();
+                cacheProperties.getLocalSubscriptionCache().setEnabled(true);
+                cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
+                var localCache = mock(LocalSubscriptionCache.class);
+                when(localCache.isReady()).thenReturn(true);
+
+                contextRunner(cacheProperties)
+                                .withBean(LocalSubscriptionCache.class, () -> localCache)
+                                .run(context -> {
+                                        var reader = context.getBean(SubscriptionCacheReader.class);
+                                        reader.getById("subscription-1");
+                                        verify(localCache, never()).getById("subscription-1");
+                                        when(localCache.isFresh()).thenReturn(true);
+                                        reader.getById("subscription-1");
+                                        verify(localCache).getById("subscription-1");
+                                });
+        }
+
+        @Test
+        void zooKeeperReaderRejectsMissingSharedFallback() {
+                var cacheProperties = new CacheProperties();
+                cacheProperties.getLocalSubscriptionCache().setEnabled(true);
+                cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
+                cacheProperties.getLocalSubscriptionCache().setFallbackMode(
+                                CacheProperties.LocalSubscriptionCacheFallback.NONE);
+
+                contextRunner(cacheProperties)
+                                .withBean(LocalSubscriptionCache.class, () -> mock(LocalSubscriptionCache.class))
+                                .run(context -> assertThat(context.getStartupFailure())
+                                        .hasRootCauseInstanceOf(IllegalStateException.class));
+        }
 
     @SuppressWarnings("unchecked")
     private ApplicationContextRunner contextRunner(CacheProperties cacheProperties) {

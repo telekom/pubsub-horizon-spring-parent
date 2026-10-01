@@ -21,6 +21,12 @@ subscription ID and by environment plus event type. The Shared Cache implementat
 
 ## Architecture
 
+![High-level architecture of the pod-local subscription cache](local-subscription-cache-architecture.svg)
+
+Editable diagrams.net source: [local-subscription-cache-architecture.drawio](local-subscription-cache-architecture.drawio).
+
+Proposed ZooKeeper coordinator flow: [zookeeper-snapshot-coordinator-flow.drawio](zookeeper-snapshot-coordinator-flow.drawio).
+
 ```mermaid
 classDiagram
     direction LR
@@ -80,9 +86,6 @@ classDiagram
     class LocalSubscriptionCacheInitializer {
         +run(args)
         +health()
-        +startHeadPolling()
-        +pollHead()
-        +stopHeadPolling()
     }
 
     SubscriptionCacheReader <|.. LocalSubscriptionCache
@@ -97,7 +100,7 @@ classDiagram
     FallbackSubscriptionCacheReader --> LocalSubscriptionCache : primary
     FallbackSubscriptionCacheReader --> HazelcastCacheReader : fallback
     LocalSubscriptionCacheInitializer --> LocalSubscriptionCache
-    LocalSubscriptionCacheInitializer ..> MongoSubscriptionSnapshotLoader : optional head polling
+    LocalSubscriptionCacheInitializer ..> MongoSubscriptionSnapshotLoader : initial head lookup without ZooKeeper
 ```
 
 `LocalSubscriptionCache` verwaltet `IndexedSubscriptionSnapshot`-Instanzen und hält dabei zwei Referenzen:
@@ -111,21 +114,16 @@ Lookup-Indizes. `activate(snapshotHead)` veröffentlicht diesen vorbereiteten Sn
 Dadurch können Leser während des Vorbereitens weiterhin den alten vollständigen Snapshot verwenden und sehen nach der Aktivierung
 entweder den vollständigen alten oder den vollständigen neuen Snapshot.
 
-The `LocalSubscriptionCacheInitializer` always performs the initial snapshot loading during startup. The recurring `pollHead()`
-execution is optional and is started only when the pod configuration sets `head-polling.enabled: true`. During polling it obtains a
-`SubscriptionSnapshotHead`, calls `prepare(snapshotHead)`, and activates the prepared snapshot with `activate(snapshotHead)`. The
-head may be obtained through the default cache method or by a custom coordinator implementation; polling is not part of the reader
-API itself.
+Without ZooKeeper, `LocalSubscriptionCacheInitializer` loads the published MongoDB head once during startup, prepares its
+snapshot, and activates it. With ZooKeeper enabled, the watcher coordinates initialization and later updates through the
+`prepared` and `activate` heads. No periodic MongoDB head polling is performed.
 
 The `LocalSubscriptionCacheInitializer` provides the following coordinator responsibilities:
 
 | Method | Responsibility |
 |---|---|
-| `run(args)` | Performs the initial head lookup, preparation, activation, and starts optional polling. |
+| `run(args)` | Performs the initial MongoDB head lookup, preparation, and activation only when ZooKeeper is disabled. |
 | `health()` | Reports `UP` when the local cache or an enabled fallback reader is ready; otherwise reports `DOWN`. |
-| `startHeadPolling()` | Optional polling lifecycle operation. It is called only when the pod configuration enables `head-polling.enabled: true` and starts the scheduled executor. |
-| `pollHead()` | Optional recurring polling operation. It reads a new head, prepares the corresponding snapshot, and activates it when a pending snapshot exists. A polling failure preserves the active snapshot. |
-| `stopHeadPolling()` | Optional polling lifecycle operation. It stops the scheduled polling executor during application shutdown when polling was enabled. |
 
 The initializer coordinates the snapshot lifecycle but does not provide subscription lookup methods itself. Readers use
 `SubscriptionCacheReader`, which delegates local lookups to the currently active snapshot.
@@ -272,7 +270,7 @@ horizon:
 The bean is registered in addition to the existing `JsonCacheService`. A custom `LocalSubscriptionCache` or
 `LocalSubscriptionCacheInitializer` bean overrides the corresponding auto-configured bean.
 
-Enable the cache and optional snapshot-head polling with:
+Enable the cache without ZooKeeper for a one-time MongoDB head lookup at startup with:
 
 ```yaml
 horizon:
@@ -282,16 +280,38 @@ horizon:
             fallback-mode: hazelcast-with-mongo-fallback
             snapshot-collection: subscriptions.subscriber.horizon.telekom.de.v1-snapshots
             head-collection: subscriptions.subscriber.horizon.telekom.de.v1-head
-            head-polling:
-                enabled: true
-                interval: 30s
 ```
 
-The initializer performs the initial `prepare(snapshotHead)` and `activate(snapshotHead)` automatically. When the pod configuration
-sets `head-polling.enabled: true`, it additionally obtains the published snapshot head periodically and atomically activates a newly
-prepared snapshot. If polling is disabled or not configured, no recurring `pollHead()` execution is started. Unchanged heads are
-ignored, empty snapshots are rejected, and load failures preserve the active snapshot. A custom coordinator may supply the head
+Without ZooKeeper, the initializer performs `prepare(snapshotHead)` and `activate(snapshotHead)` once during startup.
+Empty snapshots are rejected and load failures preserve the active snapshot. A custom coordinator may supply the head
 itself while using the same `prepare(snapshotHead)` and `activate(snapshotHead)` contract.
+
+To opt in to ZooKeeper head coordination, configure the local cache, a shared fallback, and distinct head paths:
+
+```yaml
+horizon:
+    cache:
+        local-subscription-cache:
+            enabled: true
+            fallback-mode: hazelcast-with-mongo-fallback
+            zoo-keeper:
+                enabled: true
+                connect-string: localhost:2181,localhost:2182,localhost:2183
+                prepared-path: /horizon/subscriptions/prepared
+                activate-path: /horizon/subscriptions/activate
+```
+
+Curator tracks the ZooKeeper-published ensemble addresses by default (`ensemble-tracker-enabled: true`).
+For a local Docker ensemble accessed from the host through mapped ports, set `ensemble-tracker-enabled: false`
+in the local profile. This keeps the host-reachable `connect-string` for reconnects instead of switching to
+Docker-internal names such as `zoo1:2181`. Leave tracking enabled when the published addresses are reachable.
+
+The Curator client and head watcher start with the Spring context and close on shutdown. The watcher reconciles
+the current heads asynchronously; the initial reconciliation signal does not block pod startup or imply a fresh
+snapshot when `activate` is absent. In this mode the MongoDB head initializer and its poller do not run. Local
+reads require a `FRESH` snapshot; otherwise the shared reader is used, and health follows the effective reader.
+Without this opt-in the existing MongoDB head initialization and optional polling remain unchanged. Readiness
+probe separation and Kafka listener startup gating are still pending.
 
 ### Runtime scenarios
 

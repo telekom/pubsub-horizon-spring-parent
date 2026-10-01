@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 
 @Slf4j
 /**
@@ -20,6 +21,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
 
     private final SubscriptionCacheReader primary;
     private final SubscriptionCacheReader fallback;
+    private final BooleanSupplier primaryFresh;
 
     /**
      * Creates a primary/fallback reader chain.
@@ -28,8 +30,14 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      * @param fallback source used when the primary is not ready or fails
      */
     public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback) {
+        this(primary, fallback, () -> true);
+    }
+
+    public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback,
+                                           BooleanSupplier primaryFresh) {
         this.primary = primary;
         this.fallback = fallback;
+        this.primaryFresh = primaryFresh;
     }
 
     @Override
@@ -104,7 +112,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
 
     private boolean isPrimaryReady() {
         try {
-            return primary.isReady();
+            return primaryFresh.getAsBoolean() && primary.isReady();
         } catch (RuntimeException exception) {
             log.warn("Failed to determine primary subscription cache readiness, using fallback", exception);
             return false;

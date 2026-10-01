@@ -23,7 +23,7 @@ import java.util.Optional;
  * environment plus event type. Duplicate IDs and invalid subscription data
  * are rejected while the snapshot is built.</p>
  */
-record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
+record IndexedSubscriptionSnapshot(SnapshotVersion version,
                                    Map<String, SubscriptionResource> subscriptionsById,
                                    Map<EnvironmentEventTypeKey, List<SubscriptionResource>> subscriptionsByEnvironmentAndEventType) {
 
@@ -52,11 +52,11 @@ record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
             }
             resources.add(entry.getResource());
         }
-        return fromSubscriptionResources(SnapshotMetadata.from(snapshotHead), resources);
+        return fromSubscriptionResources(SnapshotVersion.from(snapshotHead), resources);
     }
 
     String snapshotId() {
-        return metadata == null ? null : metadata.snapshotId();
+        return version == null ? null : version.snapshotId();
     }
 
     /**
@@ -103,7 +103,7 @@ record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
     }
 
         private static IndexedSubscriptionSnapshot fromSubscriptionResources(
-            SnapshotMetadata metadata,
+            SnapshotVersion version,
             List<? extends SubscriptionResource> resources) {
         var subscriptionsById = new HashMap<String, SubscriptionResource>();
         var subscriptionsByEnvironmentAndEventType = new HashMap<EnvironmentEventTypeKey, List<SubscriptionResource>>();
@@ -124,7 +124,7 @@ record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
         subscriptionsByEnvironmentAndEventType.forEach((key, value) ->
             immutableSubscriptionsByEnvironmentAndEventType.put(key, List.copyOf(value)));
         return new IndexedSubscriptionSnapshot(
-            metadata,
+            version,
             Map.copyOf(subscriptionsById),
             Map.copyOf(immutableSubscriptionsByEnvironmentAndEventType));
     }
@@ -142,21 +142,29 @@ record IndexedSubscriptionSnapshot(SnapshotMetadata metadata,
     private record EnvironmentEventTypeKey(String environment, String eventType) {
     }
 
-    record SnapshotMetadata(String id,
-                            String snapshotId,
-                            Long documentCount,
-                            Long revision,
-                            String sourceHash,
-                            Instant createdAt) {
+    /** Identifies snapshot content independently of the MongoDB document ID of its head. */
+    record SnapshotVersion(String snapshotId,
+                           Long documentCount,
+                           Long revision,
+                           String sourceHash,
+                           Instant createdAt) {
 
-        static SnapshotMetadata from(SubscriptionSnapshotHead snapshotHead) {
-            return new SnapshotMetadata(
-                snapshotHead.getId(),
+        static SnapshotVersion from(SubscriptionSnapshotHead snapshotHead) {
+            return new SnapshotVersion(
                 snapshotHead.getSnapshotId(),
                 snapshotHead.getDocumentCount(),
                 snapshotHead.getRevision(),
                 snapshotHead.getSourceHash(),
                 snapshotHead.getCreatedAt() == null ? null : snapshotHead.getCreatedAt().toInstant());
+        }
+
+        SnapshotVersion requireComplete() {
+            if (snapshotId == null || snapshotId.isBlank()
+                    || documentCount == null || documentCount <= 0
+                    || createdAt == null) {
+                throw new IllegalArgumentException("Invalid subscription snapshot head");
+            }
+            return this;
         }
     }
 }

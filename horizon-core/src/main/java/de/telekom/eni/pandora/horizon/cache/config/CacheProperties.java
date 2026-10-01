@@ -41,16 +41,26 @@ public class CacheProperties {
 
         private String headCollection = "subscriptions.subscriber.horizon.telekom.de.v1-head";
 
-        private HeadPollingProperties headPolling = new HeadPollingProperties();
+        private ZooKeeperProperties zooKeeper = new ZooKeeperProperties();
     }
 
     @Getter
     @Setter
-    public static class HeadPollingProperties {
+    public static class ZooKeeperProperties {
 
         private boolean enabled = false;
 
-        private Duration interval = Duration.ofSeconds(30);
+        private boolean ensembleTrackerEnabled = true;
+
+        private String connectString;
+
+        private String preparedPath;
+
+        private String activatePath;
+
+        private Duration connectionTimeout = Duration.ofSeconds(15);
+
+        private Duration sessionTimeout = Duration.ofSeconds(60);
     }
 
     public enum LocalSubscriptionCacheFallback {

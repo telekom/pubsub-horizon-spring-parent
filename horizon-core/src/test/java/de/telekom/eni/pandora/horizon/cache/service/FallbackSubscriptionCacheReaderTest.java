@@ -39,6 +39,59 @@ class FallbackSubscriptionCacheReaderTest {
     }
 
     @Test
+    void shouldUseSharedReaderWhenLocalSnapshotIsStale() throws SubscriptionCacheReadException {
+        var staleReader = new FallbackSubscriptionCacheReader(primary, fallback, () -> false);
+        var expected = List.of(new SubscriptionResource());
+        when(primary.isReady()).thenReturn(true);
+        when(fallback.findByEnvironmentAndEventType("production", "event-type")).thenReturn(expected);
+
+        assertEquals(expected, staleReader.findByEnvironmentAndEventType("production", "event-type"));
+        verify(primary, never()).findByEnvironmentAndEventType(any(), any());
+    }
+
+    @Test
+    void shouldUseSharedReaderWhenLocalSnapshotIsNotInitialized() throws SubscriptionCacheReadException {
+        var notInitializedReader = new FallbackSubscriptionCacheReader(primary, fallback, () -> false);
+        var expected = Optional.of(new SubscriptionResource());
+        when(primary.isReady()).thenReturn(false);
+        when(fallback.getById("subscription-id")).thenReturn(expected);
+
+        assertEquals(expected, notInitializedReader.getById("subscription-id"));
+        verify(primary, never()).getById(any());
+    }
+
+    @Test
+    void shouldPropagateSharedFailureWithoutReadingStaleSnapshot() throws SubscriptionCacheReadException {
+        var staleReader = new FallbackSubscriptionCacheReader(primary, fallback, () -> false);
+        var failure = new SubscriptionCacheReadException("shared unavailable");
+        when(primary.isReady()).thenReturn(true);
+        when(fallback.getById("subscription-id")).thenThrow(failure);
+
+        assertSame(failure, assertThrows(SubscriptionCacheReadException.class,
+                () -> staleReader.getById("subscription-id")));
+        verify(primary, never()).getById(any());
+    }
+
+    @Test
+    void shouldKeepGenuineEmptyLocalResultWhenFresh() throws SubscriptionCacheReadException {
+        var freshReader = new FallbackSubscriptionCacheReader(primary, fallback, () -> true);
+        when(primary.isReady()).thenReturn(true);
+        when(primary.getById("unknown-id")).thenReturn(Optional.empty());
+
+        assertEquals(Optional.empty(), freshReader.getById("unknown-id"));
+        verify(fallback, never()).getById(any());
+    }
+
+    @Test
+    void shouldReportSharedReadinessWhenLocalSnapshotIsStale() {
+        var staleReader = new FallbackSubscriptionCacheReader(primary, fallback, () -> false);
+        when(primary.isReady()).thenReturn(true);
+        when(fallback.isReady()).thenReturn(false);
+
+        assertFalse(staleReader.isReady());
+    }
+
+    @Test
     void shouldUseFallbackWhenPrimaryQueryFails() throws SubscriptionCacheReadException {
         var expected = List.of(new SubscriptionResource());
         when(primary.isReady()).thenReturn(true);

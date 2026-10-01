@@ -270,6 +270,131 @@ class LocalSubscriptionCacheTest {
         assertFalse(cache.getById("duplicate-id").isPresent());
     }
 
+    @Test
+    void retainsFreshSnapshotUntilCurrentHeadFails() {
+        var first = snapshotHead("first");
+        var second = snapshotHead("second");
+        when(snapshotLoader.load(first)).thenReturn(snapshot(first,
+            List.of(subscription("first-id", "production", "event"))));
+        when(snapshotLoader.load(second)).thenReturn(snapshot(second,
+            List.of(subscription("second-id", "production", "event"))));
+
+        assertEquals(LocalSubscriptionCache.Status.NOT_INITIALIZED, cache.status());
+        cache.authorize(first);
+        cache.prepare(first);
+        cache.activate(first);
+        assertTrue(cache.isFresh());
+
+        cache.authorize(second);
+        assertTrue(cache.isFresh());
+        assertTrue(cache.getById("first-id").isPresent());
+        cache.activationFailed(second);
+        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+        assertTrue(cache.isReady());
+        assertTrue(cache.getById("first-id").isPresent());
+
+        cache.prepare(second);
+        cache.activate(second);
+        assertTrue(cache.isFresh());
+        assertTrue(cache.getById("second-id").isPresent());
+    }
+
+    @Test
+    void disconnectPreventsLateActivationUntilReauthorized() {
+        var head = snapshotHead("first");
+        when(snapshotLoader.load(head)).thenReturn(snapshot(head,
+            List.of(subscription("first-id", "production", "event"))));
+
+        cache.authorize(head);
+        cache.prepare(head);
+        cache.disconnected();
+        cache.activate(head);
+        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+        assertTrue(cache.isReady());
+
+        cache.authorize(head);
+        cache.activate(head);
+        assertTrue(cache.isFresh());
+    }
+
+    @Test
+    void ignoresMongoIdButComparesCompleteAuthorizedHead() {
+        var mongoHead = snapshotHead("same");
+        var zooKeeperHead = snapshotHead("same");
+        zooKeeperHead.setId(null);
+        var changedHead = snapshotHead("same");
+        changedHead.setId(null);
+        changedHead.setRevision(2L);
+        when(snapshotLoader.load(mongoHead)).thenReturn(snapshot(mongoHead,
+            List.of(subscription("first-id", "production", "event"))));
+        when(snapshotLoader.load(changedHead)).thenReturn(snapshot(changedHead,
+            List.of(subscription("second-id", "production", "event"))));
+
+        cache.prepare(mongoHead);
+        cache.activate(mongoHead);
+        cache.authorize(zooKeeperHead);
+        cache.activate(mongoHead);
+        assertTrue(cache.isFresh());
+
+        cache.authorize(changedHead);
+        cache.activate(mongoHead);
+        assertTrue(cache.isFresh());
+        cache.prepare(changedHead);
+        cache.activate(changedHead);
+        assertTrue(cache.isFresh());
+        assertTrue(cache.getById("second-id").isPresent());
+    }
+
+    @Test
+    void ignoresFailureOfSupersededHead() {
+        var first = snapshotHead("first");
+        var superseded = snapshotHead("superseded");
+        var latest = snapshotHead("latest");
+        when(snapshotLoader.load(first)).thenReturn(snapshot(first,
+            List.of(subscription("first-id", "production", "event"))));
+        cache.authorize(first);
+        cache.prepare(first);
+        cache.activate(first);
+
+        cache.authorize(superseded);
+        cache.authorize(latest);
+        cache.activationFailed(superseded);
+
+        assertTrue(cache.isFresh());
+        assertTrue(cache.getById("first-id").isPresent());
+    }
+
+    @Test
+    void lateActivationCannotRestoreFreshnessAfterDisconnect() {
+        var first = snapshotHead("first");
+        var next = snapshotHead("next");
+        when(snapshotLoader.load(first)).thenReturn(snapshot(first,
+            List.of(subscription("first-id", "production", "event"))));
+        when(snapshotLoader.load(next)).thenReturn(snapshot(next,
+            List.of(subscription("next-id", "production", "event"))));
+        cache.authorize(first);
+        cache.prepare(first);
+        cache.activate(first);
+        cache.authorize(next);
+        cache.prepare(next);
+        cache.disconnected();
+
+        cache.activate(next);
+
+        assertFalse(cache.isFresh());
+        assertTrue(cache.isReady());
+        assertTrue(cache.getById("next-id").isPresent());
+    }
+
+    @Test
+    void rejectsInvalidAuthorizedHead() {
+        var head = snapshotHead("first");
+        head.setDocumentCount(0L);
+
+        assertThrows(IllegalArgumentException.class, () -> cache.authorize(head));
+        assertEquals(LocalSubscriptionCache.Status.NOT_INITIALIZED, cache.status());
+    }
+
     private List<SubscriptionMongoDocument> subscriptions(String prefix, int count) {
         var subscriptions = new ArrayList<SubscriptionMongoDocument>();
         for (int index = 0; index < count; index++) {
