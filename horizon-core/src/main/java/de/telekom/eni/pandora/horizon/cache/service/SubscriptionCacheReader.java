@@ -12,6 +12,7 @@ import java.util.Optional;
 
 /**
  * Read-only contract for accessing subscription resources from a cache source.
+ * Returned resources and their nested objects are shared data and must not be mutated.
  */
 public interface SubscriptionCacheReader {
 
@@ -19,7 +20,7 @@ public interface SubscriptionCacheReader {
      * Looks up a subscription by its ID.
      *
      * @param subscriptionId subscription ID
-     * @return the subscription if present
+    * @return the subscription if present; treat it and its nested objects as read-only
     * @throws SubscriptionCacheReadException if the underlying cache cannot be read
      */
     Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException;
@@ -29,7 +30,7 @@ public interface SubscriptionCacheReader {
      *
      * @param environment subscription environment
      * @param eventType subscription event type
-     * @return matching subscriptions
+    * @return matching subscriptions; treat each resource and its nested objects as read-only
          * @throws SubscriptionCacheReadException if the underlying cache cannot be read
      */
         List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)

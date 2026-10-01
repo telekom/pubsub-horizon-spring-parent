@@ -10,9 +10,13 @@ import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.health.Status;
 import org.springframework.dao.DataAccessResourceFailureException;
+
+import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -35,6 +39,12 @@ class LocalSubscriptionCacheInitializerTest {
     private final LocalSubscriptionCacheInitializer initializer =
             new LocalSubscriptionCacheInitializer(cache, subscriptionCacheReaderProvider, cacheProperties);
 
+    @BeforeEach
+    void setDefaultCacheDiagnostics() {
+        when(cache.localSnapshotId()).thenReturn(Optional.empty());
+        when(cache.status()).thenReturn(LocalSubscriptionCache.Status.UNINITIALIZED);
+    }
+
     @Test
     void shouldLeaveInitializationToZooKeeperWhenEnabled() {
         cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
@@ -47,20 +57,28 @@ class LocalSubscriptionCacheInitializerTest {
     @Test
     void zooKeeperHealthRequiresEffectiveReaderEvenWhenOldSnapshotExists() {
         cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
-        when(cache.isReady()).thenReturn(true);
+        when(cache.isInitialized()).thenReturn(true);
+        when(cache.localSnapshotId()).thenReturn(Optional.of("snapshot-local"));
+        when(cache.status()).thenReturn(LocalSubscriptionCache.Status.STALE);
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
         when(subscriptionCacheReader.isReady()).thenReturn(false, true);
 
         assertEquals(Status.DOWN, initializer.health().getStatus());
-        assertEquals(Status.UP, initializer.health().getStatus());
-        assertEquals("fallback", initializer.health().getDetails().get("source"));
+        var health = initializer.health();
+        assertEquals(Status.UP, health.getStatus());
+        assertEquals("fallback", health.getDetails().get("source"));
+        assertEquals("snapshot-local", health.getDetails().get("localSnapshotId"));
+        assertEquals("STALE", health.getDetails().get("cacheStatus"));
+        assertEquals(false, health.getDetails().get("localReadsAllowed"));
+        assertEquals(List.of("source", "localSnapshotId", "cacheStatus", "localReadsAllowed"),
+            List.copyOf(health.getDetails().keySet()));
     }
 
     @Test
     void shouldPrepareAndActivateCacheBeforeReportingUp() {
         var snapshotHead = snapshotHead("snapshot-1");
         when(cache.readSnapshotHead()).thenReturn(snapshotHead);
-        when(cache.isReady()).thenReturn(false, true);
+        when(cache.isInitialized()).thenReturn(false, true);
         assertEquals(Status.DOWN, initializer.health().getStatus());
 
         initializer.run(null);

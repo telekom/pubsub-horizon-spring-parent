@@ -61,6 +61,8 @@ public class CacheProperties {
         private Duration connectionTimeout = Duration.ofSeconds(15);
 
         private Duration sessionTimeout = Duration.ofSeconds(60);
+
+        private Duration reconcileInterval = Duration.ofSeconds(300);
     }
 
     public enum LocalSubscriptionCacheFallback {

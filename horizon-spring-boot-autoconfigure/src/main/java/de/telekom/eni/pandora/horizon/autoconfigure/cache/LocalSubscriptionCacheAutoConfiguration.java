@@ -83,7 +83,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
         var reader = new ZooKeeperSubscriptionSnapshotHeadReader(
             client, new ObjectMapper(), preparedPath, activatePath);
         return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatePath,
-            new ZooKeeperSubscriptionHeadReconciler(reader, cache));
+            new ZooKeeperSubscriptionHeadReconciler(reader, cache), zooKeeper.getReconcileInterval());
     }
 
     @Bean

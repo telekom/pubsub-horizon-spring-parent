@@ -1,7 +1,6 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
-import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import lombok.extern.slf4j.Slf4j;
 
@@ -32,7 +31,13 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
     public void suspended() {
         connected = false;
-        cache.disconnected();
+        synchronized (activationLock) {
+            cache.suspended();
+        }
+    }
+
+    public void lost() {
+        connected = false;
         synchronized (activationLock) {
             cache.disconnected();
         }
@@ -53,21 +58,29 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         Optional<SubscriptionSnapshotHead> prepared = Optional.empty();
         try {
             prepared = reader.readPrepared();
-        } catch (SubscriptionCacheSnapshotException exception) {
-            log.warn("Invalid prepared subscription head; ignoring it", exception);
+        } catch (RuntimeException exception) {
+            log.warn("Could not read prepared subscription head; ignoring it", exception);
         }
 
+        reconcileActiveHead(prepared);
+    }
+
+    public synchronized void reconcileActiveHead() {
+        reconcileActiveHead(Optional.empty());
+    }
+
+    private void reconcileActiveHead(Optional<SubscriptionSnapshotHead> prepared) {
         Optional<SubscriptionSnapshotHead> active;
         try {
             active = reader.readActivate();
-        } catch (SubscriptionCacheSnapshotException exception) {
-            cache.disconnected();
-            log.warn("Invalid activate subscription head; using shared cache", exception);
+        } catch (RuntimeException exception) {
+            disconnectIfConnected();
+            log.warn("Could not read activate subscription head; using shared cache", exception);
             return;
         }
 
         if (active.isEmpty()) {
-            cache.disconnected();
+            disconnectIfConnected();
             prepared.ifPresent(this::prepareOnly);
             return;
         }
@@ -78,9 +91,9 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
             if (!connected) {
                 return;
             }
-            cache.authorize(head);
+            cache.setActivationHead(head);
         }
-        if (cache.isFresh() && metadata.equals(lastActivated)) {
+        if (cache.isActiveSnapshotUpToDate() && metadata.equals(lastActivated)) {
             prepared.filter(candidate -> !Head.from(candidate).equals(metadata)).ifPresent(this::prepareOnly);
             return;
         }
@@ -106,6 +119,14 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
             cache.prepare(head);
         } catch (RuntimeException exception) {
             log.warn("Could not prepare subscription snapshot {}", head.getSnapshotId(), exception);
+        }
+    }
+
+    private void disconnectIfConnected() {
+        synchronized (activationLock) {
+            if (connected) {
+                cache.disconnected();
+            }
         }
     }
 }

@@ -102,7 +102,7 @@ public class JsonCacheAutoconfiguration {
         log.info("Using local subscription cache reader with Hazelcast/MongoDB fallback");
         if (localCacheProperties.getZooKeeper().isEnabled()) {
             return new FallbackSubscriptionCacheReader(
-                localSubscriptionCache, hazelcastCacheReader, localSubscriptionCache::isFresh);
+                localSubscriptionCache, hazelcastCacheReader, localSubscriptionCache::canServeLocalReads);
         }
         return new FallbackSubscriptionCacheReader(localSubscriptionCache, hazelcastCacheReader);
     }

@@ -21,7 +21,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
 
     private final SubscriptionCacheReader primary;
     private final SubscriptionCacheReader fallback;
-    private final BooleanSupplier primaryFresh;
+    private final BooleanSupplier primaryReadAllowed;
 
     /**
      * Creates a primary/fallback reader chain.
@@ -34,10 +34,10 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     }
 
     public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback,
-                                           BooleanSupplier primaryFresh) {
+                                           BooleanSupplier primaryReadAllowed) {
         this.primary = primary;
         this.fallback = fallback;
-        this.primaryFresh = primaryFresh;
+        this.primaryReadAllowed = primaryReadAllowed;
     }
 
     @Override
@@ -112,7 +112,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
 
     private boolean isPrimaryReady() {
         try {
-            return primaryFresh.getAsBoolean() && primary.isReady();
+            return primaryReadAllowed.getAsBoolean() && primary.isReady();
         } catch (RuntimeException exception) {
             log.warn("Failed to determine primary subscription cache readiness, using fallback", exception);
             return false;

@@ -11,7 +11,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -40,7 +39,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         var order = inOrder(reader, cache);
         order.verify(reader).readPrepared();
         order.verify(reader).readActivate();
-        order.verify(cache).authorize(active);
+        order.verify(cache).setActivationHead(active);
         order.verify(cache).prepare(active);
         order.verify(cache).activate(active);
         verify(cache, never()).prepare(prepared);
@@ -53,7 +52,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         when(reader.readActivate()).thenReturn(Optional.of(active));
         reconciler.run();
 
-        when(cache.isFresh()).thenReturn(true);
+        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
         when(reader.readPrepared()).thenReturn(Optional.of(prepared));
         reconciler.run();
 
@@ -83,7 +82,35 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
 
         reconciler.run();
 
-        verify(cache).authorize(active);
+        verify(cache).setActivationHead(active);
+        verify(cache).prepare(active);
+        verify(cache).activate(active);
+    }
+
+    @Test
+    void preparedReadFailureDoesNotBlockActivateHead() {
+        var active = head("active");
+        when(reader.readPrepared()).thenThrow(new IllegalStateException("ZooKeeper read denied"));
+        when(reader.readActivate()).thenReturn(Optional.of(active));
+
+        reconciler.run();
+
+        verify(reader).readActivate();
+        verify(cache).setActivationHead(active);
+        verify(cache).prepare(active);
+        verify(cache).activate(active);
+    }
+
+    @Test
+    void activeOnlyReconciliationDoesNotReadPreparedHead() {
+        var active = head("active");
+        when(reader.readActivate()).thenReturn(Optional.of(active));
+
+        reconciler.reconcileActiveHead();
+
+        verify(reader).readActivate();
+        verify(reader, never()).readPrepared();
+        verify(cache).setActivationHead(active);
         verify(cache).prepare(active);
         verify(cache).activate(active);
     }
@@ -123,7 +150,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         revised.setRevision(2L);
         var rollback = head("previous");
         when(reader.readActivate()).thenReturn(Optional.of(original), Optional.of(revised), Optional.of(rollback));
-        when(cache.isFresh()).thenReturn(true);
+        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
 
         reconciler.run();
         reconciler.run();
@@ -136,19 +163,19 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void connectionFailureIsNotMistakenForMissingHead() {
+    void activateReadFailureRevokesLocalFreshness() {
         when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
 
-        assertThrows(IllegalStateException.class, reconciler::run);
+        reconciler.run();
 
-        verify(cache, never()).disconnected();
+        verify(cache).disconnected();
     }
 
     @Test
     void reconnectRereadsBothHeadsAndReloadsUnchangedActiveHead() {
         var active = head("active");
         when(reader.readActivate()).thenReturn(Optional.of(active));
-        when(cache.isFresh()).thenReturn(true);
+        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
 
         reconciler.run();
         reconciler.run();
@@ -180,7 +207,8 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
             var reconciliation = executor.submit(reconciler::run);
             assertTrue(loading.await(10, TimeUnit.SECONDS));
             reconciler.suspended();
-            verify(cache, times(2)).disconnected();
+            verify(cache).suspended();
+            verify(cache, never()).disconnected();
             release.countDown();
             reconciliation.get(10, TimeUnit.SECONDS);
         } finally {
@@ -188,6 +216,14 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         }
 
         verify(cache, never()).activate(active);
+    }
+
+    @Test
+    void lostConnectionRevokesLocalReadPermission() {
+        reconciler.lost();
+
+        verify(cache).disconnected();
+        verify(cache, never()).suspended();
     }
 
     private static SubscriptionSnapshotHead head(String snapshotId) {

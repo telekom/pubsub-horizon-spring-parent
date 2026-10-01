@@ -16,7 +16,9 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,10 +46,12 @@ class LocalSubscriptionCacheTest {
 
         assertTrue(cache.getById("old-id").isEmpty());
         assertTrue(cache.findByEnvironmentAndEventType("production", "old-event").isEmpty());
-        assertFalse(cache.isReady());
+        assertFalse(cache.isInitialized());
+        assertTrue(cache.localSnapshotId().isEmpty());
 
         cache.activate(oldHead);
-        assertTrue(cache.isReady());
+        assertTrue(cache.isInitialized());
+        assertEquals("snapshot-1", cache.localSnapshotId().orElseThrow());
         cache.prepare(newHead);
 
         assertTrue(cache.getById("old-id").isPresent());
@@ -89,7 +93,7 @@ class LocalSubscriptionCacheTest {
         var exception = assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.activate(head));
 
         assertEquals("Cannot activate empty subscription snapshot", exception.getMessage());
-        assertFalse(cache.isReady());
+        assertFalse(cache.isInitialized());
     }
 
     @Test
@@ -151,7 +155,7 @@ class LocalSubscriptionCacheTest {
 
         assertThrows(IllegalStateException.class, () -> snapshotCache.prepare(failingHead));
         snapshotCache.activate(secondHead);
-        assertTrue(snapshotCache.isReady());
+        assertTrue(snapshotCache.isInitialized());
     }
 
     @Test
@@ -167,6 +171,7 @@ class LocalSubscriptionCacheTest {
         snapshotCache.prepare(activeHead);
         assertFalse(snapshotCache.hasPendingSnapshot());
         snapshotCache.activate(activeHead);
+        verify(snapshotLoader).load(activeHead);
     }
 
     @Test
@@ -279,46 +284,82 @@ class LocalSubscriptionCacheTest {
         when(snapshotLoader.load(second)).thenReturn(snapshot(second,
             List.of(subscription("second-id", "production", "event"))));
 
-        assertEquals(LocalSubscriptionCache.Status.NOT_INITIALIZED, cache.status());
-        cache.authorize(first);
+        assertEquals(LocalSubscriptionCache.Status.UNINITIALIZED, cache.status());
+        cache.setActivationHead(first);
         cache.prepare(first);
         cache.activate(first);
-        assertTrue(cache.isFresh());
+        assertTrue(cache.isActiveSnapshotUpToDate());
 
-        cache.authorize(second);
-        assertTrue(cache.isFresh());
+        cache.setActivationHead(second);
+        assertTrue(cache.isActiveSnapshotUpToDate());
         assertTrue(cache.getById("first-id").isPresent());
         cache.activationFailed(second);
         assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
-        assertTrue(cache.isReady());
+        assertTrue(cache.isInitialized());
         assertTrue(cache.getById("first-id").isPresent());
 
         cache.prepare(second);
         cache.activate(second);
-        assertTrue(cache.isFresh());
+        assertTrue(cache.isActiveSnapshotUpToDate());
         assertTrue(cache.getById("second-id").isPresent());
     }
 
     @Test
-    void disconnectPreventsLateActivationUntilReauthorized() {
+    void disconnectPreventsLateActivationUntilActivationHeadIsSet() {
         var head = snapshotHead("first");
         when(snapshotLoader.load(head)).thenReturn(snapshot(head,
             List.of(subscription("first-id", "production", "event"))));
 
-        cache.authorize(head);
+        cache.setActivationHead(head);
         cache.prepare(head);
         cache.disconnected();
         cache.activate(head);
         assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
-        assertTrue(cache.isReady());
+        assertTrue(cache.isInitialized());
+        assertFalse(cache.canServeLocalReads());
 
-        cache.authorize(head);
+        cache.setActivationHead(head);
         cache.activate(head);
-        assertTrue(cache.isFresh());
+        assertTrue(cache.isActiveSnapshotUpToDate());
     }
 
     @Test
-    void ignoresMongoIdButComparesCompleteAuthorizedHead() {
+    void suspendedCacheKeepsServingUntilLost() {
+        var head = snapshotHead("suspended");
+        when(snapshotLoader.load(head)).thenReturn(snapshot(head,
+            List.of(subscription("local-id", "production", "event"))));
+        cache.setActivationHead(head);
+        cache.prepare(head);
+        cache.activate(head);
+
+        cache.suspended();
+
+        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+        assertTrue(cache.isInitialized());
+        assertFalse(cache.isActiveSnapshotUpToDate());
+        assertTrue(cache.canServeLocalReads());
+        assertTrue(cache.isReady());
+        assertTrue(cache.getById("local-id").isPresent());
+
+        cache.disconnected();
+
+        assertTrue(cache.isInitialized());
+        assertFalse(cache.canServeLocalReads());
+        assertFalse(cache.isReady());
+    }
+
+    @Test
+    void suspendedUninitializedCacheRemainsUnavailable() {
+        cache.suspended();
+
+        assertEquals(LocalSubscriptionCache.Status.UNINITIALIZED, cache.status());
+        assertFalse(cache.isInitialized());
+        assertFalse(cache.canServeLocalReads());
+        assertFalse(cache.isReady());
+    }
+
+    @Test
+    void ignoresMongoIdButComparesCompleteActivationHead() {
         var mongoHead = snapshotHead("same");
         var zooKeeperHead = snapshotHead("same");
         zooKeeperHead.setId(null);
@@ -332,16 +373,16 @@ class LocalSubscriptionCacheTest {
 
         cache.prepare(mongoHead);
         cache.activate(mongoHead);
-        cache.authorize(zooKeeperHead);
+        cache.setActivationHead(zooKeeperHead);
         cache.activate(mongoHead);
-        assertTrue(cache.isFresh());
+        assertTrue(cache.isActiveSnapshotUpToDate());
 
-        cache.authorize(changedHead);
+        cache.setActivationHead(changedHead);
         cache.activate(mongoHead);
-        assertTrue(cache.isFresh());
+        assertTrue(cache.isActiveSnapshotUpToDate());
         cache.prepare(changedHead);
         cache.activate(changedHead);
-        assertTrue(cache.isFresh());
+        assertTrue(cache.isActiveSnapshotUpToDate());
         assertTrue(cache.getById("second-id").isPresent());
     }
 
@@ -352,15 +393,15 @@ class LocalSubscriptionCacheTest {
         var latest = snapshotHead("latest");
         when(snapshotLoader.load(first)).thenReturn(snapshot(first,
             List.of(subscription("first-id", "production", "event"))));
-        cache.authorize(first);
+        cache.setActivationHead(first);
         cache.prepare(first);
         cache.activate(first);
 
-        cache.authorize(superseded);
-        cache.authorize(latest);
+        cache.setActivationHead(superseded);
+        cache.setActivationHead(latest);
         cache.activationFailed(superseded);
 
-        assertTrue(cache.isFresh());
+        assertTrue(cache.isActiveSnapshotUpToDate());
         assertTrue(cache.getById("first-id").isPresent());
     }
 
@@ -372,27 +413,237 @@ class LocalSubscriptionCacheTest {
             List.of(subscription("first-id", "production", "event"))));
         when(snapshotLoader.load(next)).thenReturn(snapshot(next,
             List.of(subscription("next-id", "production", "event"))));
-        cache.authorize(first);
+        cache.setActivationHead(first);
         cache.prepare(first);
         cache.activate(first);
-        cache.authorize(next);
+        cache.setActivationHead(next);
         cache.prepare(next);
         cache.disconnected();
 
         cache.activate(next);
 
-        assertFalse(cache.isFresh());
-        assertTrue(cache.isReady());
+        assertFalse(cache.isActiveSnapshotUpToDate());
+        assertTrue(cache.isInitialized());
         assertTrue(cache.getById("next-id").isPresent());
     }
 
     @Test
-    void rejectsInvalidAuthorizedHead() {
+    void rejectsInvalidActivationHead() {
         var head = snapshotHead("first");
         head.setDocumentCount(0L);
 
-        assertThrows(IllegalArgumentException.class, () -> cache.authorize(head));
-        assertEquals(LocalSubscriptionCache.Status.NOT_INITIALIZED, cache.status());
+        assertThrows(IllegalArgumentException.class, () -> cache.setActivationHead(head));
+        assertEquals(LocalSubscriptionCache.Status.UNINITIALIZED, cache.status());
+    }
+
+    @Test
+    void concurrentReadersRemainAvailableDuringPreparation() throws Exception {
+        var first = snapshotHead("first");
+        var next = snapshotHead("next");
+        var activeSubscription = subscription("first-id", "production", "event");
+        when(snapshotLoader.load(first)).thenReturn(snapshot(first, List.of(activeSubscription)));
+        cache.setActivationHead(first);
+        cache.prepare(first);
+        cache.activate(first);
+        cache.setActivationHead(next);
+        var loading = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        blockSnapshotLoad(next, loading, release);
+
+        try (var executor = Executors.newFixedThreadPool(9)) {
+            var preparation = executor.submit(() -> cache.prepare(next));
+            try {
+                assertTrue(loading.await(10, TimeUnit.SECONDS));
+                var readers = new ArrayList<java.util.concurrent.Future<?>>();
+                for (int readerIndex = 0; readerIndex < 8; readerIndex++) {
+                    readers.add(executor.submit(() -> {
+                        for (int lookupIndex = 0; lookupIndex < 500; lookupIndex++) {
+                            assertEquals(activeSubscription, cache.getById("first-id").orElseThrow());
+                            assertEquals(List.of(activeSubscription),
+                                cache.findByEnvironmentAndEventType("production", "event"));
+                            assertTrue(cache.isInitialized());
+                            assertTrue(cache.isActiveSnapshotUpToDate());
+                        }
+                    }));
+                }
+                for (var reader : readers) {
+                    reader.get(10, TimeUnit.SECONDS);
+                }
+                assertFalse(preparation.isDone());
+                assertFalse(cache.hasPendingSnapshot());
+                release.countDown();
+                preparation.get(10, TimeUnit.SECONDS);
+            } finally {
+                release.countDown();
+            }
+        }
+
+        assertTrue(cache.isActiveSnapshotUpToDate());
+        assertTrue(cache.hasPendingSnapshot());
+        assertTrue(cache.getById("first-id").isPresent());
+        assertTrue(cache.getById("next-id").isEmpty());
+        cache.activate(next);
+        assertTrue(cache.isActiveSnapshotUpToDate());
+        assertFalse(cache.hasPendingSnapshot());
+        assertTrue(cache.getById("next-id").isPresent());
+        verify(snapshotLoader).load(next);
+    }
+
+    @Test
+    void disconnectDuringPreparationIsNotOverwrittenByLoadedSnapshot() throws Exception {
+        var first = snapshotHead("first");
+        var next = snapshotHead("next");
+        when(snapshotLoader.load(first)).thenReturn(snapshot(first,
+            List.of(subscription("first-id", "production", "event"))));
+        cache.setActivationHead(first);
+        cache.prepare(first);
+        cache.activate(first);
+        cache.setActivationHead(next);
+        var loading = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        blockSnapshotLoad(next, loading, release);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var preparation = executor.submit(() -> cache.prepare(next));
+            try {
+                assertTrue(loading.await(10, TimeUnit.SECONDS));
+                executor.submit(cache::disconnected).get(10, TimeUnit.SECONDS);
+                assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+                assertTrue(cache.getById("first-id").isPresent());
+                release.countDown();
+                preparation.get(10, TimeUnit.SECONDS);
+            } finally {
+                release.countDown();
+            }
+        }
+
+        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+        assertTrue(cache.hasPendingSnapshot());
+        cache.activate(next);
+        assertFalse(cache.isActiveSnapshotUpToDate());
+        assertTrue(cache.isInitialized());
+        assertTrue(cache.getById("next-id").isPresent());
+        cache.setActivationHead(next);
+        cache.activate(next);
+        assertTrue(cache.isActiveSnapshotUpToDate());
+        verify(snapshotLoader).load(next);
+    }
+
+    @Test
+    void newerActivationHeadDuringPreparationIsNotOverwrittenByLoadedSnapshot() throws Exception {
+        var first = snapshotHead("first");
+        var next = snapshotHead("next");
+        var latest = snapshotHead("latest");
+        when(snapshotLoader.load(first)).thenReturn(snapshot(first,
+            List.of(subscription("first-id", "production", "event"))));
+        when(snapshotLoader.load(latest)).thenReturn(snapshot(latest,
+            List.of(subscription("latest-id", "production", "event"))));
+        cache.setActivationHead(first);
+        cache.prepare(first);
+        cache.activate(first);
+        cache.setActivationHead(next);
+        var loading = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        blockSnapshotLoad(next, loading, release);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var preparation = executor.submit(() -> cache.prepare(next));
+            try {
+                assertTrue(loading.await(10, TimeUnit.SECONDS));
+                executor.submit(() -> cache.setActivationHead(latest)).get(10, TimeUnit.SECONDS);
+                release.countDown();
+                preparation.get(10, TimeUnit.SECONDS);
+            } finally {
+                release.countDown();
+            }
+        }
+
+        assertTrue(cache.isActiveSnapshotUpToDate());
+        cache.activationFailed(next);
+        assertTrue(cache.isActiveSnapshotUpToDate());
+        cache.activate(next);
+        assertFalse(cache.isActiveSnapshotUpToDate());
+        cache.prepare(latest);
+        cache.activate(latest);
+        assertTrue(cache.isActiveSnapshotUpToDate());
+        assertTrue(cache.getById("latest-id").isPresent());
+        verify(snapshotLoader).load(next);
+    }
+
+    @Test
+    void concurrentActivationAndDisconnectCannotLeaveSnapshotFresh() throws Exception {
+        var next = snapshotHead("next");
+        when(snapshotLoader.load(next)).thenReturn(snapshot(next,
+            List.of(subscription("next-id", "production", "event"))));
+        cache.setActivationHead(next);
+        cache.prepare(next);
+        var ready = new CountDownLatch(2);
+        var start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var activation = executor.submit(() -> {
+                ready.countDown();
+                assertTrue(start.await(10, TimeUnit.SECONDS));
+                cache.activate(next);
+                return null;
+            });
+            var disconnect = executor.submit(() -> {
+                ready.countDown();
+                assertTrue(start.await(10, TimeUnit.SECONDS));
+                cache.disconnected();
+                return null;
+            });
+            try {
+                assertTrue(ready.await(10, TimeUnit.SECONDS));
+                start.countDown();
+                activation.get(10, TimeUnit.SECONDS);
+                disconnect.get(10, TimeUnit.SECONDS);
+            } finally {
+                start.countDown();
+            }
+        }
+
+        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+        assertTrue(cache.isInitialized());
+        assertTrue(cache.getById("next-id").isPresent());
+        assertFalse(cache.hasPendingSnapshot());
+    }
+
+    @Test
+    void discardingPreparedSnapshotPreservesActiveSnapshotAndActivationHeadRequirement() {
+        var first = snapshotHead("first");
+        var next = snapshotHead("next");
+        when(snapshotLoader.load(first)).thenReturn(snapshot(first,
+            List.of(subscription("first-id", "production", "event"))));
+        when(snapshotLoader.load(next)).thenReturn(snapshot(next,
+            List.of(subscription("next-id", "production", "event"))));
+        cache.setActivationHead(first);
+        cache.prepare(first);
+        cache.activate(first);
+        cache.setActivationHead(next);
+        cache.prepare(next);
+        assertThrows(IllegalStateException.class, () -> cache.activate(first));
+        cache.activationFailed(next);
+        cache.discardPreparedSnapshot();
+
+        assertFalse(cache.hasPendingSnapshot());
+        assertTrue(cache.isInitialized());
+        assertTrue(cache.getById("first-id").isPresent());
+        assertTrue(cache.getById("next-id").isEmpty());
+        cache.activate(first);
+        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+        cache.prepare(next);
+        cache.activate(next);
+        assertTrue(cache.isActiveSnapshotUpToDate());
+        assertTrue(cache.getById("next-id").isPresent());
+    }
+
+    private void blockSnapshotLoad(SubscriptionSnapshotHead head, CountDownLatch loading, CountDownLatch release) {
+        when(snapshotLoader.load(head)).thenAnswer(ignored -> {
+            loading.countDown();
+            assertTrue(release.await(30, TimeUnit.SECONDS));
+            return snapshot(head, List.of(subscription("next-id", "production", "event")));
+        });
     }
 
     private List<SubscriptionMongoDocument> subscriptions(String prefix, int count) {

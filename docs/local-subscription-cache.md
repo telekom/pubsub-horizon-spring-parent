@@ -125,6 +125,10 @@ The `LocalSubscriptionCacheInitializer` provides the following coordinator respo
 | `run(args)` | Performs the initial MongoDB head lookup, preparation, and activation only when ZooKeeper is disabled. |
 | `health()` | Reports `UP` when the local cache or an enabled fallback reader is ready; otherwise reports `DOWN`. |
 
+Health details are reported in this order: `source`, `localSnapshotId`, `cacheStatus`, and `localReadsAllowed`.
+`localSnapshotId` identifies the last active local snapshot and can be stale when `source` is `fallback`; it is
+`none` before a local snapshot has been activated.
+
 The initializer coordinates the snapshot lifecycle but does not provide subscription lookup methods itself. Readers use
 `SubscriptionCacheReader`, which delegates local lookups to the currently active snapshot.
 
@@ -299,6 +303,7 @@ horizon:
                 connect-string: localhost:2181,localhost:2182,localhost:2183
                 prepared-path: /horizon/subscriptions/prepared
                 activate-path: /horizon/subscriptions/activate
+                reconcile-interval: 300s
 ```
 
 Curator tracks the ZooKeeper-published ensemble addresses by default (`ensemble-tracker-enabled: true`).
@@ -307,9 +312,14 @@ in the local profile. This keeps the host-reachable `connect-string` for reconne
 Docker-internal names such as `zoo1:2181`. Leave tracking enabled when the published addresses are reachable.
 
 The Curator client and head watcher start with the Spring context and close on shutdown. The watcher reconciles
-the current heads asynchronously; the initial reconciliation signal does not block pod startup or imply a fresh
-snapshot when `activate` is absent. In this mode the MongoDB head initializer and its poller do not run. Local
-reads require a `FRESH` snapshot; otherwise the shared reader is used, and health follows the effective reader.
+both current heads asynchronously on startup, watch events, and reconnect. It also rereads only the authoritative
+`activate` head periodically; configure `reconcile-interval` as a non-negative Spring `Duration` (default: `300s`).
+Set it to `0s` to disable periodic reconciliation; watch events and reconnect handling remain enabled. With zero,
+recovery after a missed watch event or read failure waits for a later watch event or reconnect. Periodic passes are
+serialized with watcher and reconnect work and skipped while disconnected. The initial
+reconciliation signal does not block pod startup or imply a fresh snapshot when `activate` is absent. In this
+mode the MongoDB head initializer and its poller do not run. Local reads require a `FRESH` snapshot; otherwise
+the shared reader is used, and health follows the effective reader.
 Without this opt-in the existing MongoDB head initialization and optional polling remain unchanged. Readiness
 probe separation and Kafka listener startup gating are still pending.
 

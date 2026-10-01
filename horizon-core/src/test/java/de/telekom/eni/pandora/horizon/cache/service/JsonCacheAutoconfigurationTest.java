@@ -59,7 +59,7 @@ class JsonCacheAutoconfigurationTest {
     }
 
         @Test
-        void zooKeeperReaderUsesSharedUntilLocalCacheIsFresh() throws Exception {
+        void zooKeeperReaderUsesSharedUntilLocalReadsAreAllowed() throws Exception {
                 var cacheProperties = new CacheProperties();
                 cacheProperties.getLocalSubscriptionCache().setEnabled(true);
                 cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
@@ -72,7 +72,7 @@ class JsonCacheAutoconfigurationTest {
                                         var reader = context.getBean(SubscriptionCacheReader.class);
                                         reader.getById("subscription-1");
                                         verify(localCache, never()).getById("subscription-1");
-                                        when(localCache.isFresh()).thenReturn(true);
+                                        when(localCache.canServeLocalReads()).thenReturn(true);
                                         reader.getById("subscription-1");
                                         verify(localCache).getById("subscription-1");
                                 });

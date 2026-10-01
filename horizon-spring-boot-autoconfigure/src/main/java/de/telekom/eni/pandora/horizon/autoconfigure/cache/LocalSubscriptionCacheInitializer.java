@@ -83,25 +83,36 @@ public class LocalSubscriptionCacheInitializer implements ApplicationRunner, Hea
         if (cacheProperties.getLocalSubscriptionCache().getZooKeeper().isEnabled()) {
             var reader = subscriptionCacheReaderProvider.getIfAvailable();
             if (reader != null && reader.isReady()) {
-                return Health.up().withDetail("source", localSubscriptionCache.isFresh() ? "local" : "fallback").build();
+                var source = localSubscriptionCache.canServeLocalReads() ? "local" : "fallback";
+                return withCacheDetails(Health.up(), source).build();
             }
-            return Health.down().withDetail("reason", "No subscription cache reader is ready").build();
+            return withCacheDetails(Health.down(), "unavailable")
+                    .withDetail("reason", "No subscription cache reader is ready")
+                    .build();
         }
-        if (localSubscriptionCache.isReady()) {
-            return Health.up().withDetail("source", "local").build();
+        if (localSubscriptionCache.isInitialized()) {
+            return withCacheDetails(Health.up(), "local").build();
         }
         if (cacheProperties.getLocalSubscriptionCache().getFallbackMode()
                 != CacheProperties.LocalSubscriptionCacheFallback.NONE) {
             var subscriptionCacheReader = subscriptionCacheReaderProvider.getIfAvailable();
             if (subscriptionCacheReader != null && subscriptionCacheReader.isReady()) {
-                return Health.up()
-                        .withDetail("source", "fallback")
-                        .withDetail("localCache", "not initialized")
-                        .build();
+                return withCacheDetails(Health.up(), "fallback")
+                    .withDetail("localCache", "not initialized")
+                    .build();
             }
         }
-        return Health.down()
+            return withCacheDetails(Health.down(), "unavailable")
                 .withDetail("reason", "No subscription cache reader is ready")
                 .build();
     }
+
+            private Health.Builder withCacheDetails(Health.Builder builder, String source) {
+            var cacheStatus = localSubscriptionCache.status();
+            return builder
+                .withDetail("source", source)
+                .withDetail("localSnapshotId", localSubscriptionCache.localSnapshotId().orElse("none"))
+                .withDetail("cacheStatus", cacheStatus == null ? "UNKNOWN" : cacheStatus.name())
+                .withDetail("localReadsAllowed", localSubscriptionCache.canServeLocalReads());
+            }
 }

@@ -17,11 +17,14 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -104,12 +107,101 @@ class SubscriptionZooKeeperClientTest {
         contextRunner
             .withPropertyValues(
                 "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/horizon/subscriptions/prepared",
-                "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/horizon/subscriptions/activate")
+                "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/horizon/subscriptions/activate",
+                "horizon.cache.local-subscription-cache.zoo-keeper.reconcile-interval=7m")
             .run(context -> {
                 var properties = context.getBean(CacheProperties.class).getLocalSubscriptionCache().getZooKeeper();
                 assertThat(properties.getPreparedPath()).isEqualTo("/horizon/subscriptions/prepared");
                 assertThat(properties.getActivatePath()).isEqualTo("/horizon/subscriptions/activate");
+                assertThat(properties.getReconcileInterval()).isEqualTo(Duration.ofMinutes(7));
             });
+    }
+
+    @Test
+    void reconcileIntervalDefaultsTo300Seconds() {
+        contextRunner.run(context -> assertThat(context.getBean(CacheProperties.class)
+            .getLocalSubscriptionCache().getZooKeeper().getReconcileInterval())
+            .isEqualTo(Duration.ofSeconds(300)));
+    }
+
+    @Test
+    void periodicReconciliationUsesActivateOnlyPath() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var periodicTask = new AtomicReference<Runnable>();
+            var scheduler = manualScheduler(periodicTask);
+
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler, Duration.ofMinutes(7), scheduler)) {
+                watcher.start();
+                watcher.initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                verify(reconciler).run();
+                assertThat(periodicTask.get()).isNotNull();
+                watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
+                periodicTask.get().run();
+                verify(reconciler).reconcileActiveHead();
+            }
+        }
+    }
+
+    @Test
+    void periodicReconciliationIsSkippedWhileSuspended() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var periodicTask = new AtomicReference<Runnable>();
+            var scheduler = manualScheduler(periodicTask);
+
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler, Duration.ofMinutes(7), scheduler)) {
+                watcher.start();
+                watcher.initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                verify(reconciler).run();
+                watcher.connectionStateChanged(client, ConnectionState.SUSPENDED);
+                periodicTask.get().run();
+                verify(reconciler, org.mockito.Mockito.never()).reconcileActiveHead();
+            }
+        }
+    }
+
+    @Test
+    void negativeReconcileIntervalIsRejected() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+
+            assertThrows(IllegalArgumentException.class, () -> new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler, Duration.ofSeconds(-1)));
+        }
+    }
+
+    @Test
+    void zeroReconcileIntervalDisablesOnlyPeriodicTask() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var periodicTask = new AtomicReference<Runnable>();
+            var scheduler = manualScheduler(periodicTask);
+
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler, Duration.ZERO, scheduler)) {
+                watcher.start();
+                watcher.initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+                assertThat(periodicTask.get()).isNull();
+                watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
+                verify(reconciler).reconcileAfterReconnect();
+            }
+        }
     }
 
     @Test
@@ -274,7 +366,7 @@ class SubscriptionZooKeeperClientTest {
     }
 
     @Test
-    void suspensionAndLossInvalidateWhileReconnectSchedulesForcedReconciliation() throws Exception {
+    void suspensionAndLossUseDifferentCacheTransitionsBeforeReconnect() throws Exception {
         try (var server = new TestingServer();
              var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
             client.start();
@@ -283,11 +375,13 @@ class SubscriptionZooKeeperClientTest {
             try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
                 "/subscriptions/prepared", "/subscriptions/activate", reconciler)) {
                 watcher.start();
-                verify(reconciler, timeout(10000)).run();
+                watcher.initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                verify(reconciler).run();
 
                 watcher.connectionStateChanged(client, ConnectionState.SUSPENDED);
                 watcher.connectionStateChanged(client, ConnectionState.LOST);
-                verify(reconciler, times(2)).suspended();
+                verify(reconciler).suspended();
+                verify(reconciler).lost();
 
                 watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
                 verify(reconciler, timeout(10000)).reconcileAfterReconnect();
@@ -402,6 +496,23 @@ class SubscriptionZooKeeperClientTest {
             actual = remaining > 0 ? observed.poll(remaining, TimeUnit.NANOSECONDS) : null;
         } while (actual != null && !actual.equals(expected));
         assertThat(actual).isEqualTo(expected);
+    }
+
+    private static ScheduledExecutorService manualScheduler(AtomicReference<Runnable> periodicTask) {
+        var scheduler = mock(ScheduledExecutorService.class);
+        doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(0).run();
+            return null;
+        }).when(scheduler).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
+        doAnswer(invocation -> {
+            periodicTask.set(invocation.getArgument(0));
+            return mock(ScheduledFuture.class);
+        }).when(scheduler).scheduleWithFixedDelay(
+            org.mockito.ArgumentMatchers.any(Runnable.class),
+            org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.any(TimeUnit.class));
+        return scheduler;
     }
 
     private static byte[] head(String snapshotId) {
