@@ -186,7 +186,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         verify(reader, times(3)).readPrepared();
         verify(reader, times(3)).readActivate();
         verify(cache).disconnected();
-        verify(cache).discardPreparedSnapshot();
+        verify(cache, never()).discardPreparedSnapshot();
         verify(cache, times(2)).prepare(active);
         verify(cache, times(2)).activate(active);
     }

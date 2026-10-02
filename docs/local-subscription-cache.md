@@ -298,13 +298,21 @@ horizon:
         local-subscription-cache:
             enabled: true
             fallback-mode: hazelcast-with-mongo-fallback
+            stale-cache-read-grace-period: 120s
+            initial-snapshot-timeout: 120s
             zoo-keeper:
                 enabled: true
                 connect-string: localhost:2181,localhost:2182,localhost:2183
                 prepared-path: /horizon/subscriptions/prepared
                 activate-path: /horizon/subscriptions/activate
-                reconcile-interval: 300s
+                reconcile-interval: 60s
+                snapshot-sync-jitter: 10s
 ```
+
+The service YAMLs and matching Helm helpers use service-prefixed environment variables:
+`STARLIGHT`, `COMET`, `GALAXY`, or `PULSAR`, followed by `CACHE_LOCAL_SUBSCRIPTION_CACHE_`.
+ZooKeeper properties add `ZOO_KEEPER_`; the stale-read grace property is named
+`stale-cache-read-grace-period` and uses the `STALE_CACHE_READ_GRACE_PERIOD` suffix.
 
 Curator tracks the ZooKeeper-published ensemble addresses by default (`ensemble-tracker-enabled: true`).
 For a local Docker ensemble accessed from the host through mapped ports, set `ensemble-tracker-enabled: false`
@@ -313,15 +321,34 @@ Docker-internal names such as `zoo1:2181`. Leave tracking enabled when the publi
 
 The Curator client and head watcher start with the Spring context and close on shutdown. The watcher reconciles
 both current heads asynchronously on startup, watch events, and reconnect. It also rereads only the authoritative
-`activate` head periodically; configure `reconcile-interval` as a non-negative Spring `Duration` (default: `300s`).
+`activate` head periodically; configure `reconcile-interval` as a non-negative Spring `Duration` (default: `60s`).
 Set it to `0s` to disable periodic reconciliation; watch events and reconnect handling remain enabled. With zero,
 recovery after a missed watch event or read failure waits for a later watch event or reconnect. Periodic passes are
 serialized with watcher and reconnect work and skipped while disconnected. The initial
 reconciliation signal does not block pod startup or imply a fresh snapshot when `activate` is absent. In this
 mode the MongoDB head initializer and its poller do not run. Local reads require a `FRESH` snapshot; otherwise
-the shared reader is used, and health follows the effective reader.
-Without this opt-in the existing MongoDB head initialization and optional polling remain unchanged. Readiness
-probe separation and Kafka listener startup gating are still pending.
+the shared reader is used after the configured stale-cache-read grace expires. Configure
+`stale-cache-read-grace-period` as a non-negative Spring `Duration` under `local-subscription-cache` (default: `120s`).
+While the cache is `STALE`, the last active local snapshot may serve reads until that period expires; `0s` switches
+to the shared reader immediately. The same grace applies to every transition to `STALE`, including `SUSPENDED`,
+`LOST`, a missing/unreadable `ACTIVATE` head, and activation failure. Repeated stale causes do not restart the grace
+period; successful activation returns the cache to `FRESH` and clears it. The cache remains `STALE` after expiry;
+only local-read eligibility changes. Health follows the effective reader.
+Changes to `prepared` schedule only a delayed preload, with a random delay up to `snapshot-sync-jitter`
+(default: `10s`). Later `prepared` events replace the pending preload and use the latest event payload. On
+reconnect, reconciliation of the current heads is delayed by the same random interval. A subsequent `activate`
+event reconciles immediately instead. Set this value to `0s` to disable both delays; startup and periodic
+reconciliation are not jittered.
+On reconnect, a previously prepared snapshot is retained and reused only when its complete metadata matches the
+current head; a different head is loaded before activation.
+With ZooKeeper enabled, startup waits for the first successfully activated, non-empty `FRESH` snapshot. Configure
+`initial-snapshot-timeout` under `local-subscription-cache` (default: `120s`); if the deadline expires, application
+startup fails even if the shared fallback is ready. Initial reconciliation alone does not satisfy this barrier when
+`activate` is absent. Spring publishes `ApplicationReadyEvent` only after the barrier succeeds; Comet and Galaxy
+start their Kafka containers on that event. Later transitions to `STALE` do not stop those listeners, and readers
+continue to use the grace period and shared fallback. Kubernetes readiness probes must use the Spring Boot readiness
+health group, independently of liveness.
+Without this opt-in the existing MongoDB head initialization and optional polling remain unchanged.
 
 ### Runtime scenarios
 

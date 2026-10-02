@@ -13,6 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -26,8 +31,11 @@ import java.util.concurrent.atomic.AtomicReference;
 public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
     private final MongoSubscriptionSnapshotLoader snapshotLoader;
+    private final Duration staleCacheReadGracePeriod;
+    private final Clock clock;
+    private final CompletableFuture<Void> firstFreshSnapshot = new CompletableFuture<>();
     private final AtomicReference<CacheState> cacheState = new AtomicReference<>(
-        new CacheState(IndexedSubscriptionSnapshot.empty(), null, null, Status.UNINITIALIZED, false, false));
+        new CacheState(IndexedSubscriptionSnapshot.empty(), null, null, Status.UNINITIALIZED, false, null));
 
     public enum Status {
         UNINITIALIZED, FRESH, STALE
@@ -37,48 +45,55 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
                               IndexedSubscriptionSnapshot preparedSnapshot,
                               SnapshotVersion activationHeadVersion,
                               Status status, boolean activationHeadMustMatch,
-                              boolean localReadsAllowedDuringSuspension) {
+                              Instant staleSince) {
 
         private CacheState withPreparedSnapshot(IndexedSubscriptionSnapshot nextPreparedSnapshot) {
             return new CacheState(activeSnapshot, nextPreparedSnapshot, activationHeadVersion, status,
-                activationHeadMustMatch, localReadsAllowedDuringSuspension);
+                activationHeadMustMatch, staleSince);
         }
 
         private CacheState withoutPreparedSnapshot() {
             return withPreparedSnapshot(null);
         }
 
-        private CacheState withActivatedSnapshot(IndexedSubscriptionSnapshot nextSnapshot) {
+        private CacheState withActivatedSnapshot(IndexedSubscriptionSnapshot nextSnapshot, Instant now) {
             var nextVersion = nextSnapshot.version();
             var activeVersion = activeSnapshot.version();
             var freshAfterActivation = !activationHeadMustMatch || nextVersion.equals(activationHeadVersion)
                 || status == Status.FRESH && nextVersion.equals(activeVersion);
+            var nextStatus = freshAfterActivation ? Status.FRESH : Status.STALE;
             return new CacheState(nextSnapshot, preparedSnapshot, activationHeadVersion,
-                freshAfterActivation ? Status.FRESH : Status.STALE, activationHeadMustMatch,
-                freshAfterActivation ? false : localReadsAllowedDuringSuspension);
+                nextStatus, activationHeadMustMatch,
+                staleSinceFor(nextStatus, staleSince, now));
         }
 
         private CacheState withActivationHeadVersion(SnapshotVersion nextActivationHeadVersion) {
             return new CacheState(activeSnapshot, preparedSnapshot, nextActivationHeadVersion, status, true,
-                localReadsAllowedDuringSuspension);
+                staleSince);
         }
 
-        private CacheState withActivationFailure(SnapshotVersion failedVersion) {
+        private CacheState withActivationFailure(SnapshotVersion failedVersion, Instant now) {
             return !failedVersion.equals(activationHeadVersion)
                 ? this
-                : new CacheState(activeSnapshot, preparedSnapshot, activationHeadVersion, statusWhenNotFresh(), true,
-                    localReadsAllowedDuringSuspension);
+                : withStaleStatus(now);
         }
 
-        private CacheState clearActivationHeadVersion() {
-            return new CacheState(activeSnapshot, preparedSnapshot, null, statusWhenNotFresh(), true, false);
+        private CacheState clearActivationHeadVersion(Instant now) {
+            return new CacheState(activeSnapshot, preparedSnapshot, null, statusWhenNotFresh(), true,
+                staleSinceFor(statusWhenNotFresh(), staleSince, now));
         }
 
-        private CacheState withSuspendedConnection() {
-            var canContinueServing = localReadsAllowedDuringSuspension
-                || status == Status.FRESH && hasActiveSnapshot();
-            return new CacheState(activeSnapshot, preparedSnapshot, activationHeadVersion, statusWhenNotFresh(),
-                activationHeadMustMatch, canContinueServing);
+        private CacheState withStaleStatus(Instant now) {
+            var nextStatus = statusWhenNotFresh();
+            return new CacheState(activeSnapshot, preparedSnapshot, activationHeadVersion, nextStatus,
+                activationHeadMustMatch, staleSinceFor(nextStatus, staleSince, now));
+        }
+
+        private static Instant staleSinceFor(Status nextStatus, Instant currentStaleSince, Instant now) {
+            if (nextStatus != Status.STALE) {
+                return null;
+            }
+            return currentStaleSince == null ? now : currentStaleSince;
         }
 
         private boolean hasPendingSnapshot() {
@@ -101,7 +116,21 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * @param snapshotLoader loader for snapshot metadata and entries
      */
     public LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader) {
+        this(snapshotLoader, Duration.ZERO);
+    }
+
+    public LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader, Duration staleCacheReadGracePeriod) {
+        this(snapshotLoader, staleCacheReadGracePeriod, Clock.systemUTC());
+    }
+
+    LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader, Duration staleCacheReadGracePeriod, Clock clock) {
         this.snapshotLoader = Objects.requireNonNull(snapshotLoader, "snapshotLoader must not be null");
+        this.staleCacheReadGracePeriod = Objects.requireNonNull(staleCacheReadGracePeriod,
+            "staleCacheReadGracePeriod must not be null");
+        if (staleCacheReadGracePeriod.isNegative()) {
+            throw new IllegalArgumentException("staleCacheReadGracePeriod must not be negative");
+        }
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
     /**
@@ -155,7 +184,9 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         if (prepared == null) {
             if (currentState.hasActiveSnapshot() && Objects.equals(currentState.activeSnapshot().version(),
                     SnapshotVersion.from(snapshotHead))) {
-                cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot()));
+                var now = clock.instant();
+                cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
+                completeFirstFreshSnapshot();
                 return;
             }
             throw new IllegalStateException("No prepared subscription snapshot available");
@@ -169,12 +200,26 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             throw new SubscriptionCacheSnapshotException("Cannot activate empty subscription snapshot");
         }
         if (Objects.equals(prepared.version(), currentState.activeSnapshot().version())) {
-            cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot()));
+            var now = clock.instant();
+            cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
+            completeFirstFreshSnapshot();
             return;
         }
-        cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(prepared));
+        var now = clock.instant();
+        cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(prepared, now));
+        completeFirstFreshSnapshot();
         log.debug("Activated local subscription snapshot {} with {} subscriptions",
             prepared.snapshotId(), prepared.subscriptionsById().size());
+    }
+
+    public CompletionStage<Void> firstFreshSnapshot() {
+        return firstFreshSnapshot.minimalCompletionStage();
+    }
+
+    private void completeFirstFreshSnapshot() {
+        if (status() == Status.FRESH) {
+            firstFreshSnapshot.complete(null);
+        }
     }
 
     public void setActivationHead(SubscriptionSnapshotHead head) {
@@ -184,15 +229,18 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
     public void activationFailed(SubscriptionSnapshotHead head) {
         var failedVersion = completeVersion(head);
-        cacheState.updateAndGet(previous -> previous.withActivationFailure(failedVersion));
+        var now = clock.instant();
+        cacheState.updateAndGet(previous -> previous.withActivationFailure(failedVersion, now));
     }
 
     public void disconnected() {
-        cacheState.updateAndGet(CacheState::clearActivationHeadVersion);
+        var now = clock.instant();
+        cacheState.updateAndGet(previous -> previous.clearActivationHeadVersion(now));
     }
 
     public void suspended() {
-        cacheState.updateAndGet(CacheState::withSuspendedConnection);
+        var now = clock.instant();
+        cacheState.updateAndGet(previous -> previous.withStaleStatus(now));
     }
 
     public Status status() {
@@ -214,9 +262,21 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * @return {@code true} if local reads are allowed
      */
     public boolean canServeLocalReads() {
+        return canServeLocalReads(clock.instant());
+    }
+
+    boolean canServeLocalReads(Instant now) {
         var state = cacheState.get();
-        return state.hasActiveSnapshot()
-            && (state.status() == Status.FRESH || state.localReadsAllowedDuringSuspension());
+        if (!state.hasActiveSnapshot()) {
+            return false;
+        }
+        if (state.status() == Status.FRESH) {
+            return true;
+        }
+        return state.status() == Status.STALE
+            && state.staleSince() != null
+            && !staleCacheReadGracePeriod.isZero()
+            && Duration.between(state.staleSince(), now).compareTo(staleCacheReadGracePeriod) < 0;
     }
 
     /**

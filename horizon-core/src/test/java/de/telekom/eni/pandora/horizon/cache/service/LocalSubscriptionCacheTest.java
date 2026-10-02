@@ -16,9 +16,15 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -42,14 +48,17 @@ class LocalSubscriptionCacheTest {
         when(snapshotLoader.load(oldHead)).thenReturn(snapshot("snapshot-1", List.of(oldSubscription)));
         when(snapshotLoader.load(newHead)).thenReturn(snapshot("snapshot-2", List.of(newSubscription)));
 
+        assertFalse(cache.firstFreshSnapshot().toCompletableFuture().isDone());
         cache.prepare(oldHead);
 
+        assertFalse(cache.firstFreshSnapshot().toCompletableFuture().isDone());
         assertTrue(cache.getById("old-id").isEmpty());
         assertTrue(cache.findByEnvironmentAndEventType("production", "old-event").isEmpty());
         assertFalse(cache.isInitialized());
         assertTrue(cache.localSnapshotId().isEmpty());
 
         cache.activate(oldHead);
+        assertTrue(cache.firstFreshSnapshot().toCompletableFuture().isDone());
         assertTrue(cache.isInitialized());
         assertEquals("snapshot-1", cache.localSnapshotId().orElseThrow());
         cache.prepare(newHead);
@@ -68,6 +77,27 @@ class LocalSubscriptionCacheTest {
         var exception = assertThrows(IllegalStateException.class, () -> cache.activate(snapshotHead("snapshot-1")));
 
         assertEquals("No prepared subscription snapshot available", exception.getMessage());
+        assertFalse(cache.firstFreshSnapshot().toCompletableFuture().isDone());
+    }
+
+    @Test
+    void firstFreshSnapshotWaitsForConfirmedHeadAndRemainsCompleteAfterDisconnect() {
+        var head = snapshotHead("snapshot-1");
+        when(snapshotLoader.load(head)).thenReturn(snapshot(head,
+            List.of(subscription("active-id", "production", "event"))));
+
+        cache.prepare(head);
+        cache.disconnected();
+        cache.activate(head);
+        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
+        assertFalse(cache.firstFreshSnapshot().toCompletableFuture().isDone());
+
+        cache.setActivationHead(head);
+        cache.activate(head);
+        assertTrue(cache.firstFreshSnapshot().toCompletableFuture().isDone());
+
+        cache.disconnected();
+        assertTrue(cache.firstFreshSnapshot().toCompletableFuture().isDone());
     }
 
     @Test
@@ -183,6 +213,7 @@ class LocalSubscriptionCacheTest {
             List.of(subscription("active-id", "production", "event"))));
 
         snapshotCache.prepare(preparedHead);
+        snapshotCache.disconnected();
         snapshotCache.prepare(preparedHead);
 
         verify(snapshotLoader).load(preparedHead);
@@ -324,28 +355,60 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
-    void suspendedCacheKeepsServingUntilLost() {
+    void staleReadGraceAppliesAcrossSuspendedAndDisconnected() {
         var head = snapshotHead("suspended");
+        var clock = new MutableClock(Instant.parse("2026-10-02T00:00:00Z"));
+        var graceCache = new LocalSubscriptionCache(snapshotLoader, Duration.ofSeconds(5), clock);
         when(snapshotLoader.load(head)).thenReturn(snapshot(head,
             List.of(subscription("local-id", "production", "event"))));
-        cache.setActivationHead(head);
-        cache.prepare(head);
-        cache.activate(head);
+        graceCache.setActivationHead(head);
+        graceCache.prepare(head);
+        graceCache.activate(head);
 
-        cache.suspended();
+        clock.advance(Duration.ofSeconds(1));
+        graceCache.suspended();
 
-        assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
-        assertTrue(cache.isInitialized());
-        assertFalse(cache.isActiveSnapshotUpToDate());
-        assertTrue(cache.canServeLocalReads());
-        assertTrue(cache.isReady());
-        assertTrue(cache.getById("local-id").isPresent());
+        assertEquals(LocalSubscriptionCache.Status.STALE, graceCache.status());
+        assertTrue(graceCache.isInitialized());
+        assertFalse(graceCache.isActiveSnapshotUpToDate());
+        assertTrue(graceCache.canServeLocalReads());
+        assertTrue(graceCache.isReady());
+        assertTrue(graceCache.getById("local-id").isPresent());
 
-        cache.disconnected();
+        clock.advance(Duration.ofSeconds(3));
+        graceCache.disconnected();
+        assertTrue(graceCache.canServeLocalReads(), "another stale cause must not restart the grace period");
 
-        assertTrue(cache.isInitialized());
-        assertFalse(cache.canServeLocalReads());
-        assertFalse(cache.isReady());
+        clock.advance(Duration.ofSeconds(2));
+        assertFalse(graceCache.canServeLocalReads());
+        assertTrue(graceCache.isInitialized());
+        assertFalse(graceCache.isReady());
+    }
+
+    @Test
+    void activationFailureUsesTheSameStaleGracePeriod() {
+        var head = snapshotHead("failed-activation");
+        var clock = new MutableClock(Instant.parse("2026-10-02T00:00:00Z"));
+        var graceCache = new LocalSubscriptionCache(snapshotLoader, Duration.ofSeconds(5), clock);
+        when(snapshotLoader.load(head)).thenReturn(snapshot(head,
+            List.of(subscription("local-id", "production", "event"))));
+        graceCache.setActivationHead(head);
+        graceCache.prepare(head);
+        graceCache.activate(head);
+
+        clock.advance(Duration.ofSeconds(1));
+        graceCache.setActivationHead(snapshotHead("new-head"));
+        graceCache.activationFailed(snapshotHead("new-head"));
+
+        assertEquals(LocalSubscriptionCache.Status.STALE, graceCache.status());
+        assertTrue(graceCache.canServeLocalReads());
+        assertFalse(graceCache.canServeLocalReads(clock.instant().plusSeconds(5)));
+    }
+
+    @Test
+    void rejectsNegativeStaleCacheReadGracePeriod() {
+        assertThrows(IllegalArgumentException.class,
+            () -> new LocalSubscriptionCache(snapshotLoader, Duration.ofSeconds(-1)));
     }
 
     @Test
@@ -644,6 +707,33 @@ class LocalSubscriptionCacheTest {
             assertTrue(release.await(30, TimeUnit.SECONDS));
             return snapshot(head, List.of(subscription("next-id", "production", "event")));
         });
+    }
+
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> currentInstant;
+
+        private MutableClock(Instant initialInstant) {
+            this.currentInstant = new AtomicReference<>(initialInstant);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return currentInstant.get();
+        }
+
+        private void advance(Duration duration) {
+            currentInstant.updateAndGet(instant -> instant.plus(duration));
+        }
     }
 
     private List<SubscriptionMongoDocument> subscriptions(String prefix, int count) {

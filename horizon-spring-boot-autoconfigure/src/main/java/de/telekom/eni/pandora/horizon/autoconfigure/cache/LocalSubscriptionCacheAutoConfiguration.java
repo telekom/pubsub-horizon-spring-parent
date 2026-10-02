@@ -12,6 +12,7 @@ import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -21,6 +22,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Configuration
 public class LocalSubscriptionCacheAutoConfiguration {
@@ -83,7 +86,32 @@ public class LocalSubscriptionCacheAutoConfiguration {
         var reader = new ZooKeeperSubscriptionSnapshotHeadReader(
             client, new ObjectMapper(), preparedPath, activatePath);
         return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatePath,
-            new ZooKeeperSubscriptionHeadReconciler(reader, cache), zooKeeper.getReconcileInterval());
+            new ZooKeeperSubscriptionHeadReconciler(reader, cache), zooKeeper.getReconcileInterval(),
+            zooKeeper.getSnapshotSyncJitter());
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = {
+        "horizon.cache.local-subscription-cache.enabled",
+        "horizon.cache.local-subscription-cache.zoo-keeper.enabled"
+    }, havingValue = "true")
+    public ApplicationRunner localSubscriptionCacheStartupBarrier(LocalSubscriptionCache cache,
+            CacheProperties cacheProperties) {
+        var timeout = cacheProperties.getLocalSubscriptionCache().getInitialSnapshotTimeout();
+        if (timeout == null || timeout.isNegative() || timeout.isZero() || timeout.toMillis() == 0) {
+            throw new IllegalArgumentException("Initial subscription snapshot timeout must be at least 1ms");
+        }
+        return args -> {
+            try {
+                cache.firstFreshSnapshot().toCompletableFuture().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException exception) {
+                throw new IllegalStateException("Initial subscription snapshot did not become fresh within " + timeout,
+                    exception);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for initial subscription snapshot", exception);
+            }
+        };
     }
 
     @Bean
@@ -104,7 +132,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
         return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
             mongoConfigTemplate,
             localCacheProperties.getSnapshotCollection(),
-            localCacheProperties.getHeadCollection()));
+            localCacheProperties.getHeadCollection()), localCacheProperties.getStaleCacheReadGracePeriod());
     }
 
     @Bean

@@ -47,7 +47,6 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         synchronized (activationLock) {
             connected = true;
             cache.disconnected();
-            cache.discardPreparedSnapshot();
             lastActivated = null;
         }
         run();
@@ -67,6 +66,19 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
     public synchronized void reconcileActiveHead() {
         reconcileActiveHead(Optional.empty());
+    }
+
+    public synchronized void preparePreparedEvent(byte[] data) {
+        try {
+            var prepared = reader.parsePreparedEvent(data);
+            if (prepared.isPresent()) {
+                prepareOnly(prepared.orElseThrow());
+            } else {
+                cache.discardPreparedSnapshot();
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Could not process prepared subscription head event", exception);
+        }
     }
 
     private void reconcileActiveHead(Optional<SubscriptionSnapshotHead> prepared) {

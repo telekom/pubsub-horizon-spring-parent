@@ -32,6 +32,10 @@ public class ZooKeeperSubscriptionSnapshotHeadReader {
         return read(activatePath);
     }
 
+    public Optional<SubscriptionSnapshotHead> parsePreparedEvent(byte[] data) {
+        return data == null ? Optional.empty() : Optional.of(parser.parse(data));
+    }
+
     private Optional<SubscriptionSnapshotHead> read(String path) {
         try {
             return Optional.of(parser.parse(client.getData().forPath(path)));

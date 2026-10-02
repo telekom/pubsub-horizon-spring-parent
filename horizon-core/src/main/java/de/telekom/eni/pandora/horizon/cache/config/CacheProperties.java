@@ -41,6 +41,10 @@ public class CacheProperties {
 
         private String headCollection = "subscriptions.subscriber.horizon.telekom.de.v1-head";
 
+        private Duration staleCacheReadGracePeriod = Duration.ofSeconds(120);
+
+        private Duration initialSnapshotTimeout = Duration.ofSeconds(120);
+
         private ZooKeeperProperties zooKeeper = new ZooKeeperProperties();
     }
 
@@ -62,7 +66,9 @@ public class CacheProperties {
 
         private Duration sessionTimeout = Duration.ofSeconds(60);
 
-        private Duration reconcileInterval = Duration.ofSeconds(300);
+            private Duration reconcileInterval = Duration.ofSeconds(60);
+
+        private Duration snapshotSyncJitter = Duration.ofSeconds(10);
     }
 
     public enum LocalSubscriptionCacheFallback {
