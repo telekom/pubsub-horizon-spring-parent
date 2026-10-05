@@ -119,6 +119,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         this(snapshotLoader, Duration.ZERO);
     }
 
+    /** Creates a cache whose stale snapshot may serve reads for the given grace period. */
     public LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader, Duration staleCacheReadGracePeriod) {
         this(snapshotLoader, staleCacheReadGracePeriod, Clock.systemUTC());
     }
@@ -212,6 +213,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             prepared.snapshotId(), prepared.subscriptionsById().size());
     }
 
+    /** Completes when the cache becomes FRESH for the first time. */
     public CompletionStage<Void> firstFreshSnapshot() {
         return firstFreshSnapshot.minimalCompletionStage();
     }
@@ -222,27 +224,32 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
     }
 
+    /** Sets the expected active head; the cache is FRESH only while its active snapshot matches it. */
     public void setActivationHead(SubscriptionSnapshotHead head) {
         var activationHeadVersion = completeVersion(head);
         cacheState.updateAndGet(previous -> previous.withActivationHeadVersion(activationHeadVersion));
     }
 
+    /** Marks the cache STALE if the failed head is still the expected head. */
     public void activationFailed(SubscriptionSnapshotHead head) {
         var failedVersion = completeVersion(head);
         var now = clock.instant();
         cacheState.updateAndGet(previous -> previous.withActivationFailure(failedVersion, now));
     }
 
+    /** Clears the expected head because no head source is available; an active snapshot becomes STALE. */
     public void disconnected() {
         var now = clock.instant();
         cacheState.updateAndGet(previous -> previous.clearActivationHeadVersion(now));
     }
 
+    /** Marks an initialized cache STALE without clearing the expected head. */
     public void suspended() {
         var now = clock.instant();
         cacheState.updateAndGet(previous -> previous.withStaleStatus(now));
     }
 
+    /** Returns the current freshness status of the local snapshot. */
     public Status status() {
         return cacheState.get().status();
     }
@@ -254,6 +261,18 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      */
     public boolean isActiveSnapshotUpToDate() {
         return status() == Status.FRESH;
+    }
+
+    /**
+     * Indicates whether the active snapshot was loaded from the supplied head.
+     *
+     * @param head head to compare with the active snapshot
+     * @return {@code true} if all version fields of the head match the active snapshot
+     */
+    public boolean isActiveSnapshot(SubscriptionSnapshotHead head) {
+        var state = cacheState.get();
+        return head != null && state.hasActiveSnapshot()
+            && Objects.equals(state.activeSnapshot().version(), SnapshotVersion.from(head));
     }
 
     /**

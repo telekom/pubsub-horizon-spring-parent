@@ -25,7 +25,7 @@ subscription ID and by environment plus event type. The Shared Cache implementat
 
 Editable diagrams.net source: [local-subscription-cache-architecture.drawio](local-subscription-cache-architecture.drawio).
 
-Proposed ZooKeeper coordinator flow: [zookeeper-snapshot-coordinator-flow.drawio](zookeeper-snapshot-coordinator-flow.drawio).
+ZooKeeper coordinator flow: [zookeeper-snapshot-coordinator-flow.drawio](zookeeper-snapshot-coordinator-flow.drawio).
 
 ```mermaid
 classDiagram
@@ -84,8 +84,23 @@ classDiagram
     }
     class JsonCacheService~SubscriptionResource~
     class LocalSubscriptionCacheInitializer {
-        +run(args)
         +health()
+    }
+    class ZooKeeperSubscriptionHeadWatcher {
+        +start()
+        +close()
+    }
+    class ZooKeeperSubscriptionHeadReconciler {
+        +run()
+        +reconcileActiveHead()
+        +reconcileFromMongoHead()
+    }
+    class MongoSubscriptionHeadReconciler {
+        +reconcile()
+    }
+    class MongoSubscriptionHeadPoller {
+        +start()
+        +close()
     }
 
     SubscriptionCacheReader <|.. LocalSubscriptionCache
@@ -100,7 +115,11 @@ classDiagram
     FallbackSubscriptionCacheReader --> LocalSubscriptionCache : primary
     FallbackSubscriptionCacheReader --> HazelcastCacheReader : fallback
     LocalSubscriptionCacheInitializer --> LocalSubscriptionCache
-    LocalSubscriptionCacheInitializer ..> MongoSubscriptionSnapshotLoader : initial head lookup without ZooKeeper
+    ZooKeeperSubscriptionHeadWatcher --> ZooKeeperSubscriptionHeadReconciler : events, reconnect, periodic
+    ZooKeeperSubscriptionHeadReconciler --> LocalSubscriptionCache : prepare/activate ZooKeeper head
+    ZooKeeperSubscriptionHeadReconciler --> MongoSubscriptionHeadReconciler : head fallback
+    MongoSubscriptionHeadPoller --> MongoSubscriptionHeadReconciler : startup, periodic
+    MongoSubscriptionHeadReconciler --> LocalSubscriptionCache : prepare/activate MongoDB head
 ```
 
 `LocalSubscriptionCache` verwaltet `IndexedSubscriptionSnapshot`-Instanzen und hält dabei zwei Referenzen:
@@ -114,22 +133,22 @@ Lookup-Indizes. `activate(snapshotHead)` veröffentlicht diesen vorbereiteten Sn
 Dadurch können Leser während des Vorbereitens weiterhin den alten vollständigen Snapshot verwenden und sehen nach der Aktivierung
 entweder den vollständigen alten oder den vollständigen neuen Snapshot.
 
-Without ZooKeeper, `LocalSubscriptionCacheInitializer` loads the published MongoDB head once during startup, prepares its
-snapshot, and activates it. With ZooKeeper enabled, the watcher coordinates initialization and later updates through the
-`prepared` and `activate` heads. No periodic MongoDB head polling is performed.
+The ZooKeeper head watcher coordinates initialization and later updates through the `prepared` and `activate` heads.
+It falls back to the MongoDB head only when the `activate` head cannot be determined and
+`mongo-head-fallback-enabled` is `true`. With `zoo-keeper.enabled: false`, no ZooKeeper client is started; the
+`MongoSubscriptionHeadPoller` activates the MongoDB head once at startup and then every `reconcile-interval`.
 
-The `LocalSubscriptionCacheInitializer` provides the following coordinator responsibilities:
+The `LocalSubscriptionCacheInitializer` only reports health:
 
 | Method | Responsibility |
 |---|---|
-| `run(args)` | Performs the initial MongoDB head lookup, preparation, and activation only when ZooKeeper is disabled. |
-| `health()` | Reports `UP` when the local cache or an enabled fallback reader is ready; otherwise reports `DOWN`. |
+| `health()` | Reports `UP` when the effective reader (local cache or enabled fallback) is ready; otherwise reports `DOWN`. |
 
 Health details are reported in this order: `source`, `localSnapshotId`, `cacheStatus`, and `localReadsAllowed`.
 `localSnapshotId` identifies the last active local snapshot and can be stale when `source` is `fallback`; it is
 `none` before a local snapshot has been activated.
 
-The initializer coordinates the snapshot lifecycle but does not provide subscription lookup methods itself. Readers use
+The initializer does not coordinate the snapshot lifecycle and does not provide subscription lookup methods. Readers use
 `SubscriptionCacheReader`, which delegates local lookups to the currently active snapshot.
 
 Each snapshot contains two indexes:
@@ -147,11 +166,10 @@ must treat them as read-only.
 
 ### Initial state
 
-The active snapshot is empty after construction. When the local cache is enabled, the auto-configured initializer loads and
-activates the first snapshot during application startup.
+The active snapshot is empty after construction. When the local cache is enabled, the ZooKeeper head watcher (or the
+MongoDB head poller with ZooKeeper disabled) loads and activates the first snapshot during application startup; the
+startup barrier decides whether startup waits for it.
 
-- With a configured fallback, an initialization failure is logged and the shared cache can serve requests.
-- With fallback mode `NONE`, the initialization exception is propagated and application startup fails.
 - An empty snapshot is rejected by `activate(snapshotHead)`; the previous active snapshot remains unchanged.
 
 ### Prepare
@@ -175,10 +193,10 @@ The coordinator must obtain a complete and valid `SubscriptionSnapshotHead` befo
 published commit marker for the snapshot and contains more than the snapshot ID, including the expected `documentCount`, `revision`,
 and `sourceHash`.
 
-The provided initializer uses `LocalSubscriptionCache.readSnapshotHead()` as one way to read and validate the head from MongoDB. This
-method is optional for the coordinator contract, however. A coordinator may resolve the head through its own method or another trusted
-source and then call `prepare(snapshotHead)` directly. `prepare()` does not discover the current snapshot itself; it loads and validates
-the exact head supplied by the caller.
+`MongoSubscriptionHeadReconciler` uses `LocalSubscriptionCache.readSnapshotHead()` to read and validate the head from MongoDB;
+the ZooKeeper reconciler reads the head from the `activate` ZNode instead. A coordinator may resolve the head through any
+trusted source and then call `prepare(snapshotHead)` directly. `prepare()` does not discover the current snapshot itself; it
+loads and validates the exact head supplied by the caller.
 
 Regardless of how the head is obtained, the lifecycle remains:
 
@@ -274,45 +292,75 @@ horizon:
 The bean is registered in addition to the existing `JsonCacheService`. A custom `LocalSubscriptionCache` or
 `LocalSubscriptionCacheInitializer` bean overrides the corresponding auto-configured bean.
 
-Enable the cache without ZooKeeper for a one-time MongoDB head lookup at startup with:
+An enabled local cache uses ZooKeeper head coordination by default; the ZooKeeper connect string and distinct head paths
+are then required. With `zoo-keeper.enabled: false`, the MongoDB head is the only head source and is polled
+periodically; the ZooKeeper client settings, `mongo-head-fallback-enabled`, and `mongo-snapshot-sync-jitter` are ignored.
 
 ```yaml
 horizon:
     cache:
         local-subscription-cache:
             enabled: true
-            fallback-mode: hazelcast-with-mongo-fallback
+            fallback-mode: hazelcast-with-mongo-fallback # or none
+            mongo-head-fallback-enabled: true # Applies only with ZooKeeper enabled
             snapshot-collection: subscriptions.subscriber.horizon.telekom.de.v1-snapshots
             head-collection: subscriptions.subscriber.horizon.telekom.de.v1-head
-```
-
-Without ZooKeeper, the initializer performs `prepare(snapshotHead)` and `activate(snapshotHead)` once during startup.
-Empty snapshots are rejected and load failures preserve the active snapshot. A custom coordinator may supply the head
-itself while using the same `prepare(snapshotHead)` and `activate(snapshotHead)` contract.
-
-To opt in to ZooKeeper head coordination, configure the local cache, a shared fallback, and distinct head paths:
-
-```yaml
-horizon:
-    cache:
-        local-subscription-cache:
-            enabled: true
-            fallback-mode: hazelcast-with-mongo-fallback
-            stale-cache-read-grace-period: 120s
+            stale-local-cache-read-grace-period: 120s # Applies only to hazelcast-with-mongo-fallback
+            require-local-cache-at-startup: true # Applies only to hazelcast-with-mongo-fallback; none always requires a local cache
             initial-snapshot-timeout: 120s
+            reconcile-interval: 60s
+            mongo-head-poll-jitter: 10s
+            mongo-snapshot-sync-jitter: 10s # Applies only with ZooKeeper enabled
             zoo-keeper:
                 enabled: true
+                ensemble-tracker-enabled: true
                 connect-string: localhost:2181,localhost:2182,localhost:2183
                 prepared-path: /horizon/subscriptions/prepared
-                activate-path: /horizon/subscriptions/activate
-                reconcile-interval: 60s
-                snapshot-sync-jitter: 10s
+                activate-path: /horizon/subscriptions/activated
+                connection-timeout: 15s
+                session-timeout: 60s
 ```
 
 The service YAMLs and matching Helm helpers use service-prefixed environment variables:
 `STARLIGHT`, `COMET`, `GALAXY`, or `PULSAR`, followed by `CACHE_LOCAL_SUBSCRIPTION_CACHE_`.
-ZooKeeper properties add `ZOO_KEEPER_`; the stale-read grace property is named
-`stale-cache-read-grace-period` and uses the `STALE_CACHE_READ_GRACE_PERIOD` suffix.
+ZooKeeper client properties add `ZOO_KEEPER_`. For example, `stale-local-cache-read-grace-period` uses the
+`STALE_LOCAL_CACHE_READ_GRACE_PERIOD` suffix and `mongo-head-fallback-enabled` uses `MONGO_HEAD_FALLBACK_ENABLED`.
+
+### Head sources
+
+| `zoo-keeper.enabled` | Primary head source | MongoDB head | Beans |
+|---|---|---|---|
+| `true` (default) | ZooKeeper `prepared` and `activate` ZNodes, via watches, reconnect, and periodic reconciliation | Fallback when the `activate` head cannot be determined or ZooKeeper is `SUSPENDED`/`LOST`, if `mongo-head-fallback-enabled` | Curator client, `ZooKeeperSubscriptionHeadWatcher` |
+| `false` | MongoDB head only, read at startup and every `reconcile-interval` | Primary source | `MongoSubscriptionHeadPoller`; no ZooKeeper client |
+
+The MongoDB head always references the active snapshot. A snapshot activated from it is `FRESH`; an already active
+matching snapshot is not reloaded. Snapshot entries are always loaded from `snapshot-collection`, regardless of the head
+source.
+
+### Configuration properties
+
+All properties are located under `horizon.cache.local-subscription-cache`.
+
+| Property | Default | Applies to | Description |
+|---|---|---|---|
+| `enabled` | `false` | all | Enables the pod-local cache. When `false`, no local-cache, ZooKeeper, or poller bean is created and reads use the shared Hazelcast reader. |
+| `fallback-mode` | `hazelcast-with-mongo-fallback` | all | Read fallback when the local cache cannot serve reads. `none` uses only the local cache and never reads Hazelcast; stale local entries are then served indefinitely if necessary. Does not affect the MongoDB head fallback. |
+| `mongo-head-fallback-enabled` | `true` | ZooKeeper mode | Uses the MongoDB head as alternative head source when the ZooKeeper `activate` head cannot be determined. When `false`, the cache becomes `STALE` instead. |
+| `snapshot-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-snapshots` | all | MongoDB collection with the snapshot entries. |
+| `head-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-head` | all | MongoDB collection with the head document of the active snapshot. |
+| `stale-local-cache-read-grace-period` | `120s` | `hazelcast-with-mongo-fallback` | How long a `STALE` local snapshot may still serve reads before the shared reader is used. `0s` switches immediately. With `none`, stale reads are unlimited. |
+| `require-local-cache-at-startup` | `true` | `hazelcast-with-mongo-fallback` | When `true`, startup waits for the first `FRESH` local snapshot. When `false`, startup continues without waiting and without checking Hazelcast. `none` always waits. |
+| `initial-snapshot-timeout` | `120s` | all, when startup waits | Maximum wait for the first local snapshot. Expiry fails startup and terminates the process; `0s` waits indefinitely. |
+| `reconcile-interval` | `60s` | all | Interval for re-checking the active head: the ZooKeeper `activate` head, or the MongoDB head when ZooKeeper is disabled or disconnected. `0s` disables periodic runs. |
+| `mongo-head-poll-jitter` | `10s` | all | Maximum random offset of the first periodic head reconciliation; later runs keep the fixed interval. Immediate MongoDB head reads after a ZooKeeper failure are not delayed. |
+| `mongo-snapshot-sync-jitter` | `10s` | ZooKeeper mode | Maximum random delay before loading a snapshot for `prepared` preloads and after a ZooKeeper reconnect. `0s` disables the delay. |
+| `zoo-keeper.enabled` | `true` | all | Selects the head source: ZooKeeper (`true`) or MongoDB-only polling (`false`). |
+| `zoo-keeper.ensemble-tracker-enabled` | `true` | ZooKeeper mode | Lets Curator follow ZooKeeper-published ensemble addresses. Can be `false` for local operation, e.g. a local Docker ensemble reached through mapped ports. |
+| `zoo-keeper.connect-string` | none | ZooKeeper mode | ZooKeeper connect string; required in ZooKeeper mode. |
+| `zoo-keeper.prepared-path` | none | ZooKeeper mode | Absolute ZNode path of the `prepared` head, for example `/horizon/subscriptions/prepared`. |
+| `zoo-keeper.activate-path` | none | ZooKeeper mode | Absolute ZNode path of the `activate` head, for example `/horizon/subscriptions/activated`. Must differ from `prepared-path`. |
+| `zoo-keeper.connection-timeout` | `15s` | ZooKeeper mode | Curator connection timeout; must be positive. |
+| `zoo-keeper.session-timeout` | `60s` | ZooKeeper mode | ZooKeeper session timeout; must be positive. |
 
 Curator tracks the ZooKeeper-published ensemble addresses by default (`ensemble-tracker-enabled: true`).
 For a local Docker ensemble accessed from the host through mapped ports, set `ensemble-tracker-enabled: false`
@@ -321,46 +369,58 @@ Docker-internal names such as `zoo1:2181`. Leave tracking enabled when the publi
 
 The Curator client and head watcher start with the Spring context and close on shutdown. The watcher reconciles
 both current heads asynchronously on startup, watch events, and reconnect. It also rereads only the authoritative
-`activate` head periodically; configure `reconcile-interval` as a non-negative Spring `Duration` (default: `60s`).
+`activate` head periodically; configure `reconcile-interval` under `local-subscription-cache` as a non-negative Spring
+`Duration` (default: `60s`).
 Set it to `0s` to disable periodic reconciliation; watch events and reconnect handling remain enabled. With zero,
 recovery after a missed watch event or read failure waits for a later watch event or reconnect. Periodic passes are
-serialized with watcher and reconnect work and skipped while disconnected. The initial
-reconciliation signal does not block pod startup or imply a fresh snapshot when `activate` is absent. In this
-mode the MongoDB head initializer and its poller do not run. Local reads require a `FRESH` snapshot; otherwise
-the shared reader is used after the configured stale-cache-read grace expires. Configure
-`stale-cache-read-grace-period` as a non-negative Spring `Duration` under `local-subscription-cache` (default: `120s`).
+serialized with watcher and reconnect work; while ZooKeeper is disconnected they read the MongoDB head instead. The
+first periodic pass is delayed by a random offset up to `mongo-head-poll-jitter` (default: `10s`); later passes keep the
+fixed interval. Immediate MongoDB head reads after a ZooKeeper failure are not jittered.
+When the `activate` head cannot be determined (unreadable, invalid, or missing) or ZooKeeper reports `SUSPENDED` or
+`LOST`, the watcher activates the snapshot referenced by the MongoDB head, which always points to the active snapshot.
+A successfully loaded and validated MongoDB snapshot is `FRESH`; an already active matching snapshot stays `FRESH`
+without being reloaded. The cache becomes `STALE` only if the MongoDB head cannot be read or its snapshot cannot be
+loaded. With `mongo-head-fallback-enabled: false`, the MongoDB head is not used and the cache becomes `STALE` instead.
+If a valid `activate` head is read but its snapshot cannot be loaded or validated, the
+MongoDB head is not used and the cache becomes `STALE`. Local reads require a `FRESH` snapshot; otherwise
+the shared reader is used after the configured stale-local-cache-read grace expires. Configure
+`stale-local-cache-read-grace-period` as a non-negative Spring `Duration` under `local-subscription-cache` (default: `120s`).
+With fallback mode `NONE` there is no shared reader, so a `STALE` local snapshot keeps serving reads indefinitely and
+the grace period does not apply.
 While the cache is `STALE`, the last active local snapshot may serve reads until that period expires; `0s` switches
-to the shared reader immediately. The same grace applies to every transition to `STALE`, including `SUSPENDED`,
-`LOST`, a missing/unreadable `ACTIVATE` head, and activation failure. Repeated stale causes do not restart the grace
+to the shared reader immediately. The same grace applies to every transition to `STALE`: an unreadable MongoDB head
+while the `activate` head cannot be determined, and activation failure. Repeated stale causes do not restart the grace
 period; successful activation returns the cache to `FRESH` and clears it. The cache remains `STALE` after expiry;
 only local-read eligibility changes. Health follows the effective reader.
-Changes to `prepared` schedule only a delayed preload, with a random delay up to `snapshot-sync-jitter`
+Changes to `prepared` schedule only a delayed preload, with a random delay up to `mongo-snapshot-sync-jitter`
 (default: `10s`). Later `prepared` events replace the pending preload and use the latest event payload. On
 reconnect, reconciliation of the current heads is delayed by the same random interval. A subsequent `activate`
-event reconciles immediately instead. Set this value to `0s` to disable both delays; startup and periodic
-reconciliation are not jittered.
+event reconciles immediately instead. Set this value to `0s` to disable both delays; startup reconciliation is not
+jittered.
 On reconnect, a previously prepared snapshot is retained and reused only when its complete metadata matches the
 current head; a different head is loaded before activation.
-With ZooKeeper enabled, startup waits for the first successfully activated, non-empty `FRESH` snapshot. Configure
-`initial-snapshot-timeout` under `local-subscription-cache` (default: `120s`); if the deadline expires, application
-startup fails even if the shared fallback is ready. Initial reconciliation alone does not satisfy this barrier when
-`activate` is absent. Spring publishes `ApplicationReadyEvent` only after the barrier succeeds; Comet and Galaxy
-start their Kafka containers on that event. Later transitions to `STALE` do not stop those listeners, and readers
-continue to use the grace period and shared fallback. Kubernetes readiness probes must use the Spring Boot readiness
-health group, independently of liveness.
-Without this opt-in the existing MongoDB head initialization and optional polling remain unchanged.
+Startup waits for the first successfully activated, non-empty `FRESH` snapshot when a local
+cache is required: always with fallback mode `NONE`, and with `hazelcast-with-mongo-fallback` only when
+`require-local-cache-at-startup` is `true` (default). With `require-local-cache-at-startup: false`, startup continues
+immediately without checking Hazelcast readiness. Configure `initial-snapshot-timeout` under `local-subscription-cache`
+(default: `120s`); it limits only the wait for the local snapshot. If the deadline expires, application startup fails.
+Set it to `0s` to wait indefinitely; a negative value is invalid. Spring publishes `ApplicationReadyEvent` only after
+the barrier succeeds; Comet and Galaxy start their Kafka containers on that event, and Spring Boot readiness accepts
+traffic only afterwards. Later cache transitions do not stop those listeners or change Kubernetes readiness: the cache
+health indicator is not part of the readiness health group. Kubernetes readiness probes must use the Spring Boot
+readiness health group, independently of liveness.
 
 ### Runtime scenarios
 
 | Scenario | Local cache | Hazelcast/MongoDB fallback | Application startup | Health and readiness |
 |---|---|---|---|---|
 | Local snapshot loads and activates successfully | Ready | Not required | Succeeds | `UP`, source `local`; pod is ready |
-| Local snapshot initialization fails, fallback is disabled (`NONE`) | Not ready | Not used | Fails | Pod does not become ready |
-| Local snapshot initialization fails, fallback is available | Not ready | Ready through Hazelcast or MongoDB | Succeeds | `UP`, source `fallback`; pod is ready |
-| Local cache is active, polling finds an unchanged head | Ready | Not required | Already running | Remains `UP`, source `local` |
-| Local cache is active, polling activates a new snapshot | Ready | Not required | Already running | Remains `UP`, source `local` |
-| Polling fails while an active local snapshot exists | Ready with previous snapshot | Not required | Already running | Remains `UP`, source `local`; previous snapshot is preserved |
-| Local cache is not ready and all fallback checks fail | Not ready | Not ready | Depends on startup result | `DOWN`; pod is not ready |
+| No local snapshot, `require-local-cache-at-startup: true` or fallback `NONE` | Not ready | Not used for startup | Waits; fails after a positive `initial-snapshot-timeout` | Pod does not become ready |
+| No local snapshot, `require-local-cache-at-startup: false` | Not ready | Used for reads if ready | Succeeds without checking Hazelcast | Cache health `UP` with source `fallback`, or `DOWN`; pod readiness unaffected |
+| ZooKeeper unavailable, MongoDB head readable | Ready from MongoDB head | Not required | Succeeds | `UP`, source `local` |
+| ZooKeeper and MongoDB head unavailable after activation | `STALE` | Used after the grace period | Already running | Source `local` during grace, then `fallback` |
+| Valid `activate` head with an invalid snapshot | `STALE` with previous snapshot | Used after the grace period | Already running | Source `local` during grace, then `fallback` |
+| `zoo-keeper.enabled: false`, MongoDB head readable | Ready from MongoDB head; updated every `reconcile-interval` | Not required | Succeeds | `UP`, source `local` |
 
 ### `prepare` and `activate` scenarios
 
@@ -397,7 +457,9 @@ The implementation does not provide:
 
 - cross-pod activation coordination;
 - checksum or activation-time handling;
-- deep immutability of `SubscriptionResource` objects;
-- fallback based on snapshot freshness after a previously successful activation.
+- deep immutability of `SubscriptionResource` objects.
+
+Freshness-based fallback is provided: a `STALE` local snapshot serves reads only during
+`stale-local-cache-read-grace-period`, then the shared reader is used (`hazelcast-with-mongo-fallback`).
 
 These concerns remain with the consuming pod or a future coordination component.

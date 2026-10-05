@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.Instant;
 import java.util.Optional;
 
+/** Activates subscription snapshots from the ZooKeeper heads, with optional MongoDB head fallback. */
 @Slf4j
 public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
@@ -19,34 +20,43 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
     private final ZooKeeperSubscriptionSnapshotHeadReader reader;
     private final LocalSubscriptionCache cache;
+    private final MongoSubscriptionHeadReconciler mongoHeadReconciler;
+    private final boolean mongoHeadFallbackEnabled;
     private final Object activationLock = new Object();
     private volatile boolean connected = true;
     private Head lastActivated;
 
+    /** Creates a reconciler with MongoDB head fallback enabled. */
     public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
                                                LocalSubscriptionCache cache) {
+        this(reader, cache, true);
+    }
+
+    /** Creates a reconciler; without MongoDB head fallback, an undeterminable ZooKeeper head makes the cache STALE. */
+    public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
+                                               LocalSubscriptionCache cache, boolean mongoHeadFallbackEnabled) {
         this.reader = reader;
         this.cache = cache;
+        this.mongoHeadReconciler = new MongoSubscriptionHeadReconciler(cache);
+        this.mongoHeadFallbackEnabled = mongoHeadFallbackEnabled;
     }
 
+    /** Stops ZooKeeper-driven activation; freshness is then decided by {@link #reconcileFromMongoHead()}. */
     public void suspended() {
-        connected = false;
         synchronized (activationLock) {
-            cache.suspended();
+            connected = false;
         }
     }
 
+    /** Stops ZooKeeper-driven activation; freshness is then decided by {@link #reconcileFromMongoHead()}. */
     public void lost() {
-        connected = false;
-        synchronized (activationLock) {
-            cache.disconnected();
-        }
+        suspended();
     }
 
+    /** Resumes ZooKeeper-driven activation and re-reads both heads, forcing re-activation of the current head. */
     public synchronized void reconcileAfterReconnect() {
         synchronized (activationLock) {
             connected = true;
-            cache.disconnected();
             lastActivated = null;
         }
         run();
@@ -86,14 +96,14 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         try {
             active = reader.readActivate();
         } catch (RuntimeException exception) {
-            disconnectIfConnected();
-            log.warn("Could not read activate subscription head; using shared cache", exception);
+            log.warn("Could not read activate subscription head", exception);
+            reconcileFromMongoHead();
             return;
         }
 
         if (active.isEmpty()) {
-            disconnectIfConnected();
-            prepared.ifPresent(this::prepareOnly);
+            log.warn("ZooKeeper activate subscription head is missing");
+            reconcileFromMongoHead();
             return;
         }
 
@@ -126,19 +136,27 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         }
     }
 
+    /**
+     * Activates the snapshot referenced by the MongoDB head, which always points to the active snapshot.
+     * Used when the ZooKeeper ACTIVATE head cannot be determined. The cache becomes stale if the MongoDB
+     * head fallback is disabled, the MongoDB head cannot be read, or its snapshot cannot be loaded.
+     */
+    public synchronized void reconcileFromMongoHead() {
+        if (!mongoHeadFallbackEnabled) {
+            synchronized (activationLock) {
+                cache.disconnected();
+            }
+            log.warn("ZooKeeper subscription head unavailable and MongoDB head fallback disabled; local cache is stale");
+            return;
+        }
+        mongoHeadReconciler.reconcile().ifPresent(head -> lastActivated = Head.from(head));
+    }
+
     private void prepareOnly(SubscriptionSnapshotHead head) {
         try {
             cache.prepare(head);
         } catch (RuntimeException exception) {
             log.warn("Could not prepare subscription snapshot {}", head.getSnapshotId(), exception);
-        }
-    }
-
-    private void disconnectIfConnected() {
-        synchronized (activationLock) {
-            if (connected) {
-                cache.disconnected();
-            }
         }
     }
 }

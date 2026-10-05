@@ -35,15 +35,33 @@ public class CacheProperties {
 
         private boolean enabled = false;
 
+        // NONE never reads Hazelcast and serves stale local entries indefinitely if necessary.
         private LocalSubscriptionCacheFallback fallbackMode = LocalSubscriptionCacheFallback.HAZELCAST_WITH_MONGO_FALLBACK;
+
+        // Use the MongoDB head when the ZooKeeper activated head cannot be determined.
+        private boolean mongoHeadFallbackEnabled = true;
 
         private String snapshotCollection = "subscriptions.subscriber.horizon.telekom.de.v1-snapshots";
 
         private String headCollection = "subscriptions.subscriber.horizon.telekom.de.v1-head";
 
-        private Duration staleCacheReadGracePeriod = Duration.ofSeconds(120);
+        // Only applies to HAZELCAST_WITH_MONGO_FALLBACK.
+        private Duration staleLocalCacheReadGracePeriod = Duration.ofSeconds(120);
 
+        // Only applies to HAZELCAST_WITH_MONGO_FALLBACK; NONE always requires a local cache at startup.
+        private boolean requireLocalCacheAtStartup = true;
+
+        // Only applies when startup waits; expiry fails startup, zero waits indefinitely.
         private Duration initialSnapshotTimeout = Duration.ofSeconds(120);
+
+        // Re-check of the active head: ZooKeeper, or MongoDB when ZooKeeper is disabled or disconnected. Zero disables it.
+        private Duration reconcileInterval = Duration.ofSeconds(60);
+
+        // Random initial offset of the periodic head reconciliation.
+        private Duration mongoHeadPollJitter = Duration.ofSeconds(10);
+
+        // Maximum random delay before loading a snapshot for prepared preloads and reconnects (ZooKeeper mode only).
+        private Duration mongoSnapshotSyncJitter = Duration.ofSeconds(10);
 
         private ZooKeeperProperties zooKeeper = new ZooKeeperProperties();
     }
@@ -52,8 +70,10 @@ public class CacheProperties {
     @Setter
     public static class ZooKeeperProperties {
 
-        private boolean enabled = false;
+        // When disabled, the MongoDB head is the only head source and is polled periodically.
+        private boolean enabled = true;
 
+        // Can be disabled locally when the ZooKeeper-published addresses are not reachable.
         private boolean ensembleTrackerEnabled = true;
 
         private String connectString;
@@ -65,10 +85,6 @@ public class CacheProperties {
         private Duration connectionTimeout = Duration.ofSeconds(15);
 
         private Duration sessionTimeout = Duration.ofSeconds(60);
-
-            private Duration reconcileInterval = Duration.ofSeconds(60);
-
-        private Duration snapshotSyncJitter = Duration.ofSeconds(10);
     }
 
     public enum LocalSubscriptionCacheFallback {

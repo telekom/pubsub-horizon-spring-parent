@@ -5,6 +5,7 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoader;
@@ -22,35 +23,93 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+@Slf4j
 @Configuration
 public class LocalSubscriptionCacheAutoConfiguration {
 
-    @Bean(destroyMethod = "close")
-    @ConditionalOnMissingBean(CuratorFramework.class)
+    @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(
         prefix = "horizon.cache.local-subscription-cache.zoo-keeper",
         name = "enabled",
-        havingValue = "true")
-    public CuratorFramework subscriptionZooKeeperClient(CacheProperties cacheProperties) {
-        var zooKeeper = cacheProperties.getLocalSubscriptionCache().getZooKeeper();
-        var connectString = zooKeeper.getConnectString();
-        if (connectString == null || connectString.isBlank()) {
-            throw new IllegalArgumentException("ZooKeeper connect string is required when enabled");
+        havingValue = "true",
+        matchIfMissing = true)
+    static class ZooKeeperHeadSourceConfiguration {
+
+        @Bean(destroyMethod = "close")
+        @ConditionalOnMissingBean(CuratorFramework.class)
+        @ConditionalOnProperty(
+            prefix = "horizon.cache.local-subscription-cache",
+            name = "enabled",
+            havingValue = "true")
+        public CuratorFramework subscriptionZooKeeperClient(CacheProperties cacheProperties) {
+            var zooKeeper = cacheProperties.getLocalSubscriptionCache().getZooKeeper();
+            var connectString = zooKeeper.getConnectString();
+            if (connectString == null || connectString.isBlank()) {
+                throw new IllegalArgumentException(
+                    "ZooKeeper connect string is required for the local subscription cache");
+            }
+            var sessionTimeoutMs = timeoutMillis(zooKeeper.getSessionTimeout(), "session");
+            var connectionTimeoutMs = timeoutMillis(zooKeeper.getConnectionTimeout(), "connection");
+            var client = CuratorFrameworkFactory.builder()
+                .connectString(connectString)
+                .sessionTimeoutMs(sessionTimeoutMs)
+                .connectionTimeoutMs(connectionTimeoutMs)
+                .retryPolicy(new ExponentialBackoffRetry(1000, 3))
+                .ensembleTracker(zooKeeper.isEnsembleTrackerEnabled())
+                .build();
+            client.start();
+            return client;
         }
-        var sessionTimeoutMs = timeoutMillis(zooKeeper.getSessionTimeout(), "session");
-        var connectionTimeoutMs = timeoutMillis(zooKeeper.getConnectionTimeout(), "connection");
-        var client = CuratorFrameworkFactory.builder()
-            .connectString(connectString)
-            .sessionTimeoutMs(sessionTimeoutMs)
-            .connectionTimeoutMs(connectionTimeoutMs)
-            .retryPolicy(new ExponentialBackoffRetry(1000, 3))
-            .ensembleTracker(zooKeeper.isEnsembleTrackerEnabled())
-            .build();
-        client.start();
-        return client;
+
+        @Bean(initMethod = "start", destroyMethod = "close")
+        @ConditionalOnProperty(
+            prefix = "horizon.cache.local-subscription-cache",
+            name = "enabled",
+            havingValue = "true")
+        public ZooKeeperSubscriptionHeadWatcher subscriptionHeadWatcher(CuratorFramework client,
+                LocalSubscriptionCache cache, CacheProperties cacheProperties) {
+            var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+            var zooKeeper = localCacheProperties.getZooKeeper();
+            var preparedPath = zooKeeper.getPreparedPath();
+            var activatePath = zooKeeper.getActivatePath();
+            if (preparedPath == null || !preparedPath.startsWith("/") || preparedPath.isBlank()
+                    || activatePath == null || !activatePath.startsWith("/") || activatePath.isBlank()
+                    || preparedPath.equals(activatePath)) {
+                throw new IllegalArgumentException(
+                    "Distinct absolute ZooKeeper prepared and activate paths are required");
+            }
+            var reader = new ZooKeeperSubscriptionSnapshotHeadReader(
+                client, new ObjectMapper(), preparedPath, activatePath);
+            var reconciler = new ZooKeeperSubscriptionHeadReconciler(
+                reader, cache, localCacheProperties.isMongoHeadFallbackEnabled());
+            return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatePath, reconciler,
+                localCacheProperties.getReconcileInterval(), localCacheProperties.getMongoSnapshotSyncJitter(),
+                localCacheProperties.getMongoHeadPollJitter());
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(
+        prefix = "horizon.cache.local-subscription-cache.zoo-keeper",
+        name = "enabled",
+        havingValue = "false")
+    static class MongoHeadSourceConfiguration {
+
+        @Bean(initMethod = "start", destroyMethod = "close")
+        @ConditionalOnProperty(
+            prefix = "horizon.cache.local-subscription-cache",
+            name = "enabled",
+            havingValue = "true")
+        public MongoSubscriptionHeadPoller subscriptionHeadPoller(LocalSubscriptionCache cache,
+                CacheProperties cacheProperties) {
+            var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+            return new MongoSubscriptionHeadPoller(new MongoSubscriptionHeadReconciler(cache),
+                localCacheProperties.getReconcileInterval(), localCacheProperties.getMongoHeadPollJitter());
+        }
     }
 
     private static int timeoutMillis(Duration timeout, String name) {
@@ -68,42 +127,33 @@ public class LocalSubscriptionCacheAutoConfiguration {
         }
     }
 
-    @Bean(initMethod = "start", destroyMethod = "close")
-    @ConditionalOnProperty(name = {
-        "horizon.cache.local-subscription-cache.enabled",
-        "horizon.cache.local-subscription-cache.zoo-keeper.enabled"
-    }, havingValue = "true")
-    public ZooKeeperSubscriptionHeadWatcher subscriptionHeadWatcher(CuratorFramework client,
-            LocalSubscriptionCache cache, CacheProperties cacheProperties) {
-        var zooKeeper = cacheProperties.getLocalSubscriptionCache().getZooKeeper();
-        var preparedPath = zooKeeper.getPreparedPath();
-        var activatePath = zooKeeper.getActivatePath();
-        if (preparedPath == null || !preparedPath.startsWith("/") || preparedPath.isBlank()
-                || activatePath == null || !activatePath.startsWith("/") || activatePath.isBlank()
-                || preparedPath.equals(activatePath)) {
-            throw new IllegalArgumentException("Distinct absolute ZooKeeper prepared and activate paths are required");
-        }
-        var reader = new ZooKeeperSubscriptionSnapshotHeadReader(
-            client, new ObjectMapper(), preparedPath, activatePath);
-        return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatePath,
-            new ZooKeeperSubscriptionHeadReconciler(reader, cache), zooKeeper.getReconcileInterval(),
-            zooKeeper.getSnapshotSyncJitter());
-    }
-
     @Bean
-    @ConditionalOnProperty(name = {
-        "horizon.cache.local-subscription-cache.enabled",
-        "horizon.cache.local-subscription-cache.zoo-keeper.enabled"
-    }, havingValue = "true")
+    @ConditionalOnProperty(
+        prefix = "horizon.cache.local-subscription-cache",
+        name = "enabled",
+        havingValue = "true")
     public ApplicationRunner localSubscriptionCacheStartupBarrier(LocalSubscriptionCache cache,
             CacheProperties cacheProperties) {
-        var timeout = cacheProperties.getLocalSubscriptionCache().getInitialSnapshotTimeout();
-        if (timeout == null || timeout.isNegative() || timeout.isZero() || timeout.toMillis() == 0) {
-            throw new IllegalArgumentException("Initial subscription snapshot timeout must be at least 1ms");
+        var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+        var timeout = localCacheProperties.getInitialSnapshotTimeout();
+        if (timeout == null || timeout.isNegative() || (!timeout.isZero() && timeout.toMillis() == 0)) {
+            throw new IllegalArgumentException(
+                "Initial subscription snapshot timeout must be zero or at least 1ms");
         }
+        var localCacheRequired = localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE
+            || localCacheProperties.isRequireLocalCacheAtStartup();
         return args -> {
+            if (!localCacheRequired) {
+                log.info("Local subscription cache is not required at startup; startup continues without waiting");
+                return;
+            }
             try {
-                cache.firstFreshSnapshot().toCompletableFuture().get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                var firstFreshSnapshot = cache.firstFreshSnapshot().toCompletableFuture();
+                if (timeout.isZero()) {
+                    firstFreshSnapshot.get();
+                } else {
+                    firstFreshSnapshot.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                }
             } catch (TimeoutException exception) {
                 throw new IllegalStateException("Initial subscription snapshot did not become fresh within " + timeout,
                     exception);
@@ -129,10 +179,14 @@ public class LocalSubscriptionCacheAutoConfiguration {
         if (mongoConfigTemplate == null) {
             throw new IllegalStateException("MongoTemplate is required for local subscription cache");
         }
+        // Without a shared fallback, a stale local snapshot remains the only source and must stay readable.
+        var staleLocalCacheReadGracePeriod = localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE
+            ? ChronoUnit.FOREVER.getDuration()
+            : localCacheProperties.getStaleLocalCacheReadGracePeriod();
         return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
             mongoConfigTemplate,
             localCacheProperties.getSnapshotCollection(),
-            localCacheProperties.getHeadCollection()), localCacheProperties.getStaleCacheReadGracePeriod());
+            localCacheProperties.getHeadCollection()), staleLocalCacheReadGracePeriod);
     }
 
     @Bean
@@ -143,11 +197,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
         havingValue = "true")
     public LocalSubscriptionCacheInitializer localSubscriptionCacheInitializer(
         LocalSubscriptionCache localSubscriptionCache,
-        ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider,
-        ObjectProvider<CacheProperties> cachePropertiesProvider) {
-        return new LocalSubscriptionCacheInitializer(
-            localSubscriptionCache,
-            subscriptionCacheReaderProvider,
-            cachePropertiesProvider.getIfAvailable(CacheProperties::new));
+        ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider) {
+        return new LocalSubscriptionCacheInitializer(localSubscriptionCache, subscriptionCacheReaderProvider);
     }
 }

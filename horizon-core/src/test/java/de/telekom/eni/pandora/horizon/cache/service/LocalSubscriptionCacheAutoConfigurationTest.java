@@ -12,6 +12,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
@@ -23,14 +24,13 @@ class LocalSubscriptionCacheAutoConfigurationTest {
             .withBean("mongoConfigTemplate", MongoTemplate.class, () -> mock(MongoTemplate.class));
 
     @Test
-    void shouldCreateSnapshotCacheAlongsideExistingJsonCache() {
+    void shouldRequireZooKeeperConnectStringWhenLocalCacheIsEnabled() {
         contextRunner
-                .withBean("subscriptionCache", JsonCacheService.class, () -> mock(JsonCacheService.class))
+                .withBean(CacheProperties.class, CacheProperties::new)
                 .withPropertyValues("horizon.cache.local-subscription-cache.enabled=true")
-                .run(context -> {
-                    assertEquals(1, context.getBeansOfType(LocalSubscriptionCache.class).size());
-                    assertEquals(1, context.getBeansOfType(JsonCacheService.class).size());
-                });
+                .run(context -> assertThat(context.getStartupFailure())
+                        .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                        .rootCause().hasMessageContaining("ZooKeeper connect string"));
     }
 
     @Test
@@ -43,15 +43,6 @@ class LocalSubscriptionCacheAutoConfigurationTest {
                     assertEquals(1, context.getBeansOfType(LocalSubscriptionCache.class).size());
                     assertSame(customCache, context.getBean(LocalSubscriptionCache.class));
                 });
-    }
-
-    @Test
-    void shouldCreateInitializerWhenLocalCacheIsEnabled() {
-        contextRunner
-                .withBean(CacheProperties.class, CacheProperties::new)
-                .withPropertyValues("horizon.cache.local-subscription-cache.enabled=true")
-                .run(context -> assertEquals(
-                        1, context.getBeansOfType(LocalSubscriptionCacheInitializer.class).size()));
     }
 
     @Test

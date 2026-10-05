@@ -62,16 +62,21 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void missingActivateHeadKeepsPreparedSnapshotInternal() {
+    void missingActivateHeadUsesMongoHead() {
         var prepared = head("next");
+        var mongoHead = head("mongo");
         when(reader.readPrepared()).thenReturn(Optional.of(prepared));
+        when(cache.readSnapshotHead()).thenReturn(mongoHead);
 
         reconciler.run();
 
         var order = inOrder(cache);
-        order.verify(cache).disconnected();
-        order.verify(cache).prepare(prepared);
-        verify(cache, never()).activate(prepared);
+        order.verify(cache).readSnapshotHead();
+        order.verify(cache).setActivationHead(mongoHead);
+        order.verify(cache).prepare(mongoHead);
+        order.verify(cache).activate(mongoHead);
+        verify(cache, never()).prepare(prepared);
+        verify(cache, never()).disconnected();
     }
 
     @Test
@@ -116,15 +121,18 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void invalidActivateHeadRevokesFreshnessWithoutLoadingPrepared() {
+    void invalidActivateHeadUsesMongoHeadWithoutLoadingPrepared() {
         var prepared = head("next");
+        var mongoHead = head("mongo");
         when(reader.readPrepared()).thenReturn(Optional.of(prepared));
         when(reader.readActivate()).thenThrow(new SubscriptionCacheSnapshotException("invalid activate"));
+        when(cache.readSnapshotHead()).thenReturn(mongoHead);
 
         reconciler.run();
 
-        verify(cache).disconnected();
+        verify(cache, never()).disconnected();
         verify(cache, never()).prepare(prepared);
+        verify(cache).activate(mongoHead);
     }
 
     @Test
@@ -137,6 +145,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         reconciler.run();
         verify(cache).activationFailed(active);
         verify(cache).discardPreparedSnapshot();
+        verify(cache, never()).readSnapshotHead();
 
         reconciler.run();
         verify(cache, times(2)).prepare(active);
@@ -163,12 +172,67 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void activateReadFailureRevokesLocalFreshness() {
+    void activateReadFailureUsesMongoHeadWithoutRevokingFreshness() {
+        var mongoHead = head("mongo");
         when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
+        when(cache.readSnapshotHead()).thenReturn(mongoHead);
 
         reconciler.run();
 
+        var order = inOrder(cache);
+        order.verify(cache).setActivationHead(mongoHead);
+        order.verify(cache).prepare(mongoHead);
+        order.verify(cache).activate(mongoHead);
+        verify(cache, never()).disconnected();
+        verify(cache, never()).suspended();
+    }
+
+    @Test
+    void repeatedMongoHeadFallbackReusesActivatedSnapshot() {
+        var mongoHead = head("mongo");
+        when(cache.readSnapshotHead()).thenReturn(mongoHead);
+        when(cache.isActiveSnapshot(mongoHead)).thenReturn(false, true);
+
+        reconciler.reconcileFromMongoHead();
+        reconciler.reconcileFromMongoHead();
+
+        verify(cache).prepare(mongoHead);
+        verify(cache).discardPreparedSnapshot();
+        verify(cache, times(2)).activate(mongoHead);
+    }
+
+    @Test
+    void failedMongoHeadLoadKeepsCacheStale() {
+        var mongoHead = head("mongo");
+        when(cache.readSnapshotHead()).thenReturn(mongoHead);
+        doThrow(new SubscriptionCacheSnapshotException("count mismatch")).when(cache).prepare(mongoHead);
+
+        reconciler.reconcileFromMongoHead();
+
+        verify(cache).activationFailed(mongoHead);
+        verify(cache, never()).activate(mongoHead);
+    }
+
+    @Test
+    void disabledMongoHeadFallbackMarksCacheStaleWithoutReadingMongo() {
+        var withoutFallback = new ZooKeeperSubscriptionHeadReconciler(reader, cache, false);
+        when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
+
+        withoutFallback.run();
+
         verify(cache).disconnected();
+        verify(cache, never()).readSnapshotHead();
+    }
+
+    @Test
+    void unreadableMongoHeadMarksCacheStale() {
+        when(cache.readSnapshotHead()).thenThrow(new SubscriptionCacheSnapshotException("no head"));
+
+        reconciler.reconcileFromMongoHead();
+
+        verify(cache).disconnected();
+        verify(cache, never()).setActivationHead(org.mockito.ArgumentMatchers.any());
+        verify(cache, never()).activationFailed(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -185,7 +249,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
 
         verify(reader, times(3)).readPrepared();
         verify(reader, times(3)).readActivate();
-        verify(cache).disconnected();
+        verify(cache, never()).disconnected();
         verify(cache, never()).discardPreparedSnapshot();
         verify(cache, times(2)).prepare(active);
         verify(cache, times(2)).activate(active);
@@ -207,7 +271,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
             var reconciliation = executor.submit(reconciler::run);
             assertTrue(loading.await(10, TimeUnit.SECONDS));
             reconciler.suspended();
-            verify(cache).suspended();
+            verify(cache, never()).suspended();
             verify(cache, never()).disconnected();
             release.countDown();
             reconciliation.get(10, TimeUnit.SECONDS);
@@ -219,11 +283,16 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void lostConnectionRevokesLocalReadPermission() {
-        reconciler.lost();
+    void lostConnectionKeepsCacheFreshWhenMongoHeadConfirmsIt() {
+        var mongoHead = head("mongo");
+        when(cache.readSnapshotHead()).thenReturn(mongoHead);
 
-        verify(cache).disconnected();
+        reconciler.lost();
+        reconciler.reconcileFromMongoHead();
+
+        verify(cache, never()).disconnected();
         verify(cache, never()).suspended();
+        verify(cache).activate(mongoHead);
     }
 
     private static SubscriptionSnapshotHead head(String snapshotId) {

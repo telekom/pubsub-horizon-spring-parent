@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -62,7 +61,6 @@ class JsonCacheAutoconfigurationTest {
         void zooKeeperReaderUsesSharedUntilLocalReadsAreAllowed() throws Exception {
                 var cacheProperties = new CacheProperties();
                 cacheProperties.getLocalSubscriptionCache().setEnabled(true);
-                cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
                 var localCache = mock(LocalSubscriptionCache.class);
                 when(localCache.isReady()).thenReturn(true);
 
@@ -79,17 +77,16 @@ class JsonCacheAutoconfigurationTest {
         }
 
         @Test
-        void zooKeeperReaderRejectsMissingSharedFallback() {
+        void zooKeeperReaderUsesLocalCacheExclusivelyWithoutSharedFallback() {
                 var cacheProperties = new CacheProperties();
                 cacheProperties.getLocalSubscriptionCache().setEnabled(true);
-                cacheProperties.getLocalSubscriptionCache().getZooKeeper().setEnabled(true);
                 cacheProperties.getLocalSubscriptionCache().setFallbackMode(
                                 CacheProperties.LocalSubscriptionCacheFallback.NONE);
+                var localCache = mock(LocalSubscriptionCache.class);
 
                 contextRunner(cacheProperties)
-                                .withBean(LocalSubscriptionCache.class, () -> mock(LocalSubscriptionCache.class))
-                                .run(context -> assertThat(context.getStartupFailure())
-                                        .hasRootCauseInstanceOf(IllegalStateException.class));
+                                .withBean(LocalSubscriptionCache.class, () -> localCache)
+                                .run(context -> assertSame(localCache, context.getBean(SubscriptionCacheReader.class)));
         }
 
     @SuppressWarnings("unchecked")
