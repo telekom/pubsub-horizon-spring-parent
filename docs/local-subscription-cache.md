@@ -21,11 +21,7 @@ subscription ID and by environment plus event type. The Shared Cache implementat
 
 ## Architecture
 
-![High-level architecture of the pod-local subscription cache](local-subscription-cache-architecture.svg)
-
-Editable diagrams.net source: [local-subscription-cache-architecture.drawio](local-subscription-cache-architecture.drawio).
-
-ZooKeeper coordinator flow: [zookeeper-snapshot-coordinator-flow.drawio](zookeeper-snapshot-coordinator-flow.drawio).
+The class diagram below shows the main cache and reconciliation components.
 
 ```mermaid
 classDiagram

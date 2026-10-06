@@ -147,6 +147,9 @@ public class LocalSubscriptionCacheAutoConfiguration {
                 log.info("Local subscription cache is not required at startup; startup continues without waiting");
                 return;
             }
+            var waitStart = System.nanoTime();
+            log.info("Waiting for initial local subscription snapshot (timeout {})",
+                timeout.isZero() ? "none" : timeout);
             try {
                 var firstFreshSnapshot = cache.firstFreshSnapshot().toCompletableFuture();
                 if (timeout.isZero()) {
@@ -154,6 +157,9 @@ public class LocalSubscriptionCacheAutoConfiguration {
                 } else {
                     firstFreshSnapshot.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
                 }
+                log.info("Initial local subscription snapshot {} fresh after {} ms",
+                    cache.localSnapshotId().orElse("none"),
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStart));
             } catch (TimeoutException exception) {
                 throw new IllegalStateException("Initial subscription snapshot did not become fresh within " + timeout,
                     exception);
