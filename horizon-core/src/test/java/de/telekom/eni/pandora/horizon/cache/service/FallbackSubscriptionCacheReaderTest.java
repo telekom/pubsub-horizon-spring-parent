@@ -50,6 +50,25 @@ class FallbackSubscriptionCacheReaderTest {
     }
 
     @Test
+    void shouldNotifyListenerOnlyForFallbackReads() throws SubscriptionCacheReadException {
+        var fallbackReads = new java.util.concurrent.atomic.AtomicInteger();
+        var localAllowed = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var countingReader = new FallbackSubscriptionCacheReader(primary, fallback, localAllowed::get,
+            fallbackReads::incrementAndGet);
+        when(primary.isReady()).thenReturn(true);
+        when(primary.getById("subscription-id")).thenReturn(Optional.empty());
+        when(fallback.getById("subscription-id")).thenReturn(Optional.empty());
+
+        countingReader.getById("subscription-id");
+        assertEquals(0, fallbackReads.get());
+
+        localAllowed.set(false);
+        countingReader.getById("subscription-id");
+        countingReader.findByEnvironmentAndEventType("production", "event-type");
+        assertEquals(2, fallbackReads.get());
+    }
+
+    @Test
     void shouldUseSharedReaderWhenLocalSnapshotIsNotInitialized() throws SubscriptionCacheReadException {
         var notInitializedReader = new FallbackSubscriptionCacheReader(primary, fallback, () -> false);
         var expected = Optional.of(new SubscriptionResource());

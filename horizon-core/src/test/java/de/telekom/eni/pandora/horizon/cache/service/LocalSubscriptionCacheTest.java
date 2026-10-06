@@ -406,6 +406,37 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
+    void diagnosticsReportActiveExpectedAndPendingSnapshots() {
+        var activeHead = snapshotHead("active");
+        var nextHead = snapshotHead("next");
+        var activatedAt = Instant.parse("2026-10-02T00:00:00Z");
+        var clock = new MutableClock(activatedAt);
+        var diagnosticsCache = new LocalSubscriptionCache(snapshotLoader, Duration.ofSeconds(5), clock);
+        when(snapshotLoader.load(activeHead)).thenReturn(snapshot(activeHead,
+            List.of(subscription("a", "production", "event"), subscription("b", "production", "event"))));
+        when(snapshotLoader.load(nextHead)).thenReturn(snapshot(nextHead,
+            List.of(subscription("c", "production", "event"))));
+        diagnosticsCache.setActivationHead(activeHead);
+        diagnosticsCache.prepare(activeHead);
+        diagnosticsCache.activate(activeHead);
+
+        clock.advance(Duration.ofSeconds(1));
+        diagnosticsCache.setActivationHead(nextHead);
+        diagnosticsCache.prepare(nextHead);
+        diagnosticsCache.activationFailed(nextHead);
+
+        var diagnostics = diagnosticsCache.diagnostics();
+        assertEquals(LocalSubscriptionCache.Status.STALE, diagnostics.status());
+        assertTrue(diagnostics.localReadsAllowed());
+        assertEquals("active", diagnostics.activeSnapshotId());
+        assertEquals(2, diagnostics.subscriptionCount());
+        assertEquals(activatedAt, diagnostics.activatedAt());
+        assertEquals("next", diagnostics.expectedSnapshotId());
+        assertEquals("next", diagnostics.pendingSnapshotId());
+        assertEquals(activatedAt.plusSeconds(1), diagnostics.staleSince());
+    }
+
+    @Test
     void rejectsNegativeStaleCacheReadGracePeriod() {
         assertThrows(IllegalArgumentException.class,
             () -> new LocalSubscriptionCache(snapshotLoader, Duration.ofSeconds(-1)));

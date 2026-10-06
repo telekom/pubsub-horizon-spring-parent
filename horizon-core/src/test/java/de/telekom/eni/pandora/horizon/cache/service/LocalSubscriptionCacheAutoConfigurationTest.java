@@ -5,7 +5,7 @@
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCacheAutoConfiguration;
-import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCacheInitializer;
+import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCacheHealthIndicator;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -48,6 +48,6 @@ class LocalSubscriptionCacheAutoConfigurationTest {
     @Test
     void shouldNotCreateInitializerWhenLocalCacheIsDisabled() {
         contextRunner.run(context -> assertEquals(
-                0, context.getBeansOfType(LocalSubscriptionCacheInitializer.class).size()));
+                0, context.getBeansOfType(LocalSubscriptionCacheHealthIndicator.class).size()));
     }
 }

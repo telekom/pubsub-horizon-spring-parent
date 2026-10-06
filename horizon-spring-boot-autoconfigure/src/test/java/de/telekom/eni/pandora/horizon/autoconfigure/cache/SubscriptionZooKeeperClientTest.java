@@ -80,7 +80,7 @@ class SubscriptionZooKeeperClientTest {
                     "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/subscriptions/activate")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertThat(context).hasSingleBean(LocalSubscriptionCacheInitializer.class);
+                    assertThat(context).hasSingleBean(LocalSubscriptionCacheHealthIndicator.class);
                     context.getBean(ZooKeeperSubscriptionHeadWatcher.class)
                         .initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
                     verify(cache, org.mockito.Mockito.never()).readSnapshotHead();
@@ -170,7 +170,7 @@ class SubscriptionZooKeeperClientTest {
                 assertThat(context).doesNotHaveBean(CuratorFramework.class);
                 assertThat(context).doesNotHaveBean(ZooKeeperSubscriptionHeadWatcher.class);
                 assertThat(context).hasSingleBean(MongoSubscriptionHeadPoller.class);
-                assertThat(context).hasSingleBean(LocalSubscriptionCacheInitializer.class);
+                assertThat(context).hasSingleBean(LocalSubscriptionCacheHealthIndicator.class);
             });
     }
 

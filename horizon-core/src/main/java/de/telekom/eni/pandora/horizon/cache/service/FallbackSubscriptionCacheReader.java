@@ -22,6 +22,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     private final SubscriptionCacheReader primary;
     private final SubscriptionCacheReader fallback;
     private final BooleanSupplier primaryReadAllowed;
+    private final Runnable fallbackReadListener;
 
     /**
      * Creates a primary/fallback reader chain.
@@ -35,9 +36,23 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
 
     public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback,
                                            BooleanSupplier primaryReadAllowed) {
+        this(primary, fallback, primaryReadAllowed, () -> { });
+    }
+
+    /**
+     * Creates a primary/fallback reader chain that reports every read served by the fallback.
+     *
+     * @param primary source preferred for reads
+     * @param fallback source used when the primary is not ready or fails
+     * @param primaryReadAllowed whether the primary may currently serve reads
+     * @param fallbackReadListener invoked before each read that is served by the fallback
+     */
+    public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback,
+                                           BooleanSupplier primaryReadAllowed, Runnable fallbackReadListener) {
         this.primary = primary;
         this.fallback = fallback;
         this.primaryReadAllowed = primaryReadAllowed;
+        this.fallbackReadListener = fallbackReadListener;
     }
 
     @Override
@@ -56,6 +71,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
                 log.warn("Primary subscription cache getById failed, using fallback", exception);
             }
         }
+        fallbackReadListener.run();
         try {
             return fallback.getById(subscriptionId);
         } catch (SubscriptionCacheReadException exception) {
@@ -83,6 +99,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
                 log.warn("Primary subscription cache query failed, using fallback", exception);
             }
         }
+        fallbackReadListener.run();
         try {
             return fallback.findByEnvironmentAndEventType(environment, eventType);
         } catch (SubscriptionCacheReadException exception) {

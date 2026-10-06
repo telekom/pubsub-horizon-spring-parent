@@ -36,9 +36,27 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     private final CompletableFuture<Void> firstFreshSnapshot = new CompletableFuture<>();
     private final AtomicReference<CacheState> cacheState = new AtomicReference<>(
         new CacheState(IndexedSubscriptionSnapshot.empty(), null, null, Status.UNINITIALIZED, false, null));
+    private volatile Instant activatedAt;
 
     public enum Status {
         UNINITIALIZED, FRESH, STALE
+    }
+
+    /**
+     * Point-in-time view of the cache state for health reporting; absent values are {@code null}.
+     *
+     * @param status freshness status
+     * @param localReadsAllowed whether reads may currently be served locally
+     * @param activeSnapshotId ID of the active snapshot
+     * @param subscriptionCount number of subscriptions in the active snapshot
+     * @param activatedAt last successful activation of the active snapshot
+     * @param expectedSnapshotId snapshot ID of the expected (activation) head
+     * @param pendingSnapshotId ID of a prepared snapshot that is not yet active
+     * @param staleSince time since when the cache is stale
+     */
+    public record Diagnostics(Status status, boolean localReadsAllowed, String activeSnapshotId, int subscriptionCount,
+                              Instant activatedAt, String expectedSnapshotId, String pendingSnapshotId,
+                              Instant staleSince) {
     }
 
     private record CacheState(IndexedSubscriptionSnapshot activeSnapshot,
@@ -187,6 +205,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
                     SnapshotVersion.from(snapshotHead))) {
                 var now = clock.instant();
                 cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
+                activatedAt = now;
                 completeFirstFreshSnapshot();
                 return;
             }
@@ -203,11 +222,13 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         if (Objects.equals(prepared.version(), currentState.activeSnapshot().version())) {
             var now = clock.instant();
             cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
+            activatedAt = now;
             completeFirstFreshSnapshot();
             return;
         }
         var now = clock.instant();
         cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(prepared, now));
+        activatedAt = now;
         completeFirstFreshSnapshot();
         log.debug("Activated local subscription snapshot {} with {} subscriptions",
             prepared.snapshotId(), prepared.subscriptionsById().size());
@@ -249,6 +270,26 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         cacheState.updateAndGet(previous -> previous.withStaleStatus(now));
     }
 
+    /**
+     * Returns a consistent snapshot of the cache state for health reporting.
+     *
+     * @return current diagnostics
+     */
+    public Diagnostics diagnostics() {
+        var state = cacheState.get();
+        var active = state.activeSnapshot();
+        var expectedVersion = state.activationHeadVersion();
+        return new Diagnostics(
+            state.status(),
+            canServeLocalReads(state, clock.instant()),
+            active.snapshotId(),
+            active.subscriptionsById().size(),
+            state.hasActiveSnapshot() ? activatedAt : null,
+            expectedVersion == null ? null : expectedVersion.snapshotId(),
+            state.hasPendingSnapshot() ? state.preparedSnapshot().snapshotId() : null,
+            state.staleSince());
+    }
+
     /** Returns the current freshness status of the local snapshot. */
     public Status status() {
         return cacheState.get().status();
@@ -285,7 +326,10 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     }
 
     boolean canServeLocalReads(Instant now) {
-        var state = cacheState.get();
+        return canServeLocalReads(cacheState.get(), now);
+    }
+
+    private boolean canServeLocalReads(CacheState state, Instant now) {
         if (!state.hasActiveSnapshot()) {
             return false;
         }

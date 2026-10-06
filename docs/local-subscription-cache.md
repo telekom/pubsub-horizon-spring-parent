@@ -83,7 +83,7 @@ classDiagram
         +load(snapshotHead)
     }
     class JsonCacheService~SubscriptionResource~
-    class LocalSubscriptionCacheInitializer {
+    class LocalSubscriptionCacheHealthIndicator {
         +health()
     }
     class ZooKeeperSubscriptionHeadWatcher {
@@ -114,7 +114,7 @@ classDiagram
     HazelcastCacheReader --> JsonCacheService~SubscriptionResource~
     FallbackSubscriptionCacheReader --> LocalSubscriptionCache : primary
     FallbackSubscriptionCacheReader --> HazelcastCacheReader : fallback
-    LocalSubscriptionCacheInitializer --> LocalSubscriptionCache
+    LocalSubscriptionCacheHealthIndicator --> LocalSubscriptionCache
     ZooKeeperSubscriptionHeadWatcher --> ZooKeeperSubscriptionHeadReconciler : events, reconnect, periodic
     ZooKeeperSubscriptionHeadReconciler --> LocalSubscriptionCache : prepare/activate ZooKeeper head
     ZooKeeperSubscriptionHeadReconciler --> MongoSubscriptionHeadReconciler : head fallback
@@ -138,15 +138,43 @@ It falls back to the MongoDB head only when the `activate` head cannot be determ
 `mongo-head-fallback-enabled` is `true`. With `zoo-keeper.enabled: false`, no ZooKeeper client is started; the
 `MongoSubscriptionHeadPoller` activates the MongoDB head once at startup and then every `reconcile-interval`.
 
-The `LocalSubscriptionCacheInitializer` only reports health:
+The `LocalSubscriptionCacheHealthIndicator` (endpoint `/actuator/health/localSubscriptionCache`) only reports health:
 
 | Method | Responsibility |
 |---|---|
 | `health()` | Reports `UP` when the effective reader (local cache or enabled fallback) is ready; otherwise reports `DOWN`. |
 
-Health details are reported in this order: `source`, `localSnapshotId`, `cacheStatus`, and `localReadsAllowed`.
-`localSnapshotId` identifies the last active local snapshot and can be stale when `source` is `fallback`; it is
-`none` before a local snapshot has been activated.
+Health details, in this order:
+
+| Detail | Meaning |
+|---|---|
+| `source` | `local`, `fallback`, or `unavailable` (status `DOWN`) |
+| `fallbackMode` | Configured `fallback-mode` |
+| `headSource` | `zookeeper` or `mongodb` (`zoo-keeper.enabled`) |
+| `cacheStatus` | `UNINITIALIZED`, `FRESH`, or `STALE` |
+| `localSnapshotId` | Active local snapshot; `none` before the first activation. Can be outdated when `source` is `fallback`. |
+| `subscriptionCount` | Number of subscriptions in the active local snapshot |
+| `activatedAt` | Last successful activation of the active snapshot, or `none` |
+| `expectedSnapshotId` | Snapshot of the expected head; differs from `localSnapshotId` while the pod lags behind; `none` while no head source is available |
+| `pendingSnapshotId` | Prepared snapshot that is not active yet, or `none` |
+| `staleSince` | Only while `STALE`: time since when the cache is stale |
+| `staleLocalReadsRemaining` | Only while `STALE` with `hazelcast-with-mongo-fallback`: remaining `stale-local-cache-read-grace-period` before reads use the fallback |
+
+`LocalSubscriptionCacheMetrics` exposes the same state per pod as Prometheus metrics. Gauges are evaluated from
+memory at scrape time; the counter is a single increment per fallback read.
+
+| Metric | Type | Value |
+|---|---|---|
+| `horizon_local_subscription_cache_status{status}` | Gauge | `1` for the current status (`UNINITIALIZED`, `FRESH`, `STALE`), otherwise `0` |
+| `horizon_local_subscription_cache_local_reads` | Gauge | `1` if reads are served locally, `0` if the fallback is used |
+| `horizon_local_subscription_cache_subscriptions` | Gauge | Subscriptions in the active snapshot |
+| `horizon_local_subscription_cache_stale_seconds` | Gauge | Seconds since the cache became `STALE`, `0` otherwise |
+| `horizon_local_subscription_cache_last_activation_timestamp_seconds` | Gauge | Epoch seconds of the last activation, `0` if none |
+| `horizon_local_subscription_cache_snapshot_behind` | Gauge | `1` if the active snapshot differs from the expected head |
+| `horizon_local_subscription_cache_fallback_reads_total` | Counter | Reads served by the Hazelcast/MongoDB fallback (`hazelcast-with-mongo-fallback` only) |
+
+A Grafana dashboard for these metrics can be imported from
+[local-subscription-cache-dashboard.json](local-subscription-cache-dashboard.json).
 
 The initializer does not coordinate the snapshot lifecycle and does not provide subscription lookup methods. Readers use
 `SubscriptionCacheReader`, which delegates local lookups to the currently active snapshot.
@@ -290,7 +318,7 @@ horizon:
 ```
 
 The bean is registered in addition to the existing `JsonCacheService`. A custom `LocalSubscriptionCache` or
-`LocalSubscriptionCacheInitializer` bean overrides the corresponding auto-configured bean.
+`LocalSubscriptionCacheHealthIndicator` bean overrides the corresponding auto-configured bean.
 
 An enabled local cache uses ZooKeeper head coordination by default; the ZooKeeper connect string and distinct head paths
 are then required. With `zoo-keeper.enabled: false`, the MongoDB head is the only head source and is polled

@@ -25,6 +25,8 @@ import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.ObjectProvider;
@@ -73,7 +75,8 @@ public class JsonCacheAutoconfiguration {
     public SubscriptionCacheReader subscriptionCacheWithLocalPrimary(
             ObjectProvider<LocalSubscriptionCache> localSubscriptionCacheProvider,
             @org.springframework.beans.factory.annotation.Qualifier("subscriptionCache") JsonCacheService<SubscriptionResource> subscriptionCache,
-            CacheProperties cacheProperties) {
+            CacheProperties cacheProperties,
+            ObjectProvider<MeterRegistry> meterRegistryProvider) {
         var localSubscriptionCache = localSubscriptionCacheProvider.getIfAvailable();
         var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
         // If local subscription cache is not enabled, fall back to Hazelcast cache reader
@@ -96,8 +99,15 @@ public class JsonCacheAutoconfiguration {
             return hazelcastCacheReader;
         }
         log.info("Using local subscription cache reader with Hazelcast/MongoDB fallback");
+        var meterRegistry = meterRegistryProvider.getIfAvailable();
+        Runnable fallbackReadListener = meterRegistry == null
+            ? () -> { }
+            : Counter.builder(LocalSubscriptionCacheMetrics.FALLBACK_READS)
+                .description("Subscription reads served by the Hazelcast/MongoDB fallback instead of the local cache")
+                .register(meterRegistry)::increment;
         return new FallbackSubscriptionCacheReader(
-            localSubscriptionCache, hazelcastCacheReader, localSubscriptionCache::canServeLocalReads);
+            localSubscriptionCache, hazelcastCacheReader, localSubscriptionCache::canServeLocalReads,
+            fallbackReadListener);
     }
 
     @Bean

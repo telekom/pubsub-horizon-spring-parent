@@ -190,14 +190,26 @@ public class LocalSubscriptionCacheAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(LocalSubscriptionCacheInitializer.class)
+    @ConditionalOnMissingBean(LocalSubscriptionCacheHealthIndicator.class)
     @ConditionalOnProperty(
         prefix = "horizon.cache.local-subscription-cache",
         name = "enabled",
         havingValue = "true")
-    public LocalSubscriptionCacheInitializer localSubscriptionCacheInitializer(
+    public LocalSubscriptionCacheHealthIndicator localSubscriptionCacheHealthIndicator(
         LocalSubscriptionCache localSubscriptionCache,
-        ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider) {
-        return new LocalSubscriptionCacheInitializer(localSubscriptionCache, subscriptionCacheReaderProvider);
+        ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider,
+        ObjectProvider<CacheProperties> cachePropertiesProvider) {
+        return new LocalSubscriptionCacheHealthIndicator(localSubscriptionCache, subscriptionCacheReaderProvider,
+            cachePropertiesProvider.getIfAvailable(CacheProperties::new).getLocalSubscriptionCache());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(LocalSubscriptionCacheMetrics.class)
+    @ConditionalOnProperty(
+        prefix = "horizon.cache.local-subscription-cache",
+        name = "enabled",
+        havingValue = "true")
+    public LocalSubscriptionCacheMetrics localSubscriptionCacheMetrics(LocalSubscriptionCache localSubscriptionCache) {
+        return new LocalSubscriptionCacheMetrics(localSubscriptionCache);
     }
 }
