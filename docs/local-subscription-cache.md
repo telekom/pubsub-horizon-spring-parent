@@ -334,7 +334,7 @@ horizon:
             snapshot-collection: subscriptions.subscriber.horizon.telekom.de.v1-snapshots
             head-collection: subscriptions.subscriber.horizon.telekom.de.v1-head
             stale-local-cache-read-grace-period: 120s # Applies only to hazelcast-with-mongo-fallback
-            require-local-cache-at-startup: true # Applies only to hazelcast-with-mongo-fallback; none always requires a local cache
+            require-local-cache-at-startup: false # Applies only to hazelcast-with-mongo-fallback; none always requires a local cache
             initial-snapshot-timeout: 120s
             reconcile-interval: 60s
             mongo-head-poll-jitter: 10s
@@ -345,8 +345,8 @@ horizon:
                 connect-string: localhost:2181,localhost:2182,localhost:2183
                 prepared-path: /horizon/subscriptions/prepared
                 activate-path: /horizon/subscriptions/activated
-                connection-timeout: 15s
-                session-timeout: 60s
+                connection-timeout: 5s
+                session-timeout: 30s
 ```
 
 The service YAMLs and matching Helm helpers use service-prefixed environment variables:
@@ -377,7 +377,7 @@ All properties are located under `horizon.cache.local-subscription-cache`.
 | `snapshot-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-snapshots` | all | MongoDB collection with the snapshot entries. |
 | `head-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-head` | all | MongoDB collection with the head document of the active snapshot. |
 | `stale-local-cache-read-grace-period` | `120s` | `hazelcast-with-mongo-fallback` | How long a `STALE` local snapshot may still serve reads before the shared reader is used. `0s` switches immediately. With `none`, stale reads are unlimited. |
-| `require-local-cache-at-startup` | `true` | `hazelcast-with-mongo-fallback` | When `true`, startup waits for the first `FRESH` local snapshot. When `false`, startup continues without waiting and without checking Hazelcast. `none` always waits. |
+| `require-local-cache-at-startup` | `false` | `hazelcast-with-mongo-fallback` | When `true`, startup waits for the first `FRESH` local snapshot. When `false`, startup continues without waiting and without checking Hazelcast. `none` always waits. |
 | `initial-snapshot-timeout` | `120s` | all, when startup waits | Maximum wait for the first local snapshot. Expiry fails startup and terminates the process; `0s` waits indefinitely. |
 | `reconcile-interval` | `60s` | all | Interval for re-checking the active head: the ZooKeeper `activate` head, or the MongoDB head when ZooKeeper is disabled or disconnected. `0s` disables periodic runs. |
 | `mongo-head-poll-jitter` | `10s` | all | Maximum random offset of the first periodic head reconciliation; later runs keep the fixed interval. Immediate MongoDB head reads after a ZooKeeper failure are not delayed. |
@@ -387,8 +387,8 @@ All properties are located under `horizon.cache.local-subscription-cache`.
 | `zoo-keeper.connect-string` | none | ZooKeeper mode | ZooKeeper connect string; required in ZooKeeper mode. |
 | `zoo-keeper.prepared-path` | none | ZooKeeper mode | Absolute ZNode path of the `prepared` head, for example `/horizon/subscriptions/prepared`. |
 | `zoo-keeper.activate-path` | none | ZooKeeper mode | Absolute ZNode path of the `activate` head, for example `/horizon/subscriptions/activated`. Must differ from `prepared-path`. |
-| `zoo-keeper.connection-timeout` | `15s` | ZooKeeper mode | Curator connection timeout; must be positive. |
-| `zoo-keeper.session-timeout` | `60s` | ZooKeeper mode | ZooKeeper session timeout; must be positive. |
+| `zoo-keeper.connection-timeout` | `5s` | ZooKeeper mode | Curator connection timeout; also bounds each head read (`prepared`/`activate`), a timed-out read counts as `zookeeper_head_read` failure. Must be positive. |
+| `zoo-keeper.session-timeout` | `30s` | ZooKeeper mode | ZooKeeper session timeout; the server may cap it (e.g. 40s). Must be positive. |
 
 Curator tracks the ZooKeeper-published ensemble addresses by default (`ensemble-tracker-enabled: true`).
 For a local Docker ensemble accessed from the host through mapped ports, set `ensemble-tracker-enabled: false`
@@ -429,7 +429,7 @@ On reconnect, a previously prepared snapshot is retained and reused only when it
 current head; a different head is loaded before activation.
 Startup waits for the first successfully activated, non-empty `FRESH` snapshot when a local
 cache is required: always with fallback mode `NONE`, and with `hazelcast-with-mongo-fallback` only when
-`require-local-cache-at-startup` is `true` (default). With `require-local-cache-at-startup: false`, startup continues
+`require-local-cache-at-startup` is `true`. With `require-local-cache-at-startup: false` (default), startup continues
 immediately without checking Hazelcast readiness. Configure `initial-snapshot-timeout` under `local-subscription-cache`
 (default: `120s`); it limits only the wait for the local snapshot. If the deadline expires, application startup fails.
 Set it to `0s` to wait indefinitely; a negative value is invalid. Spring publishes `ApplicationReadyEvent` only after

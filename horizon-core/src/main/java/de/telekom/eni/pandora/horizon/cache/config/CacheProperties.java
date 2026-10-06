@@ -49,7 +49,7 @@ public class CacheProperties {
         private Duration staleLocalCacheReadGracePeriod = Duration.ofSeconds(120);
 
         // Only applies to HAZELCAST_WITH_MONGO_FALLBACK; NONE always requires a local cache at startup.
-        private boolean requireLocalCacheAtStartup = true;
+        private boolean requireLocalCacheAtStartup = false;
 
         // Only applies when startup waits; expiry fails startup, zero waits indefinitely.
         private Duration initialSnapshotTimeout = Duration.ofSeconds(120);
@@ -82,9 +82,9 @@ public class CacheProperties {
 
         private String activatePath;
 
-        private Duration connectionTimeout = Duration.ofSeconds(15);
+        private Duration connectionTimeout = Duration.ofSeconds(5);
 
-        private Duration sessionTimeout = Duration.ofSeconds(60);
+        private Duration sessionTimeout = Duration.ofSeconds(30);
     }
 
     public enum LocalSubscriptionCacheFallback {

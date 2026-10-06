@@ -5,9 +5,13 @@ import de.telekom.eni.pandora.horizon.cache.service.ZooKeeperSubscriptionSnapsho
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.api.CuratorEvent;
 import org.apache.zookeeper.KeeperException;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class ZooKeeperSubscriptionSnapshotHeadReader {
 
@@ -36,13 +40,30 @@ public class ZooKeeperSubscriptionSnapshotHeadReader {
         return data == null ? Optional.empty() : Optional.of(parser.parse(data));
     }
 
+    // Bounded by the connection timeout: a blocking read can hang for the session read timeout plus Curator retries.
     private Optional<SubscriptionSnapshotHead> read(String path) {
+        var readTimeoutMs = client.getZookeeperClient().getConnectionTimeoutMs();
+        var result = new CompletableFuture<CuratorEvent>();
         try {
-            return Optional.of(parser.parse(client.getData().forPath(path)));
-        } catch (KeeperException.NoNodeException exception) {
-            return Optional.empty();
+            client.getData().inBackground((ignored, event) -> result.complete(event)).forPath(path);
+            var event = result.get(readTimeoutMs, TimeUnit.MILLISECONDS);
+            var code = KeeperException.Code.get(event.getResultCode());
+            if (code == KeeperException.Code.NONODE) {
+                return Optional.empty();
+            }
+            if (code != KeeperException.Code.OK) {
+                throw KeeperException.create(code, path);
+            }
+            return Optional.of(parser.parse(event.getData()));
         } catch (SubscriptionCacheSnapshotException exception) {
             throw exception;
+        } catch (TimeoutException exception) {
+            throw new IllegalStateException("Timed out after " + readTimeoutMs
+                + " ms reading ZooKeeper subscription snapshot head at " + path, exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while reading ZooKeeper subscription snapshot head at " + path,
+                exception);
         } catch (Exception exception) {
             throw new IllegalStateException("Cannot read ZooKeeper subscription snapshot head at " + path, exception);
         }

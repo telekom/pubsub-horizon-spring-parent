@@ -8,6 +8,7 @@ import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.framework.imps.CuratorFrameworkState;
 import org.apache.curator.framework.state.ConnectionState;
+import org.apache.curator.retry.RetryNTimes;
 import org.apache.curator.retry.RetryOneTime;
 import org.apache.curator.test.TestingServer;
 import org.junit.jupiter.api.Test;
@@ -232,6 +233,7 @@ class SubscriptionZooKeeperClientTest {
         var firstFreshSnapshot = new CompletableFuture<Void>();
         when(cache.firstFreshSnapshot()).thenReturn(firstFreshSnapshot);
         var properties = new CacheProperties();
+        properties.getLocalSubscriptionCache().setRequireLocalCacheAtStartup(true);
         properties.getLocalSubscriptionCache().setInitialSnapshotTimeout(Duration.ofMillis(1));
         var barrier = new LocalSubscriptionCacheAutoConfiguration()
             .localSubscriptionCacheStartupBarrier(cache, properties);
@@ -250,6 +252,7 @@ class SubscriptionZooKeeperClientTest {
         var firstFreshSnapshot = new CompletableFuture<Void>();
         when(cache.firstFreshSnapshot()).thenReturn(firstFreshSnapshot);
         var properties = new CacheProperties();
+        properties.getLocalSubscriptionCache().setRequireLocalCacheAtStartup(true);
         properties.getLocalSubscriptionCache().setInitialSnapshotTimeout(Duration.ZERO);
         var barrier = new LocalSubscriptionCacheAutoConfiguration()
             .localSubscriptionCacheStartupBarrier(cache, properties);
@@ -298,9 +301,9 @@ class SubscriptionZooKeeperClientTest {
     }
 
     @Test
-    void requireLocalCacheAtStartupDefaultsToTrue() {
+    void requireLocalCacheAtStartupDefaultsToFalse() {
         contextRunner.run(context -> assertThat(context.getBean(CacheProperties.class)
-            .getLocalSubscriptionCache().isRequireLocalCacheAtStartup()).isTrue());
+            .getLocalSubscriptionCache().isRequireLocalCacheAtStartup()).isFalse());
     }
 
     @Test
@@ -692,6 +695,31 @@ class SubscriptionZooKeeperClientTest {
 
             client.close();
             assertThatThrownBy(reader::readActivate).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    void headReadIsBoundedByConnectionTimeoutWhenServerIsUnreachable() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.builder()
+                 .connectString(server.getConnectString())
+                 .connectionTimeoutMs(500)
+                 .sessionTimeoutMs(30_000)
+                 .retryPolicy(new RetryNTimes(3, 1000))
+                 .build()) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            client.create().creatingParentsIfNeeded().forPath("/subscriptions/activate", head("active"));
+            var reader = new ZooKeeperSubscriptionSnapshotHeadReader(client, new ObjectMapper(),
+                "/subscriptions/prepared", "/subscriptions/activate");
+            assertThat(reader.readActivate()).get().extracting("snapshotId").isEqualTo("active");
+
+            server.stop();
+            var start = System.nanoTime();
+            assertThatThrownBy(reader::readActivate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Timed out after 500 ms");
+            assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).isLessThan(2_000);
         }
     }
 
