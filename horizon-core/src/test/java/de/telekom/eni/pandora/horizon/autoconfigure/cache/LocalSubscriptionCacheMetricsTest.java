@@ -30,9 +30,7 @@ class LocalSubscriptionCacheMetricsTest {
             NOW.minusSeconds(600), "snapshot-new", "snapshot-new", NOW.minusSeconds(90)));
         new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
 
-        assertEquals(1, gauge("status", "STALE"));
-        assertEquals(0, gauge("status", "FRESH"));
-        assertEquals(0, gauge("status", "UNINITIALIZED"));
+        assertEquals(1, gauge("state"));
         assertEquals(0, gauge("local.reads"));
         assertEquals(3, gauge("subscriptions"));
         assertEquals(90, gauge("stale.seconds"));
@@ -46,17 +44,39 @@ class LocalSubscriptionCacheMetricsTest {
             LocalSubscriptionCache.Status.FRESH, true, "snapshot-local", 3, NOW, "snapshot-local", null, null));
         new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
 
-        assertEquals(1, gauge("status", "FRESH"));
+        assertEquals(2, gauge("state"));
         assertEquals(1, gauge("local.reads"));
         assertEquals(0, gauge("stale.seconds"));
         assertEquals(0, gauge("snapshot.behind"));
     }
 
-    private double gauge(String name) {
-        return registry.get(LocalSubscriptionCacheMetrics.PREFIX + "." + name).gauge().value();
+    @Test
+    void exposesUninitializedState() {
+        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+            LocalSubscriptionCache.Status.UNINITIALIZED, false, null, 0, null, null, null, null));
+        new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
+
+        assertEquals(0, gauge("state"));
+        assertEquals(0, gauge("last.activation.timestamp.seconds"));
     }
 
-    private double gauge(String name, String status) {
-        return registry.get(LocalSubscriptionCacheMetrics.PREFIX + "." + name).tag("status", status).gauge().value();
+    @Test
+    void exposesFailuresAndSnapshotLoadTimes() {
+        when(cache.activationFailureCount()).thenReturn(3L);
+        when(cache.snapshotLoadCount()).thenReturn(4L);
+        when(cache.snapshotLoadTotalNanos()).thenReturn(8_000_000_000L);
+        when(cache.lastSnapshotLoadNanos()).thenReturn(1_500_000_000L);
+        new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
+
+        assertEquals(3, registry.get(LocalSubscriptionCacheMetrics.FAILURES).tag("reason", "activation")
+            .functionCounter().count());
+        var loadTimer = registry.get(LocalSubscriptionCacheMetrics.PREFIX + ".snapshot.load").functionTimer();
+        assertEquals(4, loadTimer.count());
+        assertEquals(8, loadTimer.totalTime(java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(1.5, gauge("snapshot.load.last.seconds"));
+    }
+
+    private double gauge(String name) {
+        return registry.get(LocalSubscriptionCacheMetrics.PREFIX + "." + name).gauge().value();
     }
 }

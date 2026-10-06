@@ -68,7 +68,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
             try {
                 return primary.getById(subscriptionId);
             } catch (RuntimeException | SubscriptionCacheReadException exception) {
-                log.warn("Primary subscription cache getById failed, using fallback", exception);
+                log.debug("Primary subscription cache getById failed, using fallback", exception);
             }
         }
         fallbackReadListener.run();
@@ -96,7 +96,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
             try {
                 return primary.findByEnvironmentAndEventType(environment, eventType);
             } catch (RuntimeException | SubscriptionCacheReadException exception) {
-                log.warn("Primary subscription cache query failed, using fallback", exception);
+                log.debug("Primary subscription cache query failed, using fallback", exception);
             }
         }
         fallbackReadListener.run();

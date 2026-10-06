@@ -161,13 +161,17 @@ memory at scrape time; the counter is a single increment per fallback read.
 
 | Metric | Type | Value |
 |---|---|---|
-| `horizon_local_subscription_cache_status{status}` | Gauge | `1` for the current status (`UNINITIALIZED`, `FRESH`, `STALE`), otherwise `0` |
+| `horizon_local_subscription_cache_state` | Gauge | Current status: `0` = `UNINITIALIZED`, `1` = `STALE`, `2` = `FRESH` |
 | `horizon_local_subscription_cache_local_reads` | Gauge | `1` if reads are served locally, `0` if the fallback is used |
 | `horizon_local_subscription_cache_subscriptions` | Gauge | Subscriptions in the active snapshot |
 | `horizon_local_subscription_cache_stale_seconds` | Gauge | Seconds since the cache became `STALE`, `0` otherwise |
 | `horizon_local_subscription_cache_last_activation_timestamp_seconds` | Gauge | Epoch seconds of the last activation, `0` if none |
 | `horizon_local_subscription_cache_snapshot_behind` | Gauge | `1` if the active snapshot differs from the expected head |
 | `horizon_local_subscription_cache_fallback_reads_total` | Counter | Reads served by the Hazelcast/MongoDB fallback (`hazelcast-with-mongo-fallback` only) |
+| `horizon_local_subscription_cache_zookeeper_connected` | Gauge | `1` if the ZooKeeper head source is connected, otherwise `0` (ZooKeeper mode only) |
+| `horizon_local_subscription_cache_failures_total{reason}` | Counter | `activation`: failed snapshot activations including failed snapshot loads; `zookeeper_head_read`: ZooKeeper `activate` head unreadable or missing while ZooKeeper is reachable (ZooKeeper mode only). Counts attempts, not incidents. |
+| `horizon_local_subscription_cache_snapshot_load_seconds` | Timer | Count and total duration of successful snapshot loads from MongoDB |
+| `horizon_local_subscription_cache_snapshot_load_last_seconds` | Gauge | Duration of the last successful snapshot load |
 
 A Grafana dashboard for these metrics can be imported from
 [local-subscription-cache-dashboard.json](local-subscription-cache-dashboard.json).

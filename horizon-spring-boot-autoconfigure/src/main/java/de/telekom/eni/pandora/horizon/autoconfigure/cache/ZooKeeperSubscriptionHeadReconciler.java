@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Activates subscription snapshots from the ZooKeeper heads, with optional MongoDB head fallback. */
 @Slf4j
@@ -23,6 +24,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     private final MongoSubscriptionHeadReconciler mongoHeadReconciler;
     private final boolean mongoHeadFallbackEnabled;
     private final Object activationLock = new Object();
+    private final AtomicLong headReadFailures = new AtomicLong();
     private volatile boolean connected = true;
     private Head lastActivated;
 
@@ -96,12 +98,14 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         try {
             active = reader.readActivate();
         } catch (RuntimeException exception) {
+            headReadFailures.incrementAndGet();
             log.warn("Could not read activate subscription head", exception);
             reconcileFromMongoHead();
             return;
         }
 
         if (active.isEmpty()) {
+            headReadFailures.incrementAndGet();
             log.warn("ZooKeeper activate subscription head is missing");
             reconcileFromMongoHead();
             return;
@@ -150,6 +154,11 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
             return;
         }
         mongoHeadReconciler.reconcile().ifPresent(head -> lastActivated = Head.from(head));
+    }
+
+    /** Number of reconciliations whose ZooKeeper activate head was unreadable or missing. */
+    public long headReadFailureCount() {
+        return headReadFailures.get();
     }
 
     private void prepareOnly(SubscriptionSnapshotHead head) {

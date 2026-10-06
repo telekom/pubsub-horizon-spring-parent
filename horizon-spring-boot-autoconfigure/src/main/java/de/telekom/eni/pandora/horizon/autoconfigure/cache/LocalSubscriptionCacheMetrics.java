@@ -5,6 +5,8 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
+import io.micrometer.core.instrument.FunctionCounter;
+import io.micrometer.core.instrument.FunctionTimer;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
@@ -12,15 +14,19 @@ import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.function.ToDoubleFunction;
 
 /**
- * Exposes the state of the local subscription cache as gauges. All values are read from memory at scrape time.
+ * Exposes the state of the local subscription cache as meters. All values are read from memory at scrape time.
  */
 public class LocalSubscriptionCacheMetrics implements MeterBinder {
 
     static final String PREFIX = "horizon.local.subscription.cache";
     static final String FALLBACK_READS = PREFIX + ".fallback.reads";
+    static final String FAILURES = PREFIX + ".failures";
+    static final String FAILURES_DESCRIPTION =
+        "Failed snapshot activations (including failed snapshot loads) and unusable ZooKeeper activate heads";
 
     private final LocalSubscriptionCache cache;
     private final Clock clock;
@@ -41,12 +47,8 @@ public class LocalSubscriptionCacheMetrics implements MeterBinder {
 
     @Override
     public void bindTo(MeterRegistry registry) {
-        for (var status : LocalSubscriptionCache.Status.values()) {
-            gauge(PREFIX + ".status", "1 for the current local cache status, otherwise 0",
-                diagnostics -> diagnostics.status() == status ? 1 : 0)
-                .tag("status", status.name())
-                .register(registry);
-        }
+        gauge(PREFIX + ".state", "Local cache status: 0 = UNINITIALIZED, 1 = STALE, 2 = FRESH",
+            diagnostics -> stateValue(diagnostics.status())).register(registry);
         gauge(PREFIX + ".local.reads", "1 if reads are served locally, 0 if the fallback is used",
             diagnostics -> diagnostics.localReadsAllowed() ? 1 : 0).register(registry);
         gauge(PREFIX + ".subscriptions", "Number of subscriptions in the active local snapshot",
@@ -61,6 +63,19 @@ public class LocalSubscriptionCacheMetrics implements MeterBinder {
             diagnostics -> diagnostics.expectedSnapshotId() != null
                 && !Objects.equals(diagnostics.expectedSnapshotId(), diagnostics.activeSnapshotId()) ? 1 : 0)
             .register(registry);
+        FunctionCounter.builder(FAILURES, cache, LocalSubscriptionCache::activationFailureCount)
+            .description(FAILURES_DESCRIPTION)
+            .tag("reason", "activation")
+            .register(registry);
+        FunctionTimer.builder(PREFIX + ".snapshot.load", cache,
+                LocalSubscriptionCache::snapshotLoadCount, LocalSubscriptionCache::snapshotLoadTotalNanos,
+                TimeUnit.NANOSECONDS)
+            .description("Successful snapshot loads from MongoDB")
+            .register(registry);
+        Gauge.builder(PREFIX + ".snapshot.load.last.seconds", cache, c -> c.lastSnapshotLoadNanos() / 1e9)
+            .description("Duration of the last successful snapshot load, 0 if none")
+            .strongReference(true)
+            .register(registry);
     }
 
     private Gauge.Builder<LocalSubscriptionCache> gauge(String name, String description,
@@ -68,6 +83,14 @@ public class LocalSubscriptionCacheMetrics implements MeterBinder {
         return Gauge.builder(name, cache, c -> value.applyAsDouble(c.diagnostics()))
             .description(description)
             .strongReference(true);
+    }
+
+    private static int stateValue(LocalSubscriptionCache.Status status) {
+        return switch (status) {
+            case UNINITIALIZED -> 0;
+            case STALE -> 1;
+            case FRESH -> 2;
+        };
     }
 
     private double staleSeconds(LocalSubscriptionCache.Diagnostics diagnostics) {

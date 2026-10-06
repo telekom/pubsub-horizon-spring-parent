@@ -10,6 +10,10 @@ import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoader;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
+import io.micrometer.core.instrument.FunctionCounter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
@@ -65,13 +69,28 @@ public class LocalSubscriptionCacheAutoConfiguration {
             return client;
         }
 
+        @Bean
+        @ConditionalOnProperty(
+            prefix = "horizon.cache.local-subscription-cache",
+            name = "enabled",
+            havingValue = "true")
+        public MeterBinder localSubscriptionCacheZooKeeperMetrics(ObjectProvider<CuratorFramework> clientProvider) {
+            return registry -> clientProvider.ifAvailable(client -> Gauge.builder(
+                    LocalSubscriptionCacheMetrics.PREFIX + ".zookeeper.connected", client,
+                    c -> c.getZookeeperClient().isConnected() ? 1 : 0)
+                .description("1 if the ZooKeeper head source is connected, otherwise 0")
+                .strongReference(true)
+                .register(registry));
+        }
+
         @Bean(initMethod = "start", destroyMethod = "close")
         @ConditionalOnProperty(
             prefix = "horizon.cache.local-subscription-cache",
             name = "enabled",
             havingValue = "true")
         public ZooKeeperSubscriptionHeadWatcher subscriptionHeadWatcher(CuratorFramework client,
-                LocalSubscriptionCache cache, CacheProperties cacheProperties) {
+                LocalSubscriptionCache cache, CacheProperties cacheProperties,
+                ObjectProvider<MeterRegistry> meterRegistryProvider) {
             var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
             var zooKeeper = localCacheProperties.getZooKeeper();
             var preparedPath = zooKeeper.getPreparedPath();
@@ -86,6 +105,12 @@ public class LocalSubscriptionCacheAutoConfiguration {
                 client, new ObjectMapper(), preparedPath, activatePath);
             var reconciler = new ZooKeeperSubscriptionHeadReconciler(
                 reader, cache, localCacheProperties.isMongoHeadFallbackEnabled());
+            meterRegistryProvider.ifAvailable(registry -> FunctionCounter.builder(
+                    LocalSubscriptionCacheMetrics.FAILURES, reconciler,
+                    ZooKeeperSubscriptionHeadReconciler::headReadFailureCount)
+                .description(LocalSubscriptionCacheMetrics.FAILURES_DESCRIPTION)
+                .tag("reason", "zookeeper_head_read")
+                .register(registry));
             return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatePath, reconciler,
                 localCacheProperties.getReconcileInterval(), localCacheProperties.getMongoSnapshotSyncJitter(),
                 localCacheProperties.getMongoHeadPollJitter());

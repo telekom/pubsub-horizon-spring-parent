@@ -11,6 +11,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -77,6 +78,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         order.verify(cache).activate(mongoHead);
         verify(cache, never()).prepare(prepared);
         verify(cache, never()).disconnected();
+        assertEquals(1, reconciler.headReadFailureCount());
     }
 
     @Test
@@ -118,6 +120,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         verify(cache).setActivationHead(active);
         verify(cache).prepare(active);
         verify(cache).activate(active);
+        assertEquals(0, reconciler.headReadFailureCount());
     }
 
     @Test
@@ -133,6 +136,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         verify(cache, never()).disconnected();
         verify(cache, never()).prepare(prepared);
         verify(cache).activate(mongoHead);
+        assertEquals(1, reconciler.headReadFailureCount());
     }
 
     @Test

@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -37,6 +38,10 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     private final AtomicReference<CacheState> cacheState = new AtomicReference<>(
         new CacheState(IndexedSubscriptionSnapshot.empty(), null, null, Status.UNINITIALIZED, false, null));
     private volatile Instant activatedAt;
+    private final AtomicLong snapshotLoads = new AtomicLong();
+    private final AtomicLong snapshotLoadNanos = new AtomicLong();
+    private volatile long lastSnapshotLoadNanos;
+    private final AtomicLong activationFailures = new AtomicLong();
 
     public enum Status {
         UNINITIALIZED, FRESH, STALE
@@ -171,7 +176,12 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             return;
         }
 
+        var loadStart = System.nanoTime();
         var snapshot = snapshotLoader.load(snapshotHead);
+        var loadNanos = System.nanoTime() - loadStart;
+        snapshotLoads.incrementAndGet();
+        snapshotLoadNanos.addAndGet(loadNanos);
+        lastSnapshotLoadNanos = loadNanos;
         cacheState.updateAndGet(previous -> previous.withPreparedSnapshot(snapshot));
         log.debug("Prepared local subscription snapshot {} with {} subscriptions",
             snapshot.snapshotId(), snapshot.subscriptionsById().size());
@@ -184,6 +194,26 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      */
     public SubscriptionSnapshotHead readSnapshotHead() {
         return snapshotLoader.readSnapshotHead();
+    }
+
+    /** Number of successfully loaded snapshots. */
+    public long snapshotLoadCount() {
+        return snapshotLoads.get();
+    }
+
+    /** Total time spent loading snapshots successfully, in nanoseconds. */
+    public long snapshotLoadTotalNanos() {
+        return snapshotLoadNanos.get();
+    }
+
+    /** Duration of the last successful snapshot load, in nanoseconds; 0 if none. */
+    public long lastSnapshotLoadNanos() {
+        return lastSnapshotLoadNanos;
+    }
+
+    /** Number of failed snapshot activations, including failed snapshot loads. */
+    public long activationFailureCount() {
+        return activationFailures.get();
     }
 
     /**
@@ -253,6 +283,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
     /** Marks the cache STALE if the failed head is still the expected head. */
     public void activationFailed(SubscriptionSnapshotHead head) {
+        activationFailures.incrementAndGet();
         var failedVersion = completeVersion(head);
         var now = clock.instant();
         cacheState.updateAndGet(previous -> previous.withActivationFailure(failedVersion, now));
@@ -376,8 +407,6 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
         var snapshot = cacheState.get().activeSnapshot();
         var result = snapshot.getById(subscriptionId);
-        log.debug("Read local subscription snapshot {} by subscription ID {}: found={}",
-            snapshot.snapshotId(), subscriptionId, result.isPresent());
         return result;
     }
 
@@ -388,8 +417,6 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
         var snapshot = cacheState.get().activeSnapshot();
         var result = snapshot.findByEnvironmentAndEventType(environment, eventType);
-        log.debug("Read local subscription snapshot {} by environment {} and event type {}: matches={}",
-            snapshot.snapshotId(), environment, eventType, result.size());
         return result;
     }
 

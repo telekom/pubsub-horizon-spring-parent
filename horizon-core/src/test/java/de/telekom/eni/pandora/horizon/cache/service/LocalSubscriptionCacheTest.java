@@ -434,6 +434,9 @@ class LocalSubscriptionCacheTest {
         assertEquals("next", diagnostics.expectedSnapshotId());
         assertEquals("next", diagnostics.pendingSnapshotId());
         assertEquals(activatedAt.plusSeconds(1), diagnostics.staleSince());
+        assertEquals(2, diagnosticsCache.snapshotLoadCount());
+        assertTrue(diagnosticsCache.lastSnapshotLoadNanos() >= 0);
+        assertEquals(1, diagnosticsCache.activationFailureCount());
     }
 
     @Test
