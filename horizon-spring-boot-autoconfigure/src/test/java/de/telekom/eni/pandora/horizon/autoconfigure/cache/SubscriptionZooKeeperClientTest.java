@@ -375,10 +375,12 @@ class SubscriptionZooKeeperClientTest {
 
     @Test
     void reconnectUsesSnapshotSyncJitterAndDiscardsInterruptedTask() throws Exception {
-        try (var server = new TestingServer();
-             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
-            client.start();
-            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+        var client = mock(CuratorFramework.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        try (var caches = org.mockito.Mockito.mockStatic(org.apache.curator.framework.recipes.cache.CuratorCache.class)) {
+            caches.when(() -> org.apache.curator.framework.recipes.cache.CuratorCache.build(
+                    org.mockito.ArgumentMatchers.eq(client), org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(ignored -> mock(org.apache.curator.framework.recipes.cache.CuratorCache.class,
+                    org.mockito.Mockito.RETURNS_DEEP_STUBS));
             var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
             var periodicTask = new AtomicReference<Runnable>();
             var reconnectTask = new AtomicReference<Runnable>();
