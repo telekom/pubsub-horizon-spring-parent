@@ -10,10 +10,10 @@ import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.JsonCacheAutoconfiguration;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.data.mongodb.core.MongoTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -99,7 +99,7 @@ class JsonCacheAutoconfigurationTest {
                 .withConfiguration(AutoConfigurations.of(JsonCacheAutoconfiguration.class))
                 .withPropertyValues("horizon.cache.enabled=true")
                 .withBean(HazelcastInstance.class, () -> hazelcastInstance)
-                .withBean(SubscriptionsMongoRepo.class, () -> mock(SubscriptionsMongoRepo.class))
+                .withBean("mongoConfigTemplate", MongoTemplate.class, () -> mock(MongoTemplate.class))
                 .withBean(MongoProperties.class, MongoProperties::new)
                 .withBean(CacheProperties.class, () -> cacheProperties);
     }

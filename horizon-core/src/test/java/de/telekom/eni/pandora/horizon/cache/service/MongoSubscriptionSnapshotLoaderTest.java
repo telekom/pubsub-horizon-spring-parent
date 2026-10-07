@@ -4,12 +4,14 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
-import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -57,13 +59,13 @@ class MongoSubscriptionSnapshotLoaderTest {
     void shouldLoadEntriesBySnapshotIdFromConfiguredCollection() {
         var head = snapshotHead("snapshot-1", 1L);
         var entry = snapshotEntry("snapshot-1", "subscription-1");
-        when(mongoTemplate.find(any(Query.class), eq(SubscriptionSnapshotEntry.class), eq(SNAPSHOT_COLLECTION)))
+        when(mongoTemplate.find(any(Query.class), eq(Document.class), eq(SNAPSHOT_COLLECTION)))
                 .thenReturn(List.of(entry));
 
         var snapshot = loader.load(head);
 
         var queryCaptor = ArgumentCaptor.forClass(Query.class);
-        verify(mongoTemplate).find(queryCaptor.capture(), eq(SubscriptionSnapshotEntry.class), eq(SNAPSHOT_COLLECTION));
+        verify(mongoTemplate).find(queryCaptor.capture(), eq(Document.class), eq(SNAPSHOT_COLLECTION));
         assertEquals("snapshot-1", queryCaptor.getValue().getQueryObject().getString("snapshotId"));
         assertEquals(LOAD_TIMEOUT.toMillis(), queryCaptor.getValue().getMeta().getMaxTimeMsec());
         assertEquals("snapshot-1", snapshot.snapshotId());
@@ -74,7 +76,7 @@ class MongoSubscriptionSnapshotLoaderTest {
     @Test
     void shouldRejectDocumentCountMismatch() {
         var head = snapshotHead("snapshot-1", 2L);
-        when(mongoTemplate.find(any(Query.class), eq(SubscriptionSnapshotEntry.class), eq(SNAPSHOT_COLLECTION)))
+        when(mongoTemplate.find(any(Query.class), eq(Document.class), eq(SNAPSHOT_COLLECTION)))
                 .thenReturn(List.of(snapshotEntry("snapshot-1", "subscription-1")));
 
         var exception = assertThrows(SubscriptionCacheSnapshotException.class, () -> loader.load(head));
@@ -111,7 +113,7 @@ class MongoSubscriptionSnapshotLoaderTest {
         var head = snapshotHead(" ", 1L);
 
         assertThrows(SubscriptionCacheSnapshotException.class, () -> loader.load(head));
-        verify(mongoTemplate, never()).find(any(Query.class), eq(SubscriptionSnapshotEntry.class), eq(SNAPSHOT_COLLECTION));
+        verify(mongoTemplate, never()).find(any(Query.class), eq(Document.class), eq(SNAPSHOT_COLLECTION));
     }
 
     private SubscriptionSnapshotHead snapshotHead(String snapshotId, long documentCount) {
@@ -122,7 +124,7 @@ class MongoSubscriptionSnapshotLoaderTest {
         return head;
     }
 
-    private SubscriptionSnapshotEntry snapshotEntry(String snapshotId, String subscriptionId) {
+    private Document snapshotEntry(String snapshotId, String subscriptionId) {
         var subscription = new Subscription();
         subscription.setSubscriptionId(subscriptionId);
         subscription.setType("event-type");
@@ -131,10 +133,13 @@ class MongoSubscriptionSnapshotLoaderTest {
         spec.setSubscription(subscription);
         var resource = new SubscriptionResource();
         resource.setSpec(spec);
-        var entry = new SubscriptionSnapshotEntry();
-        entry.setSnapshotId(snapshotId);
-        entry.setSubscriptionId(subscriptionId);
-        entry.setResource(resource);
-        return entry;
+        try {
+            return new Document("snapshotId", snapshotId)
+                    .append("subscriptionId", subscriptionId)
+                    .append("resource", Document.parse(
+                            SubscriptionResourceJsonMapper.createObjectMapper().writeValueAsString(resource)));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 }

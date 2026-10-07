@@ -4,19 +4,24 @@
 
 package de.telekom.eni.pandora.horizon.cache.fallback;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
+import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionTrigger;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,7 +29,7 @@ import static org.mockito.Mockito.*;
 
 class SubscriptionCacheMongoFallbackTest {
 
-    private SubscriptionsMongoRepo subscriptionsMongoRepo;
+    private MongoTemplate mongoTemplate;
     
     private SubscriptionCacheMongoFallback subscriptionCacheMongoFallback;
     
@@ -37,20 +42,23 @@ class SubscriptionCacheMongoFallbackTest {
 
     @BeforeEach
     void setUp() {
-        subscriptionsMongoRepo = mock(SubscriptionsMongoRepo.class);
-        subscriptionCacheMongoFallback = new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties);
+        mongoTemplate = mock(MongoTemplate.class);
+        subscriptionCacheMongoFallback = new SubscriptionCacheMongoFallback(mongoTemplate, mongoProperties,
+                new SubscriptionResourceJsonMapper());
     }
 
     @Test
     void shouldBeReadyWhenMongoDbIsReachable() {
         assertTrue(subscriptionCacheMongoFallback.isReady());
 
-        verify(subscriptionsMongoRepo).existsById("__horizon_cache_readiness__");
+        var captor = ArgumentCaptor.forClass(org.springframework.data.mongodb.core.query.Query.class);
+        verify(mongoTemplate).exists(captor.capture(), eq(SubscriptionCacheMongoFallback.COLLECTION_NAME));
+        assertEquals("__horizon_cache_readiness__", captor.getValue().getQueryObject().get("_id"));
     }
 
     @Test
     void shouldNotBeReadyWhenMongoDbIsNotReachable() {
-        when(subscriptionsMongoRepo.existsById(anyString()))
+        when(mongoTemplate.exists(anyMongoQuery(), anyString()))
                 .thenThrow(new DataAccessResourceFailureException("MongoDB unavailable"));
 
         assertFalse(subscriptionCacheMongoFallback.isReady());
@@ -61,7 +69,7 @@ class SubscriptionCacheMongoFallbackTest {
 
         // Prepare test data and simulate mongo db
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(subscriptionsMongoRepo.findByTypeAndEnvironment(any(), any())).thenReturn(List.of(mockDocument));
+        stubFind(mockDocument);
 
         // Call method to test
         Query query = Query.builder(SubscriptionMongoDocument.class)
@@ -72,7 +80,9 @@ class SubscriptionCacheMongoFallbackTest {
         List<SubscriptionResource> cacheResult = subscriptionCacheMongoFallback.getQuery(query);
 
         // Verify result
-        verify(subscriptionsMongoRepo, times(1)).findByTypeAndEnvironment(TEST_SUBSCRIPTION_TYPE, "integration");
+        var filter = capturedFindFilter();
+        assertEquals(TEST_SUBSCRIPTION_TYPE, filter.get("spec.subscription.type"));
+        assertEquals("integration", filter.get("spec.environment"));
         assertFalse(cacheResult. isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, cacheResult.getFirst().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
@@ -82,13 +92,13 @@ class SubscriptionCacheMongoFallbackTest {
 
         // Prepare test data and simulate mongo db
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(subscriptionsMongoRepo.findBySubscriptionId(TEST_SUBSCRIPTION_ID)).thenReturn(List.of(mockDocument));
+        stubFind(mockDocument);
 
         // Call method to test
         Optional<SubscriptionResource> cacheResult = subscriptionCacheMongoFallback.getByKey(TEST_SUBSCRIPTION_ID);
 
         // Verify result
-        verify(subscriptionsMongoRepo, times(1)).findBySubscriptionId(TEST_SUBSCRIPTION_ID);
+        assertEquals(TEST_SUBSCRIPTION_ID, capturedFindFilter().get("_id"));
         assertFalse(cacheResult. isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, cacheResult.get().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
@@ -98,13 +108,14 @@ class SubscriptionCacheMongoFallbackTest {
 
         // Prepare test data and simulate mongo db
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(subscriptionsMongoRepo.findAll()).thenReturn(List.of(mockDocument));
+        when(mongoTemplate.findAll(Document.class, SubscriptionCacheMongoFallback.COLLECTION_NAME))
+                .thenReturn(List.of(toDocument(mockDocument)));
 
         // Call method to test
         List<SubscriptionResource> cacheResult  = subscriptionCacheMongoFallback.getAll();
 
         // Verify result
-        verify(subscriptionsMongoRepo, times(1)).findAll();
+        verify(mongoTemplate, times(1)).findAll(Document.class, SubscriptionCacheMongoFallback.COLLECTION_NAME);
         assertFalse(cacheResult. isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, cacheResult.getFirst().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
@@ -114,7 +125,7 @@ class SubscriptionCacheMongoFallbackTest {
 
         // Prepare test data and simulate mongo db
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        when(subscriptionsMongoRepo.findByType(any())).thenReturn(List.of(mockDocument));
+        stubFind(mockDocument);
 
         // Call method to test
         Query query = Query.builder(SubscriptionMongoDocument.class)
@@ -124,6 +135,7 @@ class SubscriptionCacheMongoFallbackTest {
         List<SubscriptionResource> cacheResult = subscriptionCacheMongoFallback.getQuery(query);
 
         // Verify results
+        assertFalse(capturedFindFilter().containsKey("spec.environment"), "Query without environment must not filter it");
         assertNotNull(cacheResult, "Result should be filled");
         assertEquals(1, cacheResult.size(), "Size should be 1");
         assertInstanceOf(SubscriptionResource.class, cacheResult.getFirst());
@@ -145,19 +157,44 @@ class SubscriptionCacheMongoFallbackTest {
         var document = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
         var trigger = new SubscriptionTrigger();
         trigger.setResponseFilter(List.of("response.id"));
-        trigger.setSelectionFilter(java.util.Map.of("method", "POST"));
+        trigger.setSelectionFilter(Map.of("method", "POST"));
         var publisherTrigger = new SubscriptionTrigger();
         publisherTrigger.setResponseFilterMode(SubscriptionTrigger.ResponseFilterMode.EXCLUDE);
         document.getSpec().getSubscription().setTrigger(trigger);
         document.getSpec().getSubscription().setPublisherTrigger(publisherTrigger);
         document.getSpec().setEnvironment("integration");
+        stubFind(document);
 
-        var result = subscriptionCacheMongoFallback.mapMongoSubscriptions(List.of(document)).getFirst();
+        var result = subscriptionCacheMongoFallback.getByKey(TEST_SUBSCRIPTION_ID).orElseThrow();
 
-        assertSame(trigger, result.getSpec().getSubscription().getTrigger());
-        assertSame(publisherTrigger, result.getSpec().getSubscription().getPublisherTrigger());
-        assertEquals("integration", result.getSpec().getEnvironment());
+        assertEquals(List.of("response.id"), result.getSpec().getSubscription().getTrigger().getResponseFilter());
         assertEquals("POST", result.getSpec().getSubscription().getTrigger().getSelectionFilter().get("method"));
+        assertEquals(SubscriptionTrigger.ResponseFilterMode.EXCLUDE,
+                result.getSpec().getSubscription().getPublisherTrigger().getResponseFilterMode());
+        assertEquals("integration", result.getSpec().getEnvironment());
+    }
+
+    private void stubFind(SubscriptionMongoDocument document) {
+        when(mongoTemplate.find(anyMongoQuery(), eq(Document.class), eq(SubscriptionCacheMongoFallback.COLLECTION_NAME)))
+                .thenReturn(List.of(toDocument(document)));
+    }
+
+    private Document capturedFindFilter() {
+        var captor = ArgumentCaptor.forClass(org.springframework.data.mongodb.core.query.Query.class);
+        verify(mongoTemplate).find(captor.capture(), eq(Document.class), eq(SubscriptionCacheMongoFallback.COLLECTION_NAME));
+        return captor.getValue().getQueryObject();
+    }
+
+    private static org.springframework.data.mongodb.core.query.Query anyMongoQuery() {
+        return any(org.springframework.data.mongodb.core.query.Query.class);
+    }
+
+    private static Document toDocument(SubscriptionMongoDocument document) {
+        try {
+            return Document.parse(SubscriptionResourceJsonMapper.createObjectMapper().writeValueAsString(document));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     // Helper method to create a mocked SubscriptionMongoDocument
