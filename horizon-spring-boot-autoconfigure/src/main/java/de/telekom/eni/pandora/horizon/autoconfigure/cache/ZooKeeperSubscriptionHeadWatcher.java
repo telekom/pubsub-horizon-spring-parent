@@ -454,7 +454,9 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
                 connectionEpoch++;
                 lost.run();
                 executor.execute(this::reconcileFromMongoHeadWhileDisconnected);
-            } else if (state == ConnectionState.RECONNECTED) {
+            } else if (state == ConnectionState.RECONNECTED
+                    // Curator reports CONNECTED, not RECONNECTED, for the first connection after a failed startup.
+                    || state == ConnectionState.CONNECTED && !connected) {
                 cancelPendingPreparedReconcile();
                 cancelPendingReconnectReconcile();
                 connected = true;
@@ -481,7 +483,19 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             client.getConnectionStateListenable().removeListener(connectionStateListener);
             executor.shutdownNow();
         }
+        // Outside the monitor: running tasks may need it to finish.
+        awaitExecutorTermination();
         preparedCache.close();
         activateCache.close();
+    }
+
+    private void awaitExecutorTermination() {
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn("Subscription head watcher tasks did not stop within 5 seconds");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

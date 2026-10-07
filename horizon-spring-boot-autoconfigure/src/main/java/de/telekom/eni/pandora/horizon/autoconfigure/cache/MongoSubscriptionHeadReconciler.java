@@ -20,6 +20,7 @@ import java.util.Optional;
 public class MongoSubscriptionHeadReconciler {
 
     private final LocalSubscriptionCache cache;
+    private long consecutiveHeadReadFailures;
 
     public MongoSubscriptionHeadReconciler(LocalSubscriptionCache cache) {
         this.cache = cache;
@@ -36,15 +37,26 @@ public class MongoSubscriptionHeadReconciler {
             head = cache.readSnapshotHead();
             cache.setActivationHead(head);
         } catch (RuntimeException exception) {
+            if (ZooKeeperSubscriptionHeadReconciler.isInterrupted(exception)) {
+                return Optional.empty();
+            }
             cache.disconnected();
-            log.warn("Could not read MongoDB subscription head; local cache is stale", exception);
+            consecutiveHeadReadFailures++;
+            if (consecutiveHeadReadFailures == 1) {
+                log.warn("Could not read MongoDB subscription head; local cache is stale", exception);
+            } else {
+                log.warn("Could not read MongoDB subscription head; local cache is stale ({} consecutive failed reads): {}",
+                    consecutiveHeadReadFailures, exception.getMessage());
+            }
             return Optional.empty();
+        }
+        if (consecutiveHeadReadFailures > 0) {
+            log.info("MongoDB subscription head readable again after {} failed reads", consecutiveHeadReadFailures);
+            consecutiveHeadReadFailures = 0;
         }
         try {
             var alreadyActive = cache.isActiveSnapshot(head);
-            if (alreadyActive) {
-                cache.discardPreparedSnapshot();
-            } else {
+            if (!alreadyActive) {
                 cache.prepare(head);
             }
             cache.activate(head);

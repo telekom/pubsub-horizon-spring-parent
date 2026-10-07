@@ -217,7 +217,8 @@ public class LocalSubscriptionCacheAutoConfiguration {
         return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
             mongoConfigTemplate,
             localCacheProperties.getSnapshotCollection(),
-            localCacheProperties.getHeadCollection()), staleLocalCacheReadGracePeriod);
+            localCacheProperties.getHeadCollection(),
+            localCacheProperties.getMongoLoadTimeout()), staleLocalCacheReadGracePeriod);
     }
 
     @Bean

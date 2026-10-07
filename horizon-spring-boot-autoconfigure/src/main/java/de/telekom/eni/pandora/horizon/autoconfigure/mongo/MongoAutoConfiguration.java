@@ -8,7 +8,6 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import de.telekom.eni.pandora.horizon.mongo.converter.OperatorReadConverter;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
@@ -21,8 +20,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
-import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 import org.springframework.retry.annotation.EnableRetry;
 
@@ -53,34 +50,17 @@ public class MongoAutoConfiguration {
         return MongoClients.create(clientSettings);
     }
 
-    @Bean
-    public MongoCustomConversions mongoCustomConversions() {
-        return MongoCustomConversions.create(adapter -> adapter.registerConverter(new OperatorReadConverter()));
-    }
-
-
     @Bean(name = "mongoStatusTemplate")
     //@ConditionalOnMissingBean(name = "mongoStatusTemplate")
-    public MongoTemplate mongoStatusTemplate(MongoClient mongoClient, MongoProperties properties,
-                                             MongoCustomConversions mongoCustomConversions) {
-        return createMongoTemplate(mongoClient, properties.getDatabases().getRunTimeDatabase(), mongoCustomConversions);
+    public MongoTemplate mongoStatusTemplate(MongoClient mongoClient, MongoProperties properties) {
+        return new MongoTemplate(mongoClient, properties.getDatabases().getRunTimeDatabase());
     }
 
     @Primary
     @Bean(name = "mongoConfigTemplate")
     //@ConditionalOnMissingBean(name = "mongoConfigTemplate")
-    public MongoTemplate mongoConfigTemplate(MongoClient mongoClient, MongoProperties properties,
-                                             MongoCustomConversions mongoCustomConversions) {
-        return createMongoTemplate(mongoClient, properties.getDatabases().getConfigTimeDatabase(), mongoCustomConversions);
-    }
-
-    private MongoTemplate createMongoTemplate(MongoClient mongoClient, String database,
-                                               MongoCustomConversions mongoCustomConversions) {
-        var mongoTemplate = new MongoTemplate(mongoClient, database);
-        var converter = (MappingMongoConverter) mongoTemplate.getConverter();
-        converter.setCustomConversions(mongoCustomConversions);
-        converter.afterPropertiesSet();
-        return mongoTemplate;
+    public MongoTemplate mongoConfigTemplate(MongoClient mongoClient, MongoProperties properties) {
+        return new MongoTemplate(mongoClient, properties.getDatabases().getConfigTimeDatabase());
     }
 
     @Bean

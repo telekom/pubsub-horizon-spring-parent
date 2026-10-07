@@ -45,22 +45,33 @@ class ZooKeeperSubscriptionSnapshotHeadParserTest {
     }
 
     @Test
+    void ignoresIdAndUnknownFieldsAndAcceptsOptionalSourceHashAndOffsets() {
+        var head = parser.parse(bytes("""
+            {"id":"head","snapshotId":"snapshot","documentCount":1,"unknown":{"nested":true},
+             "createdAt":"2026-09-30T14:30:00+02:00"}
+            """));
+
+        assertNull(head.getId());
+        assertNull(head.getSourceHash());
+        assertEquals(Instant.parse("2026-09-30T12:30:00Z"), head.getCreatedAt().toInstant());
+        assertNull(parser.parse(bytes(head("\"snapshot\"", "1", "null", "null", "\"2026-09-30T12:30:00Z\"")))
+            .getSourceHash());
+    }
+
+    @Test
     void rejectsMalformedAndInvalidHeads() {
         var invalidHeads = new String[] {
             "not JSON", "null", "[]", "{}",
             "{\"snapshotId\":\"snapshot\",\"documentCount\":1,\"sourceHash\":\"hash\"}",
-            "{\"snapshotId\":\"snapshot\",\"documentCount\":1,\"createdAt\":\"2026-09-30T12:30:00Z\"}",
             head("\" \"", "1", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
             head("\"snapshot\"", "0", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
             head("\"snapshot\"", "-1", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
             head("\"snapshot\"", "1.5", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
             head("\"snapshot\"", "9223372036854775808", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
             head("\"snapshot\"", "1", "1.5", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "1", "null", "null", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "1", "null", "\"hash\"", "\"2026-09-30T14:30:00+02:00\""),
-            head("\"snapshot\"", "1", "null", "\"hash\"", "\"yesterday\""),
-            "{\"id\":\"head\",\"snapshotId\":\"snapshot\",\"documentCount\":1,"
-                + "\"sourceHash\":\"hash\",\"createdAt\":\"2026-09-30T12:30:00Z\"}"
+            head("\"snapshot\"", "1", "null", "42", "\"2026-09-30T12:30:00Z\""),
+            head("\"snapshot\"", "1", "null", "\"hash\"", "\"2026-09-30T12:30:00\""),
+            head("\"snapshot\"", "1", "null", "\"hash\"", "\"yesterday\"")
         };
 
         for (var json : invalidHeads) {

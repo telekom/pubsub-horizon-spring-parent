@@ -4,12 +4,16 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
+import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+
+import java.time.Duration;
 
 /**
  * Loads versioned subscription snapshots from MongoDB.
@@ -23,6 +27,8 @@ public class MongoSubscriptionSnapshotLoader {
     private final MongoTemplate mongoTemplate;
     private final String snapshotCollectionName;
     private final String snapshotHeadCollectionName;
+    private final Duration loadTimeout;
+    private final SubscriptionResourceJsonMapper jsonMapper = new SubscriptionResourceJsonMapper();
 
     /**
      * Creates a loader for the configured snapshot collections.
@@ -30,13 +36,19 @@ public class MongoSubscriptionSnapshotLoader {
      * @param mongoTemplate MongoDB template for the configuration database
      * @param snapshotCollectionName collection containing snapshot entries
      * @param snapshotHeadCollectionName collection containing the snapshot head
+     * @param loadTimeout server-side time limit for each head read and snapshot load
      */
     public MongoSubscriptionSnapshotLoader(MongoTemplate mongoTemplate,
                                            String snapshotCollectionName,
-                                           String snapshotHeadCollectionName) {
+                                           String snapshotHeadCollectionName,
+                                           Duration loadTimeout) {
+        if (loadTimeout == null || loadTimeout.isNegative() || loadTimeout.toMillis() == 0) {
+            throw new IllegalArgumentException("MongoDB load timeout must be at least 1ms");
+        }
         this.mongoTemplate = mongoTemplate;
         this.snapshotCollectionName = snapshotCollectionName;
         this.snapshotHeadCollectionName = snapshotHeadCollectionName;
+        this.loadTimeout = loadTimeout;
     }
 
     /**
@@ -46,9 +58,9 @@ public class MongoSubscriptionSnapshotLoader {
     * @throws SubscriptionCacheSnapshotException if no valid head exists
      */
     public SubscriptionSnapshotHead readSnapshotHead() {
-        var snapshotHead = mongoTemplate.findById(
-                "head", SubscriptionSnapshotHead.class, snapshotHeadCollectionName);
-        validateSnapshotHead(snapshotHead);
+        var query = Query.query(Criteria.where("_id").is("head")).maxTime(loadTimeout);
+        var snapshotHead = mongoTemplate.findOne(query, SubscriptionSnapshotHead.class, snapshotHeadCollectionName);
+        SubscriptionSnapshotHeads.requireValid(snapshotHead);
         return snapshotHead;
     }
 
@@ -65,23 +77,30 @@ public class MongoSubscriptionSnapshotLoader {
         if (snapshotHead == null) {
             throw new IllegalArgumentException("SnapshotHead must not be null");
         }
-        validateSnapshotHead(snapshotHead);
+        SubscriptionSnapshotHeads.requireValid(snapshotHead);
 
-        var query = Query.query(Criteria.where("snapshotId").is(snapshotHead.getSnapshotId()));
-        var entries = mongoTemplate.find(query, SubscriptionSnapshotEntry.class, snapshotCollectionName);
-        if (entries.size() != snapshotHead.getDocumentCount()) {
+        var query = Query.query(Criteria.where("snapshotId").is(snapshotHead.getSnapshotId())).maxTime(loadTimeout);
+        var documents = mongoTemplate.find(query, Document.class, snapshotCollectionName);
+        if (documents.size() != snapshotHead.getDocumentCount()) {
             throw new SubscriptionCacheSnapshotException("Subscription snapshot document count mismatch: expected "
-                    + snapshotHead.getDocumentCount() + ", actual " + entries.size());
+                    + snapshotHead.getDocumentCount() + ", actual " + documents.size());
         }
+        var entries = documents.stream().map(this::toEntry).toList();
         return IndexedSubscriptionSnapshot.fromSnapshotEntries(snapshotHead, entries);
     }
 
-    private static void validateSnapshotHead(SubscriptionSnapshotHead snapshotHead) {
-        if (snapshotHead == null || snapshotHead.getSnapshotId() == null || snapshotHead.getSnapshotId().isBlank()) {
-            throw new SubscriptionCacheSnapshotException("No valid subscription snapshot head available");
-        }
-        if (snapshotHead.getDocumentCount() == null || snapshotHead.getDocumentCount() < 0) {
-            throw new SubscriptionCacheSnapshotException("Invalid documentCount in subscription snapshot head");
+    // Same mapping as for subscriptions read from Hazelcast, not Spring Data entity mapping.
+    private SubscriptionSnapshotEntry toEntry(Document document) {
+        try {
+            var entry = new SubscriptionSnapshotEntry();
+            entry.setSnapshotId(document.getString("snapshotId"));
+            entry.setSubscriptionId(document.getString("subscriptionId"));
+            var resource = document.get("resource", Document.class);
+            entry.setResource(resource == null ? null : jsonMapper.fromDocument(resource));
+            return entry;
+        } catch (RuntimeException exception) {
+            throw new SubscriptionCacheSnapshotException("Invalid subscription snapshot entry "
+                + document.get("_id"), exception);
         }
     }
 }

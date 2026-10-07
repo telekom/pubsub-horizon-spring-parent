@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 @Slf4j
@@ -23,6 +24,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     private final SubscriptionCacheReader fallback;
     private final BooleanSupplier primaryReadAllowed;
     private final Runnable fallbackReadListener;
+    private final AtomicBoolean primaryDegraded = new AtomicBoolean();
 
     /**
      * Creates a primary/fallback reader chain.
@@ -66,9 +68,11 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     public Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException {
         if (isPrimaryReady()) {
             try {
-                return primary.getById(subscriptionId);
+                var result = primary.getById(subscriptionId);
+                primaryReadSucceeded();
+                return result;
             } catch (RuntimeException | SubscriptionCacheReadException exception) {
-                log.debug("Primary subscription cache getById failed, using fallback", exception);
+                primaryReadFailed("getById", exception);
             }
         }
         fallbackReadListener.run();
@@ -94,9 +98,11 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
             throws SubscriptionCacheReadException {
         if (isPrimaryReady()) {
             try {
-                return primary.findByEnvironmentAndEventType(environment, eventType);
+                var result = primary.findByEnvironmentAndEventType(environment, eventType);
+                primaryReadSucceeded();
+                return result;
             } catch (RuntimeException | SubscriptionCacheReadException exception) {
-                log.debug("Primary subscription cache query failed, using fallback", exception);
+                primaryReadFailed("query", exception);
             }
         }
         fallbackReadListener.run();
@@ -124,6 +130,22 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         } catch (RuntimeException exception) {
             log.warn("Failed to determine fallback subscription cache readiness", exception);
             return false;
+        }
+    }
+
+    private void primaryReadFailed(String operation, Exception exception) {
+        if (primaryDegraded.compareAndSet(false, true)) {
+            log.warn("Primary subscription cache {} failed, using fallback until the primary recovers",
+                operation, exception);
+        } else {
+            log.debug("Primary subscription cache {} failed, using fallback", operation, exception);
+        }
+    }
+
+    private void primaryReadSucceeded() {
+        // get() first keeps the healthy hot path free of CAS writes.
+        if (primaryDegraded.get() && primaryDegraded.compareAndSet(true, false)) {
+            log.info("Primary subscription cache recovered, reads are served by the primary again");
         }
     }
 

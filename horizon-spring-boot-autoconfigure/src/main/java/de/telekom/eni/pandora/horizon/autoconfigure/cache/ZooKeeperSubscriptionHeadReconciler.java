@@ -1,23 +1,16 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
+import de.telekom.eni.pandora.horizon.cache.service.SubscriptionSnapshotHeads;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import lombok.extern.slf4j.Slf4j;
 
-import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Activates subscription snapshots from the ZooKeeper heads, with optional MongoDB head fallback. */
 @Slf4j
 public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
-
-    private record Head(String snapshotId, Long documentCount, Long revision, String sourceHash, Instant createdAt) {
-        private static Head from(SubscriptionSnapshotHead head) {
-            return new Head(head.getSnapshotId(), head.getDocumentCount(), head.getRevision(),
-                head.getSourceHash(), head.getCreatedAt().toInstant());
-        }
-    }
 
     private final ZooKeeperSubscriptionSnapshotHeadReader reader;
     private final LocalSubscriptionCache cache;
@@ -26,7 +19,8 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     private final Object activationLock = new Object();
     private final AtomicLong headReadFailures = new AtomicLong();
     private volatile boolean connected = true;
-    private Head lastActivated;
+    private SubscriptionSnapshotHead lastActivated;
+    private long consecutiveHeadReadFailures;
 
     /** Creates a reconciler with MongoDB head fallback enabled. */
     public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
@@ -70,6 +64,9 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         try {
             prepared = reader.readPrepared();
         } catch (RuntimeException exception) {
+            if (isInterrupted(exception)) {
+                return;
+            }
             log.warn("Could not read prepared subscription head; ignoring it", exception);
         }
 
@@ -98,29 +95,36 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         try {
             active = reader.readActivate();
         } catch (RuntimeException exception) {
-            headReadFailures.incrementAndGet();
-            log.warn("Could not read activate subscription head", exception);
+            // Shutdown interrupts the watcher thread; that is not a ZooKeeper failure.
+            if (isInterrupted(exception)) {
+                return;
+            }
+            headReadFailed("Could not read activate subscription head", exception);
             reconcileFromMongoHead();
             return;
         }
 
         if (active.isEmpty()) {
-            headReadFailures.incrementAndGet();
-            log.warn("ZooKeeper activate subscription head is missing");
+            headReadFailed("ZooKeeper activate subscription head is missing", null);
             reconcileFromMongoHead();
             return;
         }
+        if (consecutiveHeadReadFailures > 0) {
+            log.info("ZooKeeper activate subscription head readable again after {} failed reads",
+                consecutiveHeadReadFailures);
+            consecutiveHeadReadFailures = 0;
+        }
 
         var head = active.orElseThrow();
-        var metadata = Head.from(head);
         synchronized (activationLock) {
             if (!connected) {
                 return;
             }
             cache.setActivationHead(head);
         }
-        if (cache.isActiveSnapshotUpToDate() && metadata.equals(lastActivated)) {
-            prepared.filter(candidate -> !Head.from(candidate).equals(metadata)).ifPresent(this::prepareOnly);
+        if (cache.isActiveSnapshotUpToDate() && SubscriptionSnapshotHeads.isSameSnapshot(head, lastActivated)) {
+            prepared.filter(candidate -> !SubscriptionSnapshotHeads.isSameSnapshot(candidate, head))
+                .ifPresent(this::prepareOnly);
             return;
         }
 
@@ -131,7 +135,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
                     return;
                 }
                 cache.activate(head);
-                lastActivated = metadata;
+                lastActivated = head;
             }
         } catch (RuntimeException exception) {
             cache.activationFailed(head);
@@ -153,12 +157,35 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
             log.warn("ZooKeeper subscription head unavailable and MongoDB head fallback disabled; local cache is stale");
             return;
         }
-        mongoHeadReconciler.reconcile().ifPresent(head -> lastActivated = Head.from(head));
+        mongoHeadReconciler.reconcile().ifPresent(head -> lastActivated = head);
     }
 
     /** Number of reconciliations whose ZooKeeper activate head was unreadable or missing. */
     public long headReadFailureCount() {
         return headReadFailures.get();
+    }
+
+    private void headReadFailed(String message, RuntimeException exception) {
+        headReadFailures.incrementAndGet();
+        consecutiveHeadReadFailures++;
+        if (consecutiveHeadReadFailures == 1) {
+            log.warn(message, exception);
+        } else {
+            log.warn("{} ({} consecutive failed reads): {}", message, consecutiveHeadReadFailures,
+                exception == null ? "missing" : exception.getMessage());
+        }
+    }
+
+    static boolean isInterrupted(Throwable exception) {
+        if (Thread.currentThread().isInterrupted()) {
+            return true;
+        }
+        for (var cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InterruptedException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void prepareOnly(SubscriptionSnapshotHead head) {

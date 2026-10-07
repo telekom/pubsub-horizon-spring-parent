@@ -7,30 +7,45 @@ package de.telekom.eni.pandora.horizon.cache.fallback;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoTimeoutException;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
+import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Reads subscriptions from MongoDB when Hazelcast is unavailable; documents are mapped with the Hazelcast Jackson
+ * configuration (see {@link SubscriptionResourceJsonMapper}).
+ */
 @Slf4j
-@AllArgsConstructor
 public class SubscriptionCacheMongoFallback implements JsonCacheFallback<SubscriptionResource> {
 
     private static final String READINESS_CHECK_ID = "__horizon_cache_readiness__";
 
-    private final SubscriptionsMongoRepo subscriptionsMongoRepo;
+    static final String COLLECTION_NAME = SubscriptionMongoDocument.class
+        .getAnnotation(org.springframework.data.mongodb.core.mapping.Document.class).collection();
+
+    private final MongoTemplate mongoTemplate;
     private final MongoProperties mongoProperties;
+    private final SubscriptionResourceJsonMapper jsonMapper;
+
+    public SubscriptionCacheMongoFallback(MongoTemplate mongoTemplate, MongoProperties mongoProperties,
+                                          SubscriptionResourceJsonMapper jsonMapper) {
+        this.mongoTemplate = mongoTemplate;
+        this.mongoProperties = mongoProperties;
+        this.jsonMapper = jsonMapper;
+    }
 
     @Override
     public boolean isReady() {
         try {
-            subscriptionsMongoRepo.existsById(READINESS_CHECK_ID);
+            mongoTemplate.exists(byId(READINESS_CHECK_ID), COLLECTION_NAME);
             return true;
         } catch (RuntimeException exception) {
             log.warn("MongoDB subscription cache fallback is not available: {}", exception.getMessage());
@@ -40,11 +55,10 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
 
     @Override
     public Optional<SubscriptionResource> getByKey(String key) {
-        Optional<SubscriptionResource> result;
-        List<SubscriptionMongoDocument> docs = new ArrayList<>();
+        List<Document> docs = List.of();
 
         try {
-            docs = subscriptionsMongoRepo.findBySubscriptionId(key);
+            docs = mongoTemplate.find(byId(key), Document.class, COLLECTION_NAME);
         } catch (MongoCommandException | MongoTimeoutException e) {
             log.error("MongoDB fallback error occurred executing query: ", e.getCause());
             if (mongoProperties.isRethrowExceptions()) {
@@ -53,8 +67,7 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         }
 
         if (!docs.isEmpty() && docs.getFirst() != null) {
-            List<SubscriptionResource> mapped = mapMongoSubscriptions(docs);
-            result = Optional.of(mapped.getFirst());
+            var result = Optional.of(jsonMapper.fromDocument(docs.getFirst()));
             log.debug("MongoDB fallback getByKey result: {}", result);
             return result;
         }
@@ -64,24 +77,27 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
 
     @Override
     public List<SubscriptionResource> getQuery(Query query) {
-        List<SubscriptionMongoDocument> docs = query.getEnvironment() == null
-            ? subscriptionsMongoRepo.findByType(query.getEventType())
-            : subscriptionsMongoRepo.findByTypeAndEnvironment(query.getEventType(), query.getEnvironment());
-        List<SubscriptionResource> result = mapMongoSubscriptions(docs);
+        var criteria = Criteria.where("spec.subscription.type").is(query.getEventType());
+        if (query.getEnvironment() != null) {
+            criteria = criteria.and("spec.environment").is(query.getEnvironment());
+        }
+        var docs = mongoTemplate.find(org.springframework.data.mongodb.core.query.Query.query(criteria),
+            Document.class, COLLECTION_NAME);
+        var result = mapDocuments(docs);
         log.debug("MongoDB fallback getQuery result: {}", result);
         return result;
     }
 
     @Override
     public List<SubscriptionResource> getAll() {
-        List<SubscriptionMongoDocument> docs = subscriptionsMongoRepo.findAll();
-        return mapMongoSubscriptions(docs);
+        return mapDocuments(mongoTemplate.findAll(Document.class, COLLECTION_NAME));
     }
 
-    public List<SubscriptionResource> mapMongoSubscriptions(List<SubscriptionMongoDocument> docs) {
-        List<SubscriptionResource> mappedValues = new ArrayList<>(docs.size());
-        mappedValues.addAll(docs);
-        return mappedValues;
+    private List<SubscriptionResource> mapDocuments(List<Document> docs) {
+        return docs.stream().map(jsonMapper::fromDocument).toList();
     }
 
+    private static org.springframework.data.mongodb.core.query.Query byId(String id) {
+        return org.springframework.data.mongodb.core.query.Query.query(Criteria.where("_id").is(id));
+    }
 }

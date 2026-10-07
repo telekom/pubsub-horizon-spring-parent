@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -529,7 +530,7 @@ class LocalSubscriptionCacheTest {
         var head = snapshotHead("first");
         head.setDocumentCount(0L);
 
-        assertThrows(IllegalArgumentException.class, () -> cache.setActivationHead(head));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> cache.setActivationHead(head));
         assertEquals(LocalSubscriptionCache.Status.UNINITIALIZED, cache.status());
     }
 
@@ -719,7 +720,6 @@ class LocalSubscriptionCacheTest {
         cache.activate(first);
         cache.setActivationHead(next);
         cache.prepare(next);
-        assertThrows(IllegalStateException.class, () -> cache.activate(first));
         cache.activationFailed(next);
         cache.discardPreparedSnapshot();
 
@@ -733,6 +733,58 @@ class LocalSubscriptionCacheTest {
         cache.activate(next);
         assertTrue(cache.isActiveSnapshotUpToDate());
         assertTrue(cache.getById("next-id").isPresent());
+    }
+
+    @Test
+    void preparingActiveHeadKeepsPendingSnapshotWithoutReloading() {
+        var active = snapshotHead("active");
+        var pending = snapshotHead("pending");
+        when(snapshotLoader.load(active)).thenReturn(snapshot(active,
+            List.of(subscription("active-id", "production", "event"))));
+        when(snapshotLoader.load(pending)).thenReturn(snapshot(pending,
+            List.of(subscription("pending-id", "production", "event"))));
+        cache.setActivationHead(active);
+        cache.prepare(active);
+        cache.activate(active);
+        cache.prepare(pending);
+
+        cache.prepare(active);
+        cache.activate(active);
+
+        verify(snapshotLoader, times(1)).load(active);
+        assertTrue(cache.hasPendingSnapshot());
+        assertEquals(LocalSubscriptionCache.Status.FRESH, cache.status());
+        assertTrue(cache.getById("active-id").isPresent());
+
+        cache.setActivationHead(pending);
+        cache.activate(pending);
+        verify(snapshotLoader, times(1)).load(pending);
+        assertTrue(cache.getById("pending-id").isPresent());
+        assertTrue(cache.isActiveSnapshotUpToDate());
+    }
+
+    @Test
+    void behindActivationHeadComparesFullSnapshotIdentity() {
+        var active = snapshotHead("snapshot");
+        when(snapshotLoader.load(active)).thenReturn(snapshot(active,
+            List.of(subscription("id", "production", "event"))));
+        assertFalse(cache.isBehindActivationHead());
+        cache.setActivationHead(active);
+        assertTrue(cache.isBehindActivationHead());
+        cache.prepare(active);
+        cache.activate(active);
+        assertFalse(cache.isBehindActivationHead());
+
+        var revised = snapshotHead("snapshot");
+        revised.setRevision(2L);
+        cache.setActivationHead(revised);
+        assertTrue(cache.isBehindActivationHead());
+
+        var withoutOptionalFields = snapshotHead("snapshot");
+        withoutOptionalFields.setRevision(null);
+        withoutOptionalFields.setSourceHash(null);
+        cache.setActivationHead(withoutOptionalFields);
+        assertFalse(cache.isBehindActivationHead());
     }
 
     private void blockSnapshotLoad(SubscriptionSnapshotHead head, CountDownLatch loading, CountDownLatch release) {

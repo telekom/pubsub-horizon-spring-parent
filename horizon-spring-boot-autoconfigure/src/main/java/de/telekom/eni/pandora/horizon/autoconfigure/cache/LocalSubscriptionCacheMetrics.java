@@ -13,7 +13,6 @@ import io.micrometer.core.instrument.binder.MeterBinder;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.ToDoubleFunction;
 
@@ -59,9 +58,9 @@ public class LocalSubscriptionCacheMetrics implements MeterBinder {
             "Epoch seconds of the last successful snapshot activation, 0 if none",
             diagnostics -> diagnostics.activatedAt() == null ? 0 : diagnostics.activatedAt().getEpochSecond())
             .register(registry);
-        gauge(PREFIX + ".snapshot.behind", "1 if the active snapshot differs from the expected head",
-            diagnostics -> diagnostics.expectedSnapshotId() != null
-                && !Objects.equals(diagnostics.expectedSnapshotId(), diagnostics.activeSnapshotId()) ? 1 : 0)
+        Gauge.builder(PREFIX + ".snapshot.behind", cache, c -> c.isBehindActivationHead() ? 1 : 0)
+            .description("1 if the active snapshot differs from the expected head")
+            .strongReference(true)
             .register(registry);
         FunctionCounter.builder(FAILURES, cache, LocalSubscriptionCache::activationFailureCount)
             .description(FAILURES_DESCRIPTION)

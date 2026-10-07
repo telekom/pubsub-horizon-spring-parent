@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -158,13 +159,17 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
                 snapshotHead.getCreatedAt() == null ? null : snapshotHead.getCreatedAt().toInstant());
         }
 
-        SnapshotVersion requireComplete() {
-            if (snapshotId == null || snapshotId.isBlank()
-                    || documentCount == null || documentCount <= 0
-                    || createdAt == null) {
-                throw new IllegalArgumentException("Invalid subscription snapshot head");
-            }
-            return this;
+        // Not transitive when optional fields are missing; only used for pairwise comparisons.
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof SnapshotVersion version
+                && SubscriptionSnapshotHeads.isSameSnapshot(snapshotId, documentCount, revision, sourceHash,
+                    version.snapshotId, version.documentCount, version.revision, version.sourceHash);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(snapshotId, documentCount);
         }
     }
 }

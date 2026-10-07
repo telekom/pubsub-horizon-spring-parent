@@ -45,6 +45,9 @@ public class CacheProperties {
 
         private String headCollection = "subscriptions.subscriber.horizon.telekom.de.v1-head";
 
+        // Server-side limit (maxTimeMS) for reading the snapshot head and loading snapshot entries.
+        private Duration mongoLoadTimeout = Duration.ofSeconds(60);
+
         // Only applies to HAZELCAST_WITH_MONGO_FALLBACK.
         private Duration staleLocalCacheReadGracePeriod = Duration.ofSeconds(120);
 
@@ -52,7 +55,7 @@ public class CacheProperties {
         private boolean requireLocalCacheAtStartup = false;
 
         // Only applies when startup waits; expiry fails startup, zero waits indefinitely.
-        private Duration initialSnapshotTimeout = Duration.ofSeconds(120);
+        private Duration initialSnapshotTimeout = Duration.ofSeconds(15);
 
         // Re-check of the active head: ZooKeeper, or MongoDB when ZooKeeper is disabled or disconnected. Zero disables it.
         private Duration reconcileInterval = Duration.ofSeconds(60);

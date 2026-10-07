@@ -16,8 +16,8 @@ import java.time.Duration;
 import java.util.Locale;
 
 /**
- * Reports the effective subscription cache source and the state of the local cache. Does not affect pod readiness;
- * startup readiness is controlled by the startup barrier in the auto-configuration.
+ * Reports the effective subscription cache source and the state of the local cache. Always {@code UP} so that the
+ * aggregate health and therefore the pod probes behave exactly as without the local cache.
  */
 public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
 
@@ -53,7 +53,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
     /**
      * Reports whether the local cache or its configured fallback reader can serve requests.
      *
-     * @return {@code UP} when the effective reader is ready, otherwise {@code DOWN}
+     * @return always {@code UP}; the effective source is reported as detail
      */
     @Override
     public Health health() {
@@ -63,7 +63,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
             var source = diagnostics.localReadsAllowed() ? "local" : "fallback";
             return withCacheDetails(Health.up(), source, diagnostics).build();
         }
-        return withCacheDetails(Health.down(), "unavailable", diagnostics)
+        return withCacheDetails(Health.up(), "unavailable", diagnostics)
             .withDetail("reason", "No subscription cache reader is ready")
             .build();
     }

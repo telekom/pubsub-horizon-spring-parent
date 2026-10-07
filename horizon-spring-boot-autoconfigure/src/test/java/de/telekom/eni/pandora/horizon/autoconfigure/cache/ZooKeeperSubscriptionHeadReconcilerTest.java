@@ -29,6 +29,18 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     private final ZooKeeperSubscriptionHeadReconciler reconciler = new ZooKeeperSubscriptionHeadReconciler(reader, cache);
 
     @Test
+    void interruptedHeadReadIsNeitherCountedNorFallsBackToMongo() {
+        when(reader.readActivate()).thenThrow(new IllegalStateException("Interrupted while reading",
+            new InterruptedException()));
+
+        reconciler.run();
+
+        assertEquals(0, reconciler.headReadFailureCount());
+        verify(cache, never()).readSnapshotHead();
+        verify(cache, never()).disconnected();
+    }
+
+    @Test
     void prioritizesActivateHeadOnStartupWithoutLoadingPreparedTwice() {
         var prepared = head("prepared");
         var active = head("active");
@@ -159,6 +171,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     @Test
     void changedMetadataOrRollbackIsNotSkippedAsAnOldHead() {
         var original = head("active");
+        original.setRevision(1L);
         var revised = head("active");
         revised.setRevision(2L);
         var rollback = head("previous");
@@ -201,7 +214,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         reconciler.reconcileFromMongoHead();
 
         verify(cache).prepare(mongoHead);
-        verify(cache).discardPreparedSnapshot();
+        verify(cache, never()).discardPreparedSnapshot();
         verify(cache, times(2)).activate(mongoHead);
     }
 

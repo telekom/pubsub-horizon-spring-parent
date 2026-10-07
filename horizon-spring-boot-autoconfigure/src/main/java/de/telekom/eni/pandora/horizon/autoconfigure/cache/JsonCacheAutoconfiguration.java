@@ -5,7 +5,6 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
@@ -18,22 +17,21 @@ import de.telekom.eni.pandora.horizon.cache.service.FallbackSubscriptionCacheRea
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.HazelcastCacheReader;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
+import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
-import de.telekom.jsonfilter.operator.Operator;
-import de.telekom.jsonfilter.serde.OperatorDeserializer;
-import de.telekom.jsonfilter.serde.OperatorSerializer;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.mongodb.core.MongoTemplate;
 
 @Slf4j
 @Configuration
@@ -45,13 +43,9 @@ public class JsonCacheAutoconfiguration {
     private static final String CIRCUITBREAKER_MAP = "circuit-breakers";
 
     @Bean
-    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo, MongoProperties mongoProperties) {
-        var module = new SimpleModule();
-        module.addSerializer(Operator.class, new OperatorSerializer());
-        module.addDeserializer(Operator.class, new OperatorDeserializer());
-
-        var mapper = new ObjectMapper();
-        mapper.registerModule(module);
+    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, @Qualifier("mongoConfigTemplate") MongoTemplate mongoConfigTemplate, MongoProperties mongoProperties) {
+        // The MongoDB fallback and the local snapshot use the same Jackson configuration as Hazelcast.
+        var mapper = SubscriptionResourceJsonMapper.createObjectMapper();
 
         IMap<String, HazelcastJsonValue> map = null;
 
@@ -64,7 +58,8 @@ public class JsonCacheAutoconfiguration {
         }
 
         var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1);
-        svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
+        svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(mongoConfigTemplate, mongoProperties,
+            new SubscriptionResourceJsonMapper(mapper)));
         svc.setJsonEntryMapEventBroadcaster(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher));
         return svc;
     }

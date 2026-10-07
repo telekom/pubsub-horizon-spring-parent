@@ -705,7 +705,7 @@ class SubscriptionZooKeeperClientTest {
                  .connectString(server.getConnectString())
                  .connectionTimeoutMs(500)
                  .sessionTimeoutMs(30_000)
-                 .retryPolicy(new RetryNTimes(3, 1000))
+                 .retryPolicy(new RetryNTimes(5, 2000))
                  .build()) {
             client.start();
             assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
@@ -719,7 +719,8 @@ class SubscriptionZooKeeperClientTest {
             assertThatThrownBy(reader::readActivate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Timed out after 500 ms");
-            assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).isLessThan(2_000);
+            // Unbounded, the retries alone would take at least 10 seconds.
+            assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).isLessThan(5_000);
         }
     }
 
@@ -787,6 +788,33 @@ class SubscriptionZooKeeperClientTest {
                 verify(reconciler).lost();
 
                 watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
+                reconnectTask.get().run();
+                verify(reconciler).reconcileAfterReconnect();
+            }
+        }
+    }
+
+    @Test
+    void firstConnectionAfterLostStartupReconcilesLikeReconnect() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var reconnectTask = new AtomicReference<Runnable>();
+            var scheduler = manualScheduler(new AtomicReference<>(), reconnectTask,
+                new AtomicReference<>(), new AtomicLong());
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(5), Duration.ZERO, scheduler)) {
+                watcher.start();
+                watcher.initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+                watcher.connectionStateChanged(client, ConnectionState.CONNECTED);
+                assertThat(reconnectTask.get()).isNull();
+
+                watcher.connectionStateChanged(client, ConnectionState.LOST);
+                watcher.connectionStateChanged(client, ConnectionState.CONNECTED);
                 reconnectTask.get().run();
                 verify(reconciler).reconcileAfterReconnect();
             }

@@ -42,7 +42,9 @@ class LocalSubscriptionCacheHealthIndicatorTest {
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
         when(subscriptionCacheReader.isReady()).thenReturn(false, true);
 
-        assertEquals(Status.DOWN, indicator.health().getStatus());
+        var unavailable = indicator.health();
+        assertEquals(Status.UP, unavailable.getStatus());
+        assertEquals("unavailable", unavailable.getDetails().get("source"));
         var health = indicator.health();
         assertEquals(Status.UP, health.getStatus());
         assertEquals("fallback", health.getDetails().get("source"));
@@ -95,14 +97,14 @@ class LocalSubscriptionCacheHealthIndicatorTest {
     }
 
     @Test
-    void healthIsDownWithoutReader() {
+    void healthStaysUpWithoutReader() {
         when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.UNINITIALIZED, false, null, 0, null, null, null, null));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(null);
 
         var health = indicator.health();
 
-        assertEquals(Status.DOWN, health.getStatus());
+        assertEquals(Status.UP, health.getStatus());
         assertEquals("unavailable", health.getDetails().get("source"));
         assertEquals("none", health.getDetails().get("localSnapshotId"));
     }

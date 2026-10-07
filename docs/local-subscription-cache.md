@@ -166,7 +166,7 @@ memory at scrape time; the counter is a single increment per fallback read.
 | `horizon_local_subscription_cache_subscriptions` | Gauge | Subscriptions in the active snapshot |
 | `horizon_local_subscription_cache_stale_seconds` | Gauge | Seconds since the cache became `STALE`, `0` otherwise |
 | `horizon_local_subscription_cache_last_activation_timestamp_seconds` | Gauge | Epoch seconds of the last activation, `0` if none |
-| `horizon_local_subscription_cache_snapshot_behind` | Gauge | `1` if the active snapshot differs from the expected head |
+| `horizon_local_subscription_cache_snapshot_behind` | Gauge | `1` if an expected head is known and the active snapshot does not match it (snapshot identity rules, see below) |
 | `horizon_local_subscription_cache_fallback_reads_total` | Counter | Reads served by the Hazelcast/MongoDB fallback (`hazelcast-with-mongo-fallback` only) |
 | `horizon_local_subscription_cache_zookeeper_connected` | Gauge | `1` if the ZooKeeper head source is connected, otherwise `0` (ZooKeeper mode only) |
 | `horizon_local_subscription_cache_failures_total{reason}` | Counter | `activation`: failed snapshot activations including failed snapshot loads; `zookeeper_head_read`: ZooKeeper `activate` head unreadable or missing while ZooKeeper is reachable (ZooKeeper mode only). Counts attempts, not incidents. |
@@ -212,8 +212,21 @@ Calling `prepare(snapshotHead)` performs the following steps:
 
 The active snapshot is not modified during this process. If loading, validation, or index construction fails, readers continue
 to use the previous active snapshot. A later successful `prepare()` replaces an earlier prepared snapshot. Preparation is
-skipped only when all snapshot-head fields match the prepared snapshot. Changes to fields such as `revision`, `sourceHash`,
-or `documentCount` trigger a reload even when the `snapshotId` remains unchanged.
+skipped when the head references the active or the prepared snapshot.
+
+Head validation and identity (`SubscriptionSnapshotHeads`) apply to ZooKeeper and MongoDB heads alike:
+
+| Field | Validation | Identity ("same snapshot") |
+|---|---|---|
+| `snapshotId` | required, not blank | always compared |
+| `documentCount` | required, `> 0` | always compared |
+| `revision` | optional | compared only when set on both heads |
+| `sourceHash` | optional | compared only when set on both heads |
+| `createdAt` | required; ZooKeeper accepts any ISO-8601 offset (`Z`, `+02:00`) | not compared |
+| `id` and unknown fields | ignored | not compared |
+
+A changed `revision` or `sourceHash` with an unchanged `snapshotId` therefore triggers a reload, while a field missing in one
+source does not. Invalid heads raise `SubscriptionCacheSnapshotException`.
 
 ### How the coordinator obtains the snapshot head
 
@@ -333,9 +346,10 @@ horizon:
             mongo-head-fallback-enabled: true # Applies only with ZooKeeper enabled
             snapshot-collection: subscriptions.subscriber.horizon.telekom.de.v1-snapshots
             head-collection: subscriptions.subscriber.horizon.telekom.de.v1-head
+            mongo-load-timeout: 60s
             stale-local-cache-read-grace-period: 120s # Applies only to hazelcast-with-mongo-fallback
             require-local-cache-at-startup: false # Applies only to hazelcast-with-mongo-fallback; none always requires a local cache
-            initial-snapshot-timeout: 120s
+            initial-snapshot-timeout: 15s
             reconcile-interval: 60s
             mongo-head-poll-jitter: 10s
             mongo-snapshot-sync-jitter: 10s # Applies only with ZooKeeper enabled
@@ -376,9 +390,10 @@ All properties are located under `horizon.cache.local-subscription-cache`.
 | `mongo-head-fallback-enabled` | `true` | ZooKeeper mode | Uses the MongoDB head as alternative head source when the ZooKeeper `activate` head cannot be determined. When `false`, the cache becomes `STALE` instead. |
 | `snapshot-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-snapshots` | all | MongoDB collection with the snapshot entries. |
 | `head-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-head` | all | MongoDB collection with the head document of the active snapshot. |
+| `mongo-load-timeout` | `60s` | all | Server-side time limit (`maxTimeMS`) for reading the MongoDB head and loading a snapshot. A timed-out load counts as failed activation. Does not cover unresponsive connections. Not mapped in the service YAMLs/Helm charts; override via `HORIZON_CACHE_LOCALSUBSCRIPTIONCACHE_MONGOLOADTIMEOUT` if needed. |
 | `stale-local-cache-read-grace-period` | `120s` | `hazelcast-with-mongo-fallback` | How long a `STALE` local snapshot may still serve reads before the shared reader is used. `0s` switches immediately. With `none`, stale reads are unlimited. |
 | `require-local-cache-at-startup` | `false` | `hazelcast-with-mongo-fallback` | When `true`, startup waits for the first `FRESH` local snapshot. When `false`, startup continues without waiting and without checking Hazelcast. `none` always waits. |
-| `initial-snapshot-timeout` | `120s` | all, when startup waits | Maximum wait for the first local snapshot. Expiry fails startup and terminates the process; `0s` waits indefinitely. |
+| `initial-snapshot-timeout` | `15s` | all, when startup waits | Maximum wait for the first local snapshot. Expiry fails startup and terminates the process; `0s` waits indefinitely. |
 | `reconcile-interval` | `60s` | all | Interval for re-checking the active head: the ZooKeeper `activate` head, or the MongoDB head when ZooKeeper is disabled or disconnected. `0s` disables periodic runs. |
 | `mongo-head-poll-jitter` | `10s` | all | Maximum random offset of the first periodic head reconciliation; later runs keep the fixed interval. Immediate MongoDB head reads after a ZooKeeper failure are not delayed. |
 | `mongo-snapshot-sync-jitter` | `10s` | ZooKeeper mode | Maximum random delay before loading a snapshot for `prepared` preloads and after a ZooKeeper reconnect. `0s` disables the delay. |

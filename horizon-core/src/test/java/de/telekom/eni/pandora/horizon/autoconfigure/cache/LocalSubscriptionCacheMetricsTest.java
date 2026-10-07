@@ -28,6 +28,7 @@ class LocalSubscriptionCacheMetricsTest {
         when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
             LocalSubscriptionCache.Status.STALE, false, "snapshot-local", 3,
             NOW.minusSeconds(600), "snapshot-new", "snapshot-new", NOW.minusSeconds(90)));
+        when(cache.isBehindActivationHead()).thenReturn(true);
         new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
 
         assertEquals(1, gauge("state"));
