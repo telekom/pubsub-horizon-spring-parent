@@ -92,13 +92,16 @@ class LocalSubscriptionCacheTest {
         cache.activate(head);
         assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
         assertFalse(cache.firstFreshSnapshot().toCompletableFuture().isDone());
+        assertFalse(cache.hasFirstFreshSnapshot());
 
         cache.setActivationHead(head);
         cache.activate(head);
         assertTrue(cache.firstFreshSnapshot().toCompletableFuture().isDone());
+        assertTrue(cache.hasFirstFreshSnapshot());
 
         cache.disconnected();
         assertTrue(cache.firstFreshSnapshot().toCompletableFuture().isDone());
+        assertTrue(cache.hasFirstFreshSnapshot());
     }
 
     @Test

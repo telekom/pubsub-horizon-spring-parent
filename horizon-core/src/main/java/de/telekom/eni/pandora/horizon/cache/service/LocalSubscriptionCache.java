@@ -267,6 +267,10 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         return firstFreshSnapshot.minimalCompletionStage();
     }
 
+    public boolean hasFirstFreshSnapshot() {
+        return firstFreshSnapshot.isDone();
+    }
+
     private void completeFirstFreshSnapshot() {
         if (status() == Status.FRESH) {
             firstFreshSnapshot.complete(null);

@@ -104,7 +104,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
             var reader = new ZooKeeperSubscriptionSnapshotHeadReader(
                 client, new ObjectMapper(), preparedPath, activatePath);
             var reconciler = new ZooKeeperSubscriptionHeadReconciler(
-                reader, cache, localCacheProperties.isMongoHeadFallbackEnabled());
+                reader, cache, localCacheProperties.getMongoHeadFallbackMode());
             meterRegistryProvider.ifAvailable(registry -> FunctionCounter.builder(
                     LocalSubscriptionCacheMetrics.FAILURES, reconciler,
                     ZooKeeperSubscriptionHeadReconciler::headReadFailureCount)

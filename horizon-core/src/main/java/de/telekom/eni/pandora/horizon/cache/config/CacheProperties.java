@@ -38,8 +38,7 @@ public class CacheProperties {
         // NONE never reads Hazelcast and serves stale local entries indefinitely if necessary.
         private LocalSubscriptionCacheFallback fallbackMode = LocalSubscriptionCacheFallback.HAZELCAST_WITH_MONGO_FALLBACK;
 
-        // Use the MongoDB head when the ZooKeeper activated head cannot be determined.
-        private boolean mongoHeadFallbackEnabled = true;
+        private MongoHeadFallbackMode mongoHeadFallbackMode = MongoHeadFallbackMode.STARTUP_ONLY;
 
         private String snapshotCollection = "subscriptions.subscriber.horizon.telekom.de.v1-snapshots";
 
@@ -93,6 +92,12 @@ public class CacheProperties {
     public enum LocalSubscriptionCacheFallback {
         HAZELCAST_WITH_MONGO_FALLBACK,
         NONE
+    }
+
+    public enum MongoHeadFallbackMode {
+        STARTUP_ONLY,
+        ALWAYS,
+        NEVER
     }
 
     @Getter

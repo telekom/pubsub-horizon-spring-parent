@@ -1,5 +1,6 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
+import de.telekom.eni.pandora.horizon.cache.config.CacheProperties.MongoHeadFallbackMode;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionSnapshotHeads;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
@@ -15,7 +16,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     private final ZooKeeperSubscriptionSnapshotHeadReader reader;
     private final LocalSubscriptionCache cache;
     private final MongoSubscriptionHeadReconciler mongoHeadReconciler;
-    private final boolean mongoHeadFallbackEnabled;
+    private final MongoHeadFallbackMode mongoHeadFallbackMode;
     private final Object activationLock = new Object();
     private final AtomicLong headReadFailures = new AtomicLong();
     private volatile boolean zooKeeperActivationAllowed = true;
@@ -23,19 +24,19 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     private long consecutiveHeadReadFailures;
     private long consecutiveActivationFailures;
 
-    /** Creates a reconciler with MongoDB head fallback enabled. */
+    /** Creates a reconciler with MongoDB head fallback until the first fresh snapshot. */
     public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
                                                LocalSubscriptionCache cache) {
-        this(reader, cache, true);
+        this(reader, cache, MongoHeadFallbackMode.STARTUP_ONLY);
     }
 
-    /** Creates a reconciler; without MongoDB head fallback, an undeterminable ZooKeeper head makes the cache STALE. */
+    /** Creates a reconciler with the configured MongoDB head authority policy. */
     public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
-                                               LocalSubscriptionCache cache, boolean mongoHeadFallbackEnabled) {
+                                               LocalSubscriptionCache cache, MongoHeadFallbackMode mongoHeadFallbackMode) {
         this.reader = reader;
         this.cache = cache;
         this.mongoHeadReconciler = new MongoSubscriptionHeadReconciler(cache);
-        this.mongoHeadFallbackEnabled = mongoHeadFallbackEnabled;
+        this.mongoHeadFallbackMode = java.util.Objects.requireNonNull(mongoHeadFallbackMode);
     }
 
     /** Stops ZooKeeper-driven activation; freshness is then decided by {@link #reconcileFromMongoHead()}. */
@@ -163,15 +164,21 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
     /**
      * Activates the snapshot referenced by the MongoDB head, which always points to the active snapshot.
-     * Used when the ZooKeeper ACTIVATE head cannot be determined. The cache becomes stale if the MongoDB
-     * head fallback is disabled, the MongoDB head cannot be read, or its snapshot cannot be loaded.
+    * Used when the ZooKeeper ACTIVATE head cannot be determined and the configured policy permits fallback.
+    * A denied or failed fallback leaves an active cache STALE; without a snapshot it remains UNINITIALIZED.
      */
     public synchronized void reconcileFromMongoHead() {
-        if (!mongoHeadFallbackEnabled) {
+        boolean fallbackAllowed = switch (mongoHeadFallbackMode) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            case STARTUP_ONLY -> !cache.hasFirstFreshSnapshot();
+        };
+        if (!fallbackAllowed) {
             synchronized (activationLock) {
                 cache.disconnected();
             }
-            log.warn("ZooKeeper subscription head unavailable and MongoDB head fallback disabled; local cache is stale");
+            log.warn("ZooKeeper subscription head unavailable and MongoDB head fallback denied by mode {}; local cache has no confirmed head",
+                mongoHeadFallbackMode);
             return;
         }
         mongoHeadReconciler.reconcile().ifPresent(head -> lastActivated = head);

@@ -5,20 +5,29 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
+import de.telekom.eni.pandora.horizon.cache.config.CacheProperties.MongoHeadFallbackMode;
+import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoader;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
 
+import java.time.Duration;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,12 +39,15 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 class ZooKeeperSubscriptionHeadReconcilerTest {
 
     private final ZooKeeperSubscriptionSnapshotHeadReader reader = mock(ZooKeeperSubscriptionSnapshotHeadReader.class);
     private final LocalSubscriptionCache cache = mock(LocalSubscriptionCache.class);
-    private final ZooKeeperSubscriptionHeadReconciler reconciler = new ZooKeeperSubscriptionHeadReconciler(reader, cache);
+    private final ZooKeeperSubscriptionHeadReconciler reconciler = new ZooKeeperSubscriptionHeadReconciler(
+        reader, cache, MongoHeadFallbackMode.ALWAYS);
 
     @Test
     void interruptedHeadReadIsNeitherCountedNorFallsBackToMongo() {
@@ -281,7 +293,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
 
     @Test
     void disabledMongoHeadFallbackMarksCacheStaleWithoutReadingMongo() {
-        var withoutFallback = new ZooKeeperSubscriptionHeadReconciler(reader, cache, false);
+        var withoutFallback = new ZooKeeperSubscriptionHeadReconciler(reader, cache, MongoHeadFallbackMode.NEVER);
         when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
 
         withoutFallback.run();
@@ -359,6 +371,73 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         verify(cache, never()).disconnected();
         verify(cache, never()).suspended();
         verify(cache).activate(mongoHead);
+    }
+
+    @ParameterizedTest
+    @EnumSource(MongoHeadFallbackMode.class)
+    void policyControlsFallbackBeforeAndAfterFirstFreshSnapshot(MongoHeadFallbackMode mode) {
+        var mongo = mock(MongoTemplate.class);
+        var active = head("mongo");
+        when(mongo.findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads")))
+            .thenReturn(active);
+        when(mongo.find(any(Query.class), eq(Document.class), eq("snapshots")))
+            .thenReturn(List.of(new Document("resource", new Document("spec",
+                new Document("environment", "integration").append("subscription",
+                    new Document("subscriptionId", "subscription").append("type", "event"))))));
+        var localCache = new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
+            mongo, "snapshots", "heads", Duration.ofSeconds(60)));
+        var policyReconciler = new ZooKeeperSubscriptionHeadReconciler(reader, localCache, mode);
+
+        policyReconciler.run();
+
+        assertEquals(mode != MongoHeadFallbackMode.NEVER, localCache.hasFirstFreshSnapshot());
+        if (mode == MongoHeadFallbackMode.NEVER) {
+            assertEquals(LocalSubscriptionCache.Status.UNINITIALIZED, localCache.status());
+            verify(mongo, never()).findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads"));
+            return;
+        }
+        assertEquals(LocalSubscriptionCache.Status.FRESH, localCache.status());
+        localCache.disconnected();
+        policyReconciler.lost();
+        policyReconciler.reconcileFromMongoHead();
+        policyReconciler.reconcileActiveHead();
+        policyReconciler.reconcileAfterReconnect();
+
+        assertTrue(localCache.hasFirstFreshSnapshot());
+        assertEquals(mode == MongoHeadFallbackMode.ALWAYS
+            ? LocalSubscriptionCache.Status.FRESH : LocalSubscriptionCache.Status.STALE, localCache.status());
+        verify(mongo, times(mode == MongoHeadFallbackMode.ALWAYS ? 4 : 1))
+            .findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads"));
+    }
+
+    @Test
+    void startupOnlyRetriesFailedBootstrapButStopsAfterZooKeeperActivation() {
+        var mongo = mock(MongoTemplate.class);
+        var active = head("active");
+        when(mongo.findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads")))
+            .thenReturn(null, active);
+        when(mongo.find(any(Query.class), eq(Document.class), eq("snapshots")))
+            .thenReturn(List.of(), List.of(new Document("resource", new Document("spec",
+                new Document("environment", "integration").append("subscription",
+                    new Document("subscriptionId", "subscription").append("type", "event"))))));
+        var localCache = new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
+            mongo, "snapshots", "heads", Duration.ofSeconds(60)));
+        var policyReconciler = new ZooKeeperSubscriptionHeadReconciler(reader, localCache);
+
+        policyReconciler.run();
+        policyReconciler.run();
+        assertFalse(localCache.hasFirstFreshSnapshot());
+        when(reader.readActivate()).thenReturn(Optional.of(active));
+        policyReconciler.run();
+        assertTrue(localCache.hasFirstFreshSnapshot());
+
+        when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
+        policyReconciler.run();
+        policyReconciler.reconcileAfterReconnect();
+
+        assertEquals(LocalSubscriptionCache.Status.STALE, localCache.status());
+        assertTrue(localCache.hasFirstFreshSnapshot());
+        verify(mongo, times(2)).findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads"));
     }
 
     private static SubscriptionSnapshotHead head(String snapshotId) {

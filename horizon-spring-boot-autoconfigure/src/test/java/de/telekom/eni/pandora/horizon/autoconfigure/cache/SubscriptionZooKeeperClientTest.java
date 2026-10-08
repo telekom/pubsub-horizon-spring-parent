@@ -11,6 +11,8 @@ import org.apache.curator.retry.RetryNTimes;
 import org.apache.curator.retry.RetryOneTime;
 import org.apache.curator.test.TestingServer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -115,7 +117,7 @@ class SubscriptionZooKeeperClientTest {
             .withPropertyValues(
                 "horizon.cache.local-subscription-cache.stale-local-cache-read-grace-period=30s",
                 "horizon.cache.local-subscription-cache.initial-snapshot-timeout=45s",
-                "horizon.cache.local-subscription-cache.mongo-head-fallback-enabled=false",
+                "horizon.cache.local-subscription-cache.mongo-head-fallback-mode=never",
                 "horizon.cache.local-subscription-cache.mongo-head-poll-jitter=3s",
                 "horizon.cache.local-subscription-cache.mongo-snapshot-sync-jitter=12s",
                 "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/horizon/subscriptions/prepared",
@@ -125,7 +127,7 @@ class SubscriptionZooKeeperClientTest {
                 var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
                 assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(30));
                 assertThat(localCache.getInitialSnapshotTimeout()).isEqualTo(Duration.ofSeconds(45));
-                assertThat(localCache.isMongoHeadFallbackEnabled()).isFalse();
+                assertThat(localCache.getMongoHeadFallbackMode()).isEqualTo(CacheProperties.MongoHeadFallbackMode.NEVER);
                 assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(3));
                 assertThat(localCache.getMongoSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(12));
                 assertThat(localCache.getReconcileInterval()).isEqualTo(Duration.ofMinutes(7));
@@ -140,7 +142,7 @@ class SubscriptionZooKeeperClientTest {
         contextRunner.run(context -> {
             var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
             assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(120));
-            assertThat(localCache.isMongoHeadFallbackEnabled()).isTrue();
+            assertThat(localCache.getMongoHeadFallbackMode()).isEqualTo(CacheProperties.MongoHeadFallbackMode.STARTUP_ONLY);
             assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(10));
             assertThat(localCache.getMongoSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(10));
             assertThat(localCache.getZooKeeper().isEnabled()).isTrue();
@@ -154,12 +156,59 @@ class SubscriptionZooKeeperClientTest {
             .isEqualTo(Duration.ofSeconds(60)));
     }
 
+    @ParameterizedTest
+    @EnumSource(CacheProperties.MongoHeadFallbackMode.class)
+    void mongoHeadFallbackModesBind(CacheProperties.MongoHeadFallbackMode mode) {
+        contextRunner.withPropertyValues("horizon.cache.local-subscription-cache.mongo-head-fallback-mode="
+                + mode.name().toLowerCase(java.util.Locale.ROOT).replace('_', '-'))
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBean(CacheProperties.class).getLocalSubscriptionCache()
+                    .getMongoHeadFallbackMode()).isEqualTo(mode);
+            });
+    }
+
     @Test
-    void disabledZooKeeperUsesMongoHeadPollerWithoutCurator() {
+    void invalidMongoHeadFallbackModeFailsBinding() {
+        contextRunner.withPropertyValues("horizon.cache.local-subscription-cache.mongo-head-fallback-mode=invalid")
+            .run(context -> assertThat(context).hasFailed());
+    }
+
+    @ParameterizedTest
+    @EnumSource(CacheProperties.LocalSubscriptionCacheFallback.class)
+    void startupOnlyCutoffIsIndependentOfDataFallback(CacheProperties.LocalSubscriptionCacheFallback fallback)
+            throws Exception {
+        try (var server = new TestingServer()) {
+            var cache = mock(LocalSubscriptionCache.class);
+            when(cache.hasFirstFreshSnapshot()).thenReturn(true);
+            contextRunner.withBean(LocalSubscriptionCache.class, () -> cache)
+                .withPropertyValues(
+                    "horizon.cache.local-subscription-cache.enabled=true",
+                    "horizon.cache.local-subscription-cache.fallback-mode=" + fallback,
+                    "horizon.cache.local-subscription-cache.reconcile-interval=0s",
+                    "horizon.cache.local-subscription-cache.zoo-keeper.connect-string=" + server.getConnectString(),
+                    "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/subscriptions/prepared",
+                    "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/subscriptions/activated")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    context.getBean(ZooKeeperSubscriptionHeadWatcher.class)
+                        .initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    verify(cache, org.mockito.Mockito.atLeastOnce()).disconnected();
+                    verify(cache, never()).readSnapshotHead();
+                });
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(CacheProperties.LocalSubscriptionCacheFallback.class)
+    void disabledZooKeeperUsesMongoHeadPollerWithoutCurator(CacheProperties.LocalSubscriptionCacheFallback fallback) {
+        var cache = mock(LocalSubscriptionCache.class);
         contextRunner
-            .withBean(LocalSubscriptionCache.class, () -> mock(LocalSubscriptionCache.class))
+            .withBean(LocalSubscriptionCache.class, () -> cache)
             .withPropertyValues(
                 "horizon.cache.local-subscription-cache.enabled=true",
+                "horizon.cache.local-subscription-cache.mongo-head-fallback-mode=never",
+                "horizon.cache.local-subscription-cache.fallback-mode=" + fallback,
                 "horizon.cache.local-subscription-cache.zoo-keeper.enabled=false")
             .run(context -> {
                 assertThat(context).hasNotFailed();
@@ -167,6 +216,7 @@ class SubscriptionZooKeeperClientTest {
                 assertThat(context).doesNotHaveBean(ZooKeeperSubscriptionHeadWatcher.class);
                 assertThat(context).hasSingleBean(MongoSubscriptionHeadPoller.class);
                 assertThat(context).hasSingleBean(LocalSubscriptionCacheHealthIndicator.class);
+                verify(cache, timeout(1000).atLeastOnce()).readSnapshotHead();
             });
     }
 
