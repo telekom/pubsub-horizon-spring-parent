@@ -21,6 +21,7 @@ public class MongoSubscriptionHeadReconciler {
 
     private final LocalSubscriptionCache cache;
     private long consecutiveHeadReadFailures;
+    private long consecutiveActivationFailures;
 
     public MongoSubscriptionHeadReconciler(LocalSubscriptionCache cache) {
         this.cache = cache;
@@ -60,13 +61,23 @@ public class MongoSubscriptionHeadReconciler {
                 cache.prepare(head);
             }
             cache.activate(head);
-            if (!alreadyActive) {
+            if (consecutiveActivationFailures > 0) {
+                log.info("Subscription snapshot {} activation from MongoDB head recovered after {} failed attempts",
+                    head.getSnapshotId(), consecutiveActivationFailures);
+                consecutiveActivationFailures = 0;
+            } else if (!alreadyActive) {
                 log.info("Activated subscription snapshot {} from MongoDB head", head.getSnapshotId());
             }
             return Optional.of(head);
         } catch (RuntimeException exception) {
             cache.activationFailed(head);
-            log.warn("Could not activate subscription snapshot {} from MongoDB head", head.getSnapshotId(), exception);
+            consecutiveActivationFailures++;
+            if (consecutiveActivationFailures == 1) {
+                log.warn("Could not activate subscription snapshot {} from MongoDB head", head.getSnapshotId(), exception);
+            } else {
+                log.warn("Could not activate subscription snapshot {} from MongoDB head ({} consecutive failed attempts): {}",
+                    head.getSnapshotId(), consecutiveActivationFailures, exception.getMessage());
+            }
             return Optional.empty();
         }
     }

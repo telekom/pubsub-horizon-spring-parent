@@ -18,9 +18,10 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     private final boolean mongoHeadFallbackEnabled;
     private final Object activationLock = new Object();
     private final AtomicLong headReadFailures = new AtomicLong();
-    private volatile boolean connected = true;
+    private volatile boolean zooKeeperActivationAllowed = true;
     private SubscriptionSnapshotHead lastActivated;
     private long consecutiveHeadReadFailures;
+    private long consecutiveActivationFailures;
 
     /** Creates a reconciler with MongoDB head fallback enabled. */
     public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
@@ -40,7 +41,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     /** Stops ZooKeeper-driven activation; freshness is then decided by {@link #reconcileFromMongoHead()}. */
     public void suspended() {
         synchronized (activationLock) {
-            connected = false;
+            zooKeeperActivationAllowed = false;
         }
     }
 
@@ -52,7 +53,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     /** Resumes ZooKeeper-driven activation and re-reads both heads, forcing re-activation of the current head. */
     public synchronized void reconcileAfterReconnect() {
         synchronized (activationLock) {
-            connected = true;
+            zooKeeperActivationAllowed = true;
             lastActivated = null;
         }
         run();
@@ -117,12 +118,13 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
         var head = active.orElseThrow();
         synchronized (activationLock) {
-            if (!connected) {
+            if (!zooKeeperActivationAllowed) {
                 return;
             }
             cache.setActivationHead(head);
         }
         if (cache.isActiveSnapshotUpToDate() && SubscriptionSnapshotHeads.isSameSnapshot(head, lastActivated)) {
+            activationSucceeded(head);
             prepared.filter(candidate -> !SubscriptionSnapshotHeads.isSameSnapshot(candidate, head))
                 .ifPresent(this::prepareOnly);
             return;
@@ -131,16 +133,31 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         try {
             cache.prepare(head);
             synchronized (activationLock) {
-                if (!connected) {
+                if (!zooKeeperActivationAllowed) {
                     return;
                 }
                 cache.activate(head);
                 lastActivated = head;
             }
+            activationSucceeded(head);
         } catch (RuntimeException exception) {
             cache.activationFailed(head);
             cache.discardPreparedSnapshot();
-            log.warn("Could not activate subscription snapshot {}", head.getSnapshotId(), exception);
+            consecutiveActivationFailures++;
+            if (consecutiveActivationFailures == 1) {
+                log.warn("Could not activate subscription snapshot {}", head.getSnapshotId(), exception);
+            } else {
+                log.warn("Could not activate subscription snapshot {} ({} consecutive failed attempts): {}",
+                    head.getSnapshotId(), consecutiveActivationFailures, exception.getMessage());
+            }
+        }
+    }
+
+    private void activationSucceeded(SubscriptionSnapshotHead head) {
+        if (consecutiveActivationFailures > 0) {
+            log.info("Subscription snapshot {} activation from ZooKeeper head recovered after {} failed attempts",
+                head.getSnapshotId(), consecutiveActivationFailures);
+            consecutiveActivationFailures = 0;
         }
     }
 

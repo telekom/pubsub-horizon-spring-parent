@@ -21,13 +21,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
 
     private final CuratorCache preparedCache;
     private final CuratorCache activateCache;
-    private final Runnable reconcile;
-    private final Runnable periodicReconcile;
-    private final Runnable mongoHeadReconcile;
-    private final java.util.function.Consumer<byte[]> preparePreparedEvent;
-    private final Runnable suspend;
-    private final Runnable lost;
-    private final Runnable reconnect;
+    private final ZooKeeperSubscriptionHeadReconciler reconciler;
     private final CuratorFramework client;
     private final ConnectionStateListener connectionStateListener;
     private final long reconcileIntervalMillis;
@@ -36,57 +30,12 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
     private final CompletableFuture<Void> initialReconciliation = new CompletableFuture<>();
     private final ScheduledExecutorService executor;
     private boolean watching;
-    private boolean connected = true;
+    private boolean zooKeeperConnected = true;
     private long connectionEpoch;
     private long preparedEventGeneration;
     private ScheduledFuture<?> pendingPreparedReconcile;
     private ScheduledFuture<?> pendingReconnectReconcile;
     private boolean reconnectPending;
-
-    /**
-     * Creates a watcher with a five-minute active-head reconciliation interval and a 10-second snapshot sync jitter.
-     *
-     * @param client Curator client connected to ZooKeeper
-     * @param preparedPath absolute path of the prepared snapshot head
-     * @param activatePath absolute path of the active snapshot head
-     * @param reconciler reconciler that loads and activates snapshots
-     */
-    public ZooKeeperSubscriptionHeadWatcher(CuratorFramework client, String preparedPath, String activatePath,
-                                            ZooKeeperSubscriptionHeadReconciler reconciler) {
-        this(client, preparedPath, activatePath, reconciler, Duration.ofSeconds(300), Duration.ofSeconds(10));
-    }
-
-    /**
-     * Creates a watcher with a custom active-head reconciliation interval and the default jitter.
-     *
-     * @param client Curator client connected to ZooKeeper
-     * @param preparedPath absolute path of the prepared snapshot head
-     * @param activatePath absolute path of the active snapshot head
-     * @param reconciler reconciler that loads and activates snapshots
-     * @param reconcileInterval interval for re-reading the active head; zero disables periodic reconciliation
-     */
-    public ZooKeeperSubscriptionHeadWatcher(CuratorFramework client, String preparedPath, String activatePath,
-                                            ZooKeeperSubscriptionHeadReconciler reconciler,
-                                            Duration reconcileInterval) {
-        this(client, preparedPath, activatePath, reconciler, reconcileInterval, Duration.ofSeconds(10), newExecutor());
-    }
-
-    /**
-     * Creates a watcher with custom active-head reconciliation and snapshot synchronization intervals.
-     *
-     * @param client Curator client connected to ZooKeeper
-     * @param preparedPath absolute path of the prepared snapshot head
-     * @param activatePath absolute path of the active snapshot head
-     * @param reconciler reconciler that loads and activates snapshots
-     * @param reconcileInterval interval for re-reading the active head; zero disables periodic reconciliation
-     * @param snapshotSyncJitter maximum random delay for prepared-head and reconnect reconciliation
-     */
-    public ZooKeeperSubscriptionHeadWatcher(CuratorFramework client, String preparedPath, String activatePath,
-                                            ZooKeeperSubscriptionHeadReconciler reconciler,
-                                            Duration reconcileInterval, Duration snapshotSyncJitter) {
-        this(client, preparedPath, activatePath, reconciler, reconcileInterval,
-            snapshotSyncJitter, newExecutor());
-    }
 
     /**
      * Creates a watcher with custom reconciliation interval and both jitters.
@@ -105,41 +54,6 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
                                             Duration headPollJitter) {
         this(client, preparedPath, activatePath, reconciler, reconcileInterval,
             snapshotSyncJitter, headPollJitter, newExecutor());
-    }
-
-    /**
-     * Creates a watcher with an injected scheduler and the default snapshot synchronization jitter.
-     *
-     * @param client Curator client connected to ZooKeeper
-     * @param preparedPath absolute path of the prepared snapshot head
-     * @param activatePath absolute path of the active snapshot head
-     * @param reconciler reconciler that loads and activates snapshots
-     * @param reconcileInterval interval for re-reading the active head; zero disables periodic reconciliation
-     * @param executor scheduler used for watcher reconciliation tasks
-     */
-    ZooKeeperSubscriptionHeadWatcher(CuratorFramework client, String preparedPath, String activatePath,
-                                     ZooKeeperSubscriptionHeadReconciler reconciler, Duration reconcileInterval,
-                                     ScheduledExecutorService executor) {
-        this(client, preparedPath, activatePath, reconciler, reconcileInterval,
-            Duration.ofSeconds(10), executor);
-    }
-
-    /**
-     * Creates a watcher with an injected scheduler and explicit reconciliation intervals.
-     *
-     * @param client Curator client connected to ZooKeeper
-     * @param preparedPath absolute path of the prepared snapshot head
-     * @param activatePath absolute path of the active snapshot head
-     * @param reconciler reconciler that loads and activates snapshots
-     * @param reconcileInterval interval for re-reading the active head; zero disables periodic reconciliation
-     * @param snapshotSyncJitter maximum random delay for prepared-head and reconnect reconciliation
-     * @param executor scheduler used for watcher reconciliation tasks
-     */
-    ZooKeeperSubscriptionHeadWatcher(CuratorFramework client, String preparedPath, String activatePath,
-                                     ZooKeeperSubscriptionHeadReconciler reconciler, Duration reconcileInterval,
-                                     Duration snapshotSyncJitter, ScheduledExecutorService executor) {
-        this(client, preparedPath, activatePath, reconciler, reconcileInterval, snapshotSyncJitter,
-            Duration.ZERO, executor);
     }
 
     /**
@@ -165,13 +79,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         this.executor = Objects.requireNonNull(executor, "executor must not be null");
         this.preparedCache = CuratorCache.build(client, preparedPath);
         this.activateCache = CuratorCache.build(client, activatePath);
-        this.reconcile = reconciler;
-        this.periodicReconcile = reconciler::reconcileActiveHead;
-        this.mongoHeadReconcile = reconciler::reconcileFromMongoHead;
-        this.preparePreparedEvent = reconciler::preparePreparedEvent;
-        this.suspend = reconciler::suspended;
-        this.lost = reconciler::lost;
-        this.reconnect = reconciler::reconcileAfterReconnect;
+        this.reconciler = Objects.requireNonNull(reconciler, "reconciler must not be null");
         this.connectionStateListener = this::connectionStateChanged;
         preparedCache.listenable().addListener((type, oldData, data) ->
             preparedHeadChanged(data == null ? null : data.getData()));
@@ -207,7 +115,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         var epoch = connectionEpoch;
         executor.execute(() -> {
             try {
-                if (runIfConnected(epoch, reconcile)) {
+                if (runIfConnected(epoch, reconciler)) {
                     initialReconciliation.complete(null);
                 } else {
                     initialReconciliation.completeExceptionally(
@@ -241,10 +149,10 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
      * <p>A pending PREPARED reconciliation is cancelled because the active head takes precedence.</p>
      */
     synchronized void scheduleActivateReconcile() {
-        if (watching && connected) {
+        if (watching && zooKeeperConnected) {
             cancelPendingPreparedReconcile();
             var epoch = connectionEpoch;
-            var task = reconnectPending ? reconnect : reconcile;
+            Runnable task = reconnectPending ? reconciler::reconcileAfterReconnect : reconciler;
             cancelPendingReconnectReconcile();
             executor.execute(() -> runIfConnected(epoch, task));
         }
@@ -257,7 +165,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
      */
     void preparedHeadChanged(byte[] data) {
         synchronized (this) {
-            if (!watching || !connected) {
+            if (!watching || !zooKeeperConnected) {
                 return;
             }
             cancelPendingPreparedReconcile();
@@ -279,13 +187,13 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
      */
     private void runPreparedReconcileIfCurrent(long epoch, long generation, byte[] data) {
         synchronized (this) {
-            if (!watching || !connected || epoch != connectionEpoch || generation != preparedEventGeneration) {
+            if (!watching || !zooKeeperConnected || epoch != connectionEpoch || generation != preparedEventGeneration) {
                 return;
             }
             pendingPreparedReconcile = null;
         }
         try {
-            runIfConnected(epoch, () -> preparePreparedEvent.accept(data));
+            runIfConnected(epoch, () -> reconciler.preparePreparedEvent(data));
         } catch (RuntimeException exception) {
             log.warn("Jittered ZooKeeper PREPARED reconciliation failed", exception);
         }
@@ -326,7 +234,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             reconnectPending = false;
             pendingReconnectReconcile = null;
         }
-        runIfConnected(epoch, reconnect);
+        runIfConnected(epoch, reconciler::reconcileAfterReconnect);
     }
 
     /**
@@ -355,13 +263,13 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
                 return;
             }
             epoch = connectionEpoch;
-            zooKeeperConnected = connected;
+            zooKeeperConnected = this.zooKeeperConnected;
         }
         try {
             if (zooKeeperConnected) {
-                runIfConnected(epoch, periodicReconcile);
+                runIfConnected(epoch, reconciler::reconcileActiveHead);
             } else {
-                mongoHeadReconcile.run();
+                reconciler.reconcileFromMongoHead();
             }
         } catch (RuntimeException exception) {
             log.warn("Periodic subscription head reconciliation failed", exception);
@@ -403,13 +311,13 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
      */
     private boolean runIfConnected(long epoch, Runnable task) {
         synchronized (this) {
-            if (!watching || !connected || epoch != connectionEpoch) {
+            if (!watching || !zooKeeperConnected || epoch != connectionEpoch) {
                 return false;
             }
         }
         task.run();
         synchronized (this) {
-            return watching && connected && epoch == connectionEpoch;
+            return watching && zooKeeperConnected && epoch == connectionEpoch;
         }
     }
 
@@ -418,12 +326,12 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
      */
     private void reconcileFromMongoHeadWhileDisconnected() {
         synchronized (this) {
-            if (!watching || connected) {
+            if (!watching || zooKeeperConnected) {
                 return;
             }
         }
         try {
-            mongoHeadReconcile.run();
+            reconciler.reconcileFromMongoHead();
         } catch (RuntimeException exception) {
             log.warn("MongoDB subscription head reconciliation failed", exception);
         }
@@ -443,23 +351,29 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             if (state == ConnectionState.SUSPENDED) {
                 cancelPendingPreparedReconcile();
                 cancelPendingReconnectReconcile();
-                connected = false;
+                var wasConnected = zooKeeperConnected;
+                zooKeeperConnected = false;
                 connectionEpoch++;
-                suspend.run();
-                executor.execute(this::reconcileFromMongoHeadWhileDisconnected);
+                reconciler.suspended();
+                if (wasConnected) {
+                    executor.execute(this::reconcileFromMongoHeadWhileDisconnected);
+                }
             } else if (state == ConnectionState.LOST) {
                 cancelPendingPreparedReconcile();
                 cancelPendingReconnectReconcile();
-                connected = false;
+                var wasConnected = zooKeeperConnected;
+                zooKeeperConnected = false;
                 connectionEpoch++;
-                lost.run();
-                executor.execute(this::reconcileFromMongoHeadWhileDisconnected);
+                reconciler.lost();
+                if (wasConnected) {
+                    executor.execute(this::reconcileFromMongoHeadWhileDisconnected);
+                }
             } else if (state == ConnectionState.RECONNECTED
                     // Curator reports CONNECTED, not RECONNECTED, for the first connection after a failed startup.
-                    || state == ConnectionState.CONNECTED && !connected) {
+                    || state == ConnectionState.CONNECTED && !zooKeeperConnected) {
                 cancelPendingPreparedReconcile();
                 cancelPendingReconnectReconcile();
-                connected = true;
+                zooKeeperConnected = true;
                 var epoch = ++connectionEpoch;
                 reconnectPending = true;
                 pendingReconnectReconcile = executor.schedule(

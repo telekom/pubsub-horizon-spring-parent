@@ -1,9 +1,16 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 
 import java.util.Date;
 import java.util.Optional;
@@ -12,6 +19,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -166,6 +175,46 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         reconciler.run();
         verify(cache, times(2)).prepare(active);
         verify(cache).activate(active);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void activationLogsSuppressRepeatedStackTracesAndResetAfterRecovery(boolean mongoHead) {
+        var active = head("active");
+        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(cache.readSnapshotHead()).thenReturn(active);
+        var failure = new SubscriptionCacheSnapshotException("count mismatch");
+        doThrow(failure).doThrow(failure).doNothing().doNothing().doThrow(failure)
+            .when(cache).prepare(active);
+        Runnable reconcile = mongoHead ? reconciler::reconcileFromMongoHead : reconciler::reconcileActiveHead;
+        var logger = (Logger) LoggerFactory.getLogger(mongoHead
+            ? MongoSubscriptionHeadReconciler.class : ZooKeeperSubscriptionHeadReconciler.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            for (int attempt = 0; attempt < 5; attempt++) {
+                reconcile.run();
+            }
+
+            var warnings = appender.list.stream().filter(event -> event.getLevel() == Level.WARN).toList();
+            assertEquals(3, warnings.size());
+            assertNotNull(warnings.get(0).getThrowableProxy());
+            assertNull(warnings.get(1).getThrowableProxy());
+            assertTrue(warnings.get(1).getFormattedMessage().contains("2 consecutive failed attempts"));
+            assertTrue(warnings.get(1).getFormattedMessage().contains("count mismatch"));
+            assertNotNull(warnings.get(2).getThrowableProxy());
+            var recoveries = appender.list.stream()
+                .filter(event -> event.getFormattedMessage().contains("recovered")).toList();
+            assertEquals(1, recoveries.size());
+            assertEquals(Level.INFO, recoveries.getFirst().getLevel());
+            assertTrue(recoveries.getFirst().getFormattedMessage().contains("2 failed attempts"));
+            verify(cache, times(3)).activationFailed(active);
+            verify(cache, times(2)).activate(active);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test

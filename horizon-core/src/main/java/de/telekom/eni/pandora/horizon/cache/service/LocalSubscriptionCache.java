@@ -82,8 +82,8 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         private CacheState withActivatedSnapshot(IndexedSubscriptionSnapshot nextSnapshot, Instant now) {
             var nextVersion = nextSnapshot.version();
             var activeVersion = activeSnapshot.version();
-            var freshAfterActivation = !activationHeadMustMatch || nextVersion.equals(activationHeadVersion)
-                || status == Status.FRESH && nextVersion.equals(activeVersion);
+            var freshAfterActivation = !activationHeadMustMatch || nextVersion.matches(activationHeadVersion)
+                || status == Status.FRESH && nextVersion.matches(activeVersion);
             var nextStatus = freshAfterActivation ? Status.FRESH : Status.STALE;
             return new CacheState(nextSnapshot, preparedSnapshot, activationHeadVersion,
                 nextStatus, activationHeadMustMatch,
@@ -96,7 +96,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
 
         private CacheState withActivationFailure(SnapshotVersion failedVersion, Instant now) {
-            return !failedVersion.equals(activationHeadVersion)
+            return !failedVersion.matches(activationHeadVersion)
                 ? this
                 : withStaleStatus(now);
         }
@@ -121,7 +121,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
         private boolean hasPendingSnapshot() {
             return preparedSnapshot != null
-                && !Objects.equals(preparedSnapshot.version(), activeSnapshot.version());
+                && !preparedSnapshot.version().matches(activeSnapshot.version());
         }
 
         private Status statusWhenNotFresh() {
@@ -173,11 +173,11 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         var requestedVersion = SnapshotVersion.from(snapshotHead);
         var currentState = cacheState.get();
         var prepared = currentState.preparedSnapshot();
-        if (prepared != null && Objects.equals(requestedVersion, prepared.version())) {
+        if (prepared != null && requestedVersion.matches(prepared.version())) {
             return;
         }
         // Keeps a pending preload of a newer snapshot when the active one is requested again, e.g. after a reconnect.
-        if (currentState.hasActiveSnapshot() && requestedVersion.equals(currentState.activeSnapshot().version())) {
+        if (currentState.hasActiveSnapshot() && requestedVersion.matches(currentState.activeSnapshot().version())) {
             return;
         }
 
@@ -236,7 +236,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
         var requestedVersion = SnapshotVersion.from(snapshotHead);
         var currentState = cacheState.get();
-        if (currentState.hasActiveSnapshot() && requestedVersion.equals(currentState.activeSnapshot().version())) {
+        if (currentState.hasActiveSnapshot() && requestedVersion.matches(currentState.activeSnapshot().version())) {
             var now = clock.instant();
             cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
             activatedAt = now;
@@ -248,7 +248,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         if (prepared == null) {
             throw new IllegalStateException("No prepared subscription snapshot available");
         }
-        if (!Objects.equals(prepared.version(), requestedVersion)) {
+        if (!requestedVersion.matches(prepared.version())) {
             throw new IllegalStateException("Prepared subscription snapshot does not match snapshot head to activate");
         }
         if (prepared.isEmpty()) {
@@ -342,14 +342,14 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     public boolean isActiveSnapshot(SubscriptionSnapshotHead head) {
         var state = cacheState.get();
         return head != null && state.hasActiveSnapshot()
-            && Objects.equals(state.activeSnapshot().version(), SnapshotVersion.from(head));
+            && state.activeSnapshot().version().matches(SnapshotVersion.from(head));
     }
 
     /** Indicates whether an expected head is known and the active snapshot does not reference it. */
     public boolean isBehindActivationHead() {
         var state = cacheState.get();
         return state.activationHeadVersion() != null
-            && !state.activationHeadVersion().equals(state.activeSnapshot().version());
+            && !state.activationHeadVersion().matches(state.activeSnapshot().version());
     }
 
     /**
