@@ -74,7 +74,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
         builder
             .withDetail("source", source)
             .withDetail("fallbackMode", fallbackMode.name().toLowerCase(Locale.ROOT).replace('_', '-'))
-            .withDetail("headSource", properties.getZooKeeper().isEnabled() ? "zookeeper" : "mongodb")
+            .withDetail("headSource", "zookeeper")
             .withDetail("cacheStatus", diagnostics.status().name())
             .withDetail("localSnapshotId", orNone(diagnostics.activeSnapshotId()))
             .withDetail("subscriptionCount", diagnostics.subscriptionCount())

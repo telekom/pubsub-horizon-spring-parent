@@ -1,11 +1,11 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
-import de.telekom.eni.pandora.horizon.cache.config.CacheProperties.MongoHeadFallbackMode;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionSnapshotHeads;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -13,88 +13,68 @@ import java.util.concurrent.atomic.AtomicLong;
  * Reconciles ZooKeeper subscription heads with the pod-local cache.
  *
  * <p>{@code PREPARED} may preload a snapshot but never authorizes activation. A valid {@code ACTIVATE} head is
- * authoritative; the configured MongoDB-head policy is used only when that ZooKeeper head cannot be determined.</p>
+ * authoritative; an unavailable ACTIVATE head leaves the local cache without a confirmed head.
+ * ZooKeeper-driven cache changes are committed through an {@link ActivationGate} so that the owning watcher can reject
+ * them once the connection state that produced the head is no longer current.</p>
  */
 @Slf4j
 public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
     private final ZooKeeperSubscriptionSnapshotHeadReader reader;
     private final LocalSubscriptionCache cache;
-    private final MongoSubscriptionHeadReconciler mongoHeadReconciler;
-    private final MongoHeadFallbackMode mongoHeadFallbackMode;
-    private final Object activationLock = new Object();
     private final AtomicLong headReadFailures = new AtomicLong();
-    private volatile boolean zooKeeperActivationAllowed = true;
-    private SubscriptionSnapshotHead lastActivated;
+    private volatile ActivationGate activationGate = ActivationGate.OPEN;
     private long consecutiveHeadReadFailures;
     private long consecutiveActivationFailures;
 
+    /** Commits a ZooKeeper-driven cache change only while the state that produced it is still current. */
+    @FunctionalInterface
+    interface ActivationGate {
+
+        /** Gate for standalone use without a watcher; every commit runs. */
+        ActivationGate OPEN = commit -> {
+            commit.run();
+            return true;
+        };
+
+        /**
+         * Runs the commit if the triggering ZooKeeper state is still current.
+         *
+         * @param commit cache change to apply
+         * @return {@code true} if the commit ran
+         */
+        boolean runIfCurrent(Runnable commit);
+    }
+
     /**
-     * Creates a reconciler using {@link MongoHeadFallbackMode#STARTUP_ONLY}.
+    * Creates a reconciler using ZooKeeper as the only head source.
      *
      * @param reader reader for the ZooKeeper PREPARED and ACTIVATE heads
      * @param cache cache whose snapshot is prepared and activated
      */
     public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
                                                LocalSubscriptionCache cache) {
-        this(reader, cache, MongoHeadFallbackMode.STARTUP_ONLY);
-    }
-
-    /**
-     * Creates a reconciler with the configured MongoDB-head fallback policy.
-     *
-     * @param reader reader for the ZooKeeper PREPARED and ACTIVATE heads
-     * @param cache cache whose snapshot is prepared and activated
-     * @param mongoHeadFallbackMode policy controlling when the MongoDB head may replace an unavailable ACTIVATE head
-     */
-    public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
-                                               LocalSubscriptionCache cache, MongoHeadFallbackMode mongoHeadFallbackMode) {
         this.reader = reader;
         this.cache = cache;
-        this.mongoHeadReconciler = new MongoSubscriptionHeadReconciler(cache);
-        this.mongoHeadFallbackMode = java.util.Objects.requireNonNull(mongoHeadFallbackMode);
     }
 
     /**
-     * Blocks ZooKeeper-driven activation after Curator reports {@code SUSPENDED}.
+     * Sets the gate through which ZooKeeper-driven activation is committed.
      *
-     * <p>This does not itself change cache freshness or guarantee MongoDB fallback; the configured policy is applied
-     * by a subsequent call to {@link #reconcileFromMongoHead()}.</p>
+     * @param activationGate gate supplied by the owning watcher
      */
-    public void suspended() {
-        synchronized (activationLock) {
-            zooKeeperActivationAllowed = false;
-        }
-    }
-
-    /**
-     * Blocks ZooKeeper-driven activation after Curator reports {@code LOST}.
-     *
-     * <p>This has the same activation-gating effect as {@link #suspended()}.</p>
-     */
-    public void lost() {
-        suspended();
-    }
-
-    /**
-     * Resumes ZooKeeper-driven activation and reconciles the current PREPARED and ACTIVATE heads.
-     *
-     * <p>The previous activation optimization is cleared so the current ACTIVATE head is reconciled again. This does not
-     * force a MongoDB load when a matching prepared or active snapshot can be reused.</p>
-     */
-    public synchronized void reconcileAfterReconnect() {
-        synchronized (activationLock) {
-            zooKeeperActivationAllowed = true;
-            lastActivated = null;
-        }
-        run();
+    void setActivationGate(ActivationGate activationGate) {
+        this.activationGate = Objects.requireNonNull(activationGate, "activationGate must not be null");
     }
 
     /**
      * Reads the current PREPARED and ACTIVATE heads and reconciles the authoritative ACTIVATE head.
      *
      * <p>A PREPARED read failure is logged but does not prevent ACTIVATE reconciliation. If ACTIVATE is missing or cannot
-     * be read, the configured MongoDB-head fallback policy is applied.</p>
+    * be read, the cache loses its confirmed head.</p>
+     *
+     * <p>Also used after a reconnect: a FRESH snapshot matching ACTIVATE is kept, and a STALE one is reactivated without
+     * reloading.</p>
      */
     @Override
     public synchronized void run() {
@@ -148,13 +128,13 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
                 return;
             }
             headReadFailed("Could not read activate subscription head", exception);
-            reconcileFromMongoHead();
+            activationGate.runIfCurrent(cache::disconnected);
             return;
         }
 
         if (active.isEmpty()) {
             headReadFailed("ZooKeeper activate subscription head is missing", null);
-            reconcileFromMongoHead();
+            activationGate.runIfCurrent(cache::disconnected);
             return;
         }
         if (consecutiveHeadReadFailures > 0) {
@@ -164,13 +144,10 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         }
 
         var head = active.orElseThrow();
-        synchronized (activationLock) {
-            if (!zooKeeperActivationAllowed) {
-                return;
-            }
-            cache.setActivationHead(head);
+        if (!activationGate.runIfCurrent(() -> cache.setActivationHead(head))) {
+            return;
         }
-        if (cache.isActiveSnapshotUpToDate() && SubscriptionSnapshotHeads.isSameSnapshot(head, lastActivated)) {
+        if (cache.isActiveSnapshotUpToDate() && cache.isActiveSnapshot(head)) {
             activationSucceeded(head);
             prepared.filter(candidate -> !SubscriptionSnapshotHeads.isSameSnapshot(candidate, head))
                 .ifPresent(this::prepareOnly);
@@ -179,17 +156,13 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
 
         try {
             cache.prepare(head);
-            synchronized (activationLock) {
-                if (!zooKeeperActivationAllowed) {
-                    return;
-                }
-                cache.activate(head);
-                lastActivated = head;
+            if (!activationGate.runIfCurrent(() -> cache.activate(head))) {
+                return;
             }
             activationSucceeded(head);
         } catch (RuntimeException exception) {
             cache.activationFailed(head);
-            cache.discardPreparedSnapshot();
+            cache.discardPreparedSnapshot(head);
             consecutiveActivationFailures++;
             if (consecutiveActivationFailures == 1) {
                 log.warn("Could not activate subscription snapshot {}", head.getSnapshotId(), exception);
@@ -208,29 +181,9 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         }
     }
 
-    /**
-     * Attempts reconciliation from the MongoDB head when the configured policy allows it.
-     *
-     * <p>{@link MongoHeadFallbackMode#ALWAYS} permits every fallback attempt. {@link MongoHeadFallbackMode#NEVER}
-     * denies all attempts. {@link MongoHeadFallbackMode#STARTUP_ONLY} permits attempts until the cache has reached
-     * FRESH for the first time. A denied or failed fallback leaves an active cache STALE; without an active snapshot it
-     * remains UNINITIALIZED.</p>
-     */
-    public synchronized void reconcileFromMongoHead() {
-        boolean fallbackAllowed = switch (mongoHeadFallbackMode) {
-            case ALWAYS -> true;
-            case NEVER -> false;
-            case STARTUP_ONLY -> !cache.hasFirstFreshSnapshot();
-        };
-        if (!fallbackAllowed) {
-            synchronized (activationLock) {
-                cache.disconnected();
-            }
-            log.warn("ZooKeeper subscription head unavailable and MongoDB head fallback denied by mode {}; local cache has no confirmed head",
-                mongoHeadFallbackMode);
-            return;
-        }
-        mongoHeadReconciler.reconcile().ifPresent(head -> lastActivated = head);
+    /** Marks the cache unconfirmed when the owning watcher disconnects. */
+    void disconnected() {
+        cache.disconnected();
     }
 
     /**

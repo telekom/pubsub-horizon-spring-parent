@@ -1,17 +1,26 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.cache.CuratorCache;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.retry.RetryOneTime;
 import org.apache.curator.test.TestingServer;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -19,10 +28,12 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -126,16 +137,16 @@ class ZooKeeperSubscriptionHeadWatcherTest {
                 watcher.connectionStateChanged(client, ConnectionState.SUSPENDED);
                 watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
                 assertThat(delayMillis.get()).isBetween(0L, 10_000L);
-                verify(reconciler, never()).reconcileAfterReconnect();
+                verify(reconciler, times(1)).run();
                 var interruptedTask = reconnectTask.get();
                 watcher.connectionStateChanged(client, ConnectionState.LOST);
                 verify(reconnectFuture.get()).cancel(false);
                 interruptedTask.run();
-                verify(reconciler, never()).reconcileAfterReconnect();
+                verify(reconciler, times(1)).run();
 
                 watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
                 reconnectTask.get().run();
-                verify(reconciler).reconcileAfterReconnect();
+                verify(reconciler, times(2)).run();
             }
         }
     }
@@ -161,7 +172,7 @@ class ZooKeeperSubscriptionHeadWatcherTest {
 
                 assertThat(delayMillis.get()).isZero();
                 reconnectTask.get().run();
-                verify(reconciler).reconcileAfterReconnect();
+                verify(reconciler, times(2)).run();
             }
         }
     }
@@ -188,14 +199,13 @@ class ZooKeeperSubscriptionHeadWatcherTest {
                 var pendingTask = reconnectTask.get();
 
                 watcher.scheduleActivateReconcile();
-                verify(reconciler).reconcileAfterReconnect();
+                verify(reconciler, times(2)).run();
                 verify(reconnectFuture.get()).cancel(false);
                 pendingTask.run();
-                verify(reconciler, times(1)).reconcileAfterReconnect();
+                verify(reconciler, times(2)).run();
 
                 watcher.scheduleActivateReconcile();
-                verify(reconciler, times(2)).run();
-                verify(reconciler, times(1)).reconcileAfterReconnect();
+                verify(reconciler, times(3)).run();
             }
         }
     }
@@ -249,7 +259,7 @@ class ZooKeeperSubscriptionHeadWatcherTest {
     }
 
     @Test
-    void periodicReconciliationUsesMongoHeadWhileSuspended() throws Exception {
+    void periodicReconciliationDoesNothingWhileSuspended() throws Exception {
         try (var server = new TestingServer();
              var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
             client.start();
@@ -265,10 +275,10 @@ class ZooKeeperSubscriptionHeadWatcherTest {
                 watcher.initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
                 verify(reconciler).run();
                 watcher.connectionStateChanged(client, ConnectionState.SUSPENDED);
-                verify(reconciler).reconcileFromMongoHead();
+                verify(reconciler).disconnected();
                 periodicTask.get().run();
                 verify(reconciler, org.mockito.Mockito.never()).reconcileActiveHead();
-                verify(reconciler, times(2)).reconcileFromMongoHead();
+                verify(reconciler, times(1)).disconnected();
             }
         }
     }
@@ -307,7 +317,7 @@ class ZooKeeperSubscriptionHeadWatcherTest {
                 assertThat(periodicTask.get()).isNull();
                 watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
                 reconnectTask.get().run();
-                verify(reconciler).reconcileAfterReconnect();
+                verify(reconciler, times(2)).run();
             }
         }
     }
@@ -353,7 +363,7 @@ class ZooKeeperSubscriptionHeadWatcherTest {
     }
 
     @Test
-    void suspensionAndLossUseDifferentCacheTransitionsBeforeReconnect() throws Exception {
+    void suspensionFollowedByLossMarksCacheUnconfirmedOnceBeforeReconnect() throws Exception {
         try (var server = new TestingServer();
              var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
             client.start();
@@ -371,13 +381,11 @@ class ZooKeeperSubscriptionHeadWatcherTest {
 
                 watcher.connectionStateChanged(client, ConnectionState.SUSPENDED);
                 watcher.connectionStateChanged(client, ConnectionState.LOST);
-                verify(reconciler).suspended();
-                verify(reconciler).lost();
-                verify(reconciler, times(1)).reconcileFromMongoHead();
+                verify(reconciler, times(1)).disconnected();
 
                 watcher.connectionStateChanged(client, ConnectionState.RECONNECTED);
                 reconnectTask.get().run();
-                verify(reconciler).reconcileAfterReconnect();
+                verify(reconciler, times(2)).run();
             }
         }
     }
@@ -404,9 +412,81 @@ class ZooKeeperSubscriptionHeadWatcherTest {
                 watcher.connectionStateChanged(client, ConnectionState.LOST);
                 watcher.connectionStateChanged(client, ConnectionState.CONNECTED);
                 reconnectTask.get().run();
-                verify(reconciler).reconcileAfterReconnect();
+                verify(reconciler, times(2)).run();
             }
         }
+    }
+
+    @Test
+    void activationGateRejectsCommitAfterEpochChangedDuringRunningTask() throws Exception {
+        var client = mock(CuratorFramework.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        try (var ignored = mockCuratorCaches(client)) {
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var gate = new AtomicReference<ZooKeeperSubscriptionHeadReconciler.ActivationGate>();
+            doAnswer(invocation -> {
+                gate.set(invocation.getArgument(0));
+                return null;
+            }).when(reconciler).setActivationGate(org.mockito.ArgumentMatchers.any());
+            var watcherReference = new AtomicReference<ZooKeeperSubscriptionHeadWatcher>();
+            var commits = new AtomicInteger();
+            List<Boolean> results = new ArrayList<>();
+            doAnswer(invocation -> {
+                results.add(gate.get().runIfCurrent(commits::incrementAndGet));
+                // Suspension and reconnect while the task is still running, i.e. after its runIfConnected check.
+                watcherReference.get().connectionStateChanged(client, ConnectionState.SUSPENDED);
+                watcherReference.get().connectionStateChanged(client, ConnectionState.RECONNECTED);
+                results.add(gate.get().runIfCurrent(commits::incrementAndGet));
+                return null;
+            }).when(reconciler).run();
+
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(5), Duration.ofSeconds(10), Duration.ZERO, manualScheduler(new AtomicReference<>()))) {
+                watcherReference.set(watcher);
+                watcher.start();
+
+                assertThat(results).containsExactly(true, false);
+                assertThat(commits.get()).isEqualTo(1);
+                assertFalse(gate.get().runIfCurrent(commits::incrementAndGet));
+                assertThat(commits.get()).isEqualTo(1);
+            }
+        }
+    }
+
+    @Test
+    void failingActivateReconciliationIsLoggedAndDoesNotEscape() throws Exception {
+        var client = mock(CuratorFramework.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        try (var ignored = mockCuratorCaches(client)) {
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var logger = (Logger) LoggerFactory.getLogger(ZooKeeperSubscriptionHeadWatcher.class);
+            var appender = new ListAppender<ILoggingEvent>();
+            appender.start();
+            logger.addAppender(appender);
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(5), Duration.ZERO, Duration.ZERO, manualScheduler(new AtomicReference<>()))) {
+                watcher.start();
+                org.mockito.Mockito.doThrow(new IllegalStateException("unexpected")).when(reconciler).run();
+
+                assertDoesNotThrow(watcher::scheduleActivateReconcile);
+
+                assertThat(appender.list).anySatisfy(event -> {
+                    assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                    assertThat(event.getFormattedMessage()).contains("ACTIVATE reconciliation failed");
+                });
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+        }
+    }
+
+    private static MockedStatic<CuratorCache> mockCuratorCaches(CuratorFramework client) {
+        var caches = org.mockito.Mockito.mockStatic(CuratorCache.class);
+        caches.when(() -> CuratorCache.build(org.mockito.ArgumentMatchers.eq(client),
+                org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(ignored -> mock(CuratorCache.class, org.mockito.Mockito.RETURNS_DEEP_STUBS));
+        return caches;
     }
 
     @Test
@@ -447,7 +527,6 @@ class ZooKeeperSubscriptionHeadWatcherTest {
             var reader = new ZooKeeperSubscriptionSnapshotHeadReader(client, new ObjectMapper(),
                 "/subscriptions/prepared", "/subscriptions/activate");
             var cache = mock(LocalSubscriptionCache.class);
-            when(cache.readSnapshotHead()).thenThrow(new SubscriptionCacheSnapshotException("no head"));
             var reconciler = new ZooKeeperSubscriptionHeadReconciler(reader, cache);
 
             try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,

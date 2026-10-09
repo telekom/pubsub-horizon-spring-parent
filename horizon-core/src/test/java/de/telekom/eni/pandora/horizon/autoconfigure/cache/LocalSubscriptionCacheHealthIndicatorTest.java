@@ -80,9 +80,8 @@ class LocalSubscriptionCacheHealthIndicatorTest {
     }
 
     @Test
-    void staleReadGraceIsOmittedWithoutHazelcastFallbackAndHeadSourceReflectsMongoMode() {
+        void staleReadGraceIsOmittedWithoutHazelcastFallbackAndHeadSourceIsZooKeeper() {
         properties.setFallbackMode(CacheProperties.LocalSubscriptionCacheFallback.NONE);
-        properties.getZooKeeper().setEnabled(false);
         when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.STALE, true, "snapshot-local", 3, NOW, null, null, NOW));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
@@ -91,7 +90,7 @@ class LocalSubscriptionCacheHealthIndicatorTest {
         var health = indicator.health();
 
         assertEquals("none", health.getDetails().get("fallbackMode"));
-        assertEquals("mongodb", health.getDetails().get("headSource"));
+        assertEquals("zookeeper", health.getDetails().get("headSource"));
         assertEquals("none", health.getDetails().get("expectedSnapshotId"));
         assertFalse(health.getDetails().containsKey("staleLocalReadsRemaining"));
     }

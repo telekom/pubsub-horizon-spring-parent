@@ -22,10 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,7 +78,6 @@ class SubscriptionZooKeeperClientTest {
                     assertThat(context).hasSingleBean(LocalSubscriptionCacheHealthIndicator.class);
                     context.getBean(ZooKeeperSubscriptionHeadWatcher.class)
                         .initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
-                    verify(cache, org.mockito.Mockito.never()).readSnapshotHead();
                 });
         }
     }
@@ -117,7 +113,6 @@ class SubscriptionZooKeeperClientTest {
             .withPropertyValues(
                 "horizon.cache.local-subscription-cache.stale-local-cache-read-grace-period=30s",
                 "horizon.cache.local-subscription-cache.initial-snapshot-timeout=45s",
-                "horizon.cache.local-subscription-cache.mongo-head-fallback-mode=never",
                 "horizon.cache.local-subscription-cache.mongo-head-poll-jitter=3s",
                 "horizon.cache.local-subscription-cache.mongo-snapshot-sync-jitter=12s",
                 "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/horizon/subscriptions/prepared",
@@ -127,7 +122,6 @@ class SubscriptionZooKeeperClientTest {
                 var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
                 assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(30));
                 assertThat(localCache.getInitialSnapshotTimeout()).isEqualTo(Duration.ofSeconds(45));
-                assertThat(localCache.getMongoHeadFallbackMode()).isEqualTo(CacheProperties.MongoHeadFallbackMode.NEVER);
                 assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(3));
                 assertThat(localCache.getMongoSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(12));
                 assertThat(localCache.getReconcileInterval()).isEqualTo(Duration.ofMinutes(7));
@@ -142,10 +136,8 @@ class SubscriptionZooKeeperClientTest {
         contextRunner.run(context -> {
             var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
             assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(120));
-            assertThat(localCache.getMongoHeadFallbackMode()).isEqualTo(CacheProperties.MongoHeadFallbackMode.STARTUP_ONLY);
             assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(10));
             assertThat(localCache.getMongoSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(10));
-            assertThat(localCache.getZooKeeper().isEnabled()).isTrue();
         });
     }
 
@@ -157,30 +149,11 @@ class SubscriptionZooKeeperClientTest {
     }
 
     @ParameterizedTest
-    @EnumSource(CacheProperties.MongoHeadFallbackMode.class)
-    void mongoHeadFallbackModesBind(CacheProperties.MongoHeadFallbackMode mode) {
-        contextRunner.withPropertyValues("horizon.cache.local-subscription-cache.mongo-head-fallback-mode="
-                + mode.name().toLowerCase(java.util.Locale.ROOT).replace('_', '-'))
-            .run(context -> {
-                assertThat(context).hasNotFailed();
-                assertThat(context.getBean(CacheProperties.class).getLocalSubscriptionCache()
-                    .getMongoHeadFallbackMode()).isEqualTo(mode);
-            });
-    }
-
-    @Test
-    void invalidMongoHeadFallbackModeFailsBinding() {
-        contextRunner.withPropertyValues("horizon.cache.local-subscription-cache.mongo-head-fallback-mode=invalid")
-            .run(context -> assertThat(context).hasFailed());
-    }
-
-    @ParameterizedTest
     @EnumSource(CacheProperties.LocalSubscriptionCacheFallback.class)
-    void startupOnlyCutoffIsIndependentOfDataFallback(CacheProperties.LocalSubscriptionCacheFallback fallback)
+    void missingActivateHeadIsUnconfirmedIndependentlyOfDataFallback(CacheProperties.LocalSubscriptionCacheFallback fallback)
             throws Exception {
         try (var server = new TestingServer()) {
             var cache = mock(LocalSubscriptionCache.class);
-            when(cache.hasFirstFreshSnapshot()).thenReturn(true);
             contextRunner.withBean(LocalSubscriptionCache.class, () -> cache)
                 .withPropertyValues(
                     "horizon.cache.local-subscription-cache.enabled=true",
@@ -194,34 +167,12 @@ class SubscriptionZooKeeperClientTest {
                     context.getBean(ZooKeeperSubscriptionHeadWatcher.class)
                         .initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
                     verify(cache, org.mockito.Mockito.atLeastOnce()).disconnected();
-                    verify(cache, never()).readSnapshotHead();
                 });
         }
     }
 
-    @ParameterizedTest
-    @EnumSource(CacheProperties.LocalSubscriptionCacheFallback.class)
-    void disabledZooKeeperUsesMongoHeadPollerWithoutCurator(CacheProperties.LocalSubscriptionCacheFallback fallback) {
-        var cache = mock(LocalSubscriptionCache.class);
-        contextRunner
-            .withBean(LocalSubscriptionCache.class, () -> cache)
-            .withPropertyValues(
-                "horizon.cache.local-subscription-cache.enabled=true",
-                "horizon.cache.local-subscription-cache.mongo-head-fallback-mode=never",
-                "horizon.cache.local-subscription-cache.fallback-mode=" + fallback,
-                "horizon.cache.local-subscription-cache.zoo-keeper.enabled=false")
-            .run(context -> {
-                assertThat(context).hasNotFailed();
-                assertThat(context).doesNotHaveBean(CuratorFramework.class);
-                assertThat(context).doesNotHaveBean(ZooKeeperSubscriptionHeadWatcher.class);
-                assertThat(context).hasSingleBean(MongoSubscriptionHeadPoller.class);
-                assertThat(context).hasSingleBean(LocalSubscriptionCacheHealthIndicator.class);
-                verify(cache, timeout(1000).atLeastOnce()).readSnapshotHead();
-            });
-    }
-
     @Test
-    void enabledZooKeeperDoesNotStartMongoHeadPoller() throws Exception {
+    void enabledLocalCacheUsesZooKeeper() throws Exception {
         try (var server = new TestingServer()) {
             enabledRunner
                 .withPropertyValues(
@@ -229,46 +180,7 @@ class SubscriptionZooKeeperClientTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(ZooKeeperSubscriptionHeadWatcher.class);
-                    assertThat(context).doesNotHaveBean(MongoSubscriptionHeadPoller.class);
                 });
-        }
-    }
-
-    @Test
-    void mongoHeadPollerRunsImmediatelyAndOffsetsOnlyFirstPeriodicPoll() {
-        var reconciler = mock(MongoSubscriptionHeadReconciler.class);
-        var periodicTask = new AtomicReference<Runnable>();
-        var scheduler = manualScheduler(periodicTask);
-        var initialDelay = org.mockito.ArgumentCaptor.forClass(Long.class);
-        var period = org.mockito.ArgumentCaptor.forClass(Long.class);
-
-        try (var poller = new MongoSubscriptionHeadPoller(reconciler, Duration.ofSeconds(60),
-                Duration.ofSeconds(10), scheduler)) {
-            poller.start();
-
-            verify(reconciler).reconcile();
-            verify(scheduler).scheduleWithFixedDelay(org.mockito.ArgumentMatchers.any(Runnable.class),
-                initialDelay.capture(), period.capture(), org.mockito.ArgumentMatchers.eq(TimeUnit.MILLISECONDS));
-            assertThat(initialDelay.getValue()).isBetween(60_000L, 70_000L);
-            assertThat(period.getValue()).isEqualTo(60_000L);
-            periodicTask.get().run();
-            verify(reconciler, times(2)).reconcile();
-        }
-        verify(scheduler).shutdownNow();
-    }
-
-    @Test
-    void zeroReconcileIntervalPollsMongoHeadOnlyOnce() {
-        var reconciler = mock(MongoSubscriptionHeadReconciler.class);
-        var periodicTask = new AtomicReference<Runnable>();
-        var scheduler = manualScheduler(periodicTask);
-
-        try (var poller = new MongoSubscriptionHeadPoller(reconciler, Duration.ZERO, Duration.ofSeconds(10),
-                scheduler)) {
-            poller.start();
-
-            verify(reconciler).reconcile();
-            assertThat(periodicTask.get()).isNull();
         }
     }
 
@@ -496,40 +408,6 @@ class SubscriptionZooKeeperClientTest {
             // Unbounded, the retries alone would take at least 10 seconds.
             assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).isLessThan(5_000);
         }
-    }
-
-    private static ScheduledExecutorService manualScheduler(AtomicReference<Runnable> periodicTask) {
-        return manualScheduler(periodicTask, new AtomicReference<>(), new AtomicReference<>(), new AtomicLong());
-    }
-
-    private static ScheduledExecutorService manualScheduler(AtomicReference<Runnable> periodicTask,
-                                                            AtomicReference<Runnable> delayedPreparedTask,
-                                                            AtomicReference<ScheduledFuture<?>> delayedPreparedFuture,
-                                                            AtomicLong delayedPreparedIntervalMillis) {
-        var scheduler = mock(ScheduledExecutorService.class);
-        doAnswer(invocation -> {
-            invocation.<Runnable>getArgument(0).run();
-            return null;
-        }).when(scheduler).execute(org.mockito.ArgumentMatchers.any(Runnable.class));
-        doAnswer(invocation -> {
-            periodicTask.set(invocation.getArgument(0));
-            return mock(ScheduledFuture.class);
-        }).when(scheduler).scheduleWithFixedDelay(
-            org.mockito.ArgumentMatchers.any(Runnable.class),
-            org.mockito.ArgumentMatchers.anyLong(),
-            org.mockito.ArgumentMatchers.anyLong(),
-            org.mockito.ArgumentMatchers.any(TimeUnit.class));
-        doAnswer(invocation -> {
-            delayedPreparedTask.set(invocation.getArgument(0));
-            delayedPreparedIntervalMillis.set(invocation.getArgument(1));
-            var future = mock(ScheduledFuture.class);
-            delayedPreparedFuture.set(future);
-            return future;
-        }).when(scheduler).schedule(
-            org.mockito.ArgumentMatchers.any(Runnable.class),
-            org.mockito.ArgumentMatchers.anyLong(),
-            org.mockito.ArgumentMatchers.any(TimeUnit.class));
-        return scheduler;
     }
 
     private static byte[] head(String snapshotId) {

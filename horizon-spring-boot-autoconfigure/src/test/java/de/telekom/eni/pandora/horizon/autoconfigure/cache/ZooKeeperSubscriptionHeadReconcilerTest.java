@@ -5,8 +5,8 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
-import de.telekom.eni.pandora.horizon.cache.config.CacheProperties.MongoHeadFallbackMode;
 import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoader;
+import de.telekom.eni.pandora.horizon.cache.service.SubscriptionSnapshotHeads;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.bson.Document;
@@ -25,6 +25,8 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -47,7 +49,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     private final ZooKeeperSubscriptionSnapshotHeadReader reader = mock(ZooKeeperSubscriptionSnapshotHeadReader.class);
     private final LocalSubscriptionCache cache = mock(LocalSubscriptionCache.class);
     private final ZooKeeperSubscriptionHeadReconciler reconciler = new ZooKeeperSubscriptionHeadReconciler(
-        reader, cache, MongoHeadFallbackMode.ALWAYS);
+        reader, cache);
 
     @Test
     void interruptedHeadReadIsNeitherCountedNorFallsBackToMongo() {
@@ -57,7 +59,6 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         reconciler.run();
 
         assertEquals(0, reconciler.headReadFailureCount());
-        verify(cache, never()).readSnapshotHead();
         verify(cache, never()).disconnected();
     }
 
@@ -87,6 +88,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         reconciler.run();
 
         when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
+        when(cache.isActiveSnapshot(active)).thenReturn(true);
         when(reader.readPrepared()).thenReturn(Optional.of(prepared));
         reconciler.run();
 
@@ -96,21 +98,14 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void missingActivateHeadUsesMongoHead() {
+    void missingActivateHeadMarksCacheStale() {
         var prepared = head("next");
-        var mongoHead = head("mongo");
         when(reader.readPrepared()).thenReturn(Optional.of(prepared));
-        when(cache.readSnapshotHead()).thenReturn(mongoHead);
 
         reconciler.run();
 
-        var order = inOrder(cache);
-        order.verify(cache).readSnapshotHead();
-        order.verify(cache).setActivationHead(mongoHead);
-        order.verify(cache).prepare(mongoHead);
-        order.verify(cache).activate(mongoHead);
         verify(cache, never()).prepare(prepared);
-        verify(cache, never()).disconnected();
+        verify(cache).disconnected();
         assertEquals(1, reconciler.headReadFailureCount());
     }
 
@@ -157,18 +152,15 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void invalidActivateHeadUsesMongoHeadWithoutLoadingPrepared() {
+    void invalidActivateHeadMarksCacheStaleWithoutLoadingPrepared() {
         var prepared = head("next");
-        var mongoHead = head("mongo");
         when(reader.readPrepared()).thenReturn(Optional.of(prepared));
         when(reader.readActivate()).thenThrow(new SubscriptionCacheSnapshotException("invalid activate"));
-        when(cache.readSnapshotHead()).thenReturn(mongoHead);
 
         reconciler.run();
 
-        verify(cache, never()).disconnected();
+        verify(cache).disconnected();
         verify(cache, never()).prepare(prepared);
-        verify(cache).activate(mongoHead);
         assertEquals(1, reconciler.headReadFailureCount());
     }
 
@@ -181,26 +173,23 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
 
         reconciler.run();
         verify(cache).activationFailed(active);
-        verify(cache).discardPreparedSnapshot();
-        verify(cache, never()).readSnapshotHead();
+        verify(cache).discardPreparedSnapshot(active);
+        verify(cache, never()).discardPreparedSnapshot();
 
         reconciler.run();
         verify(cache, times(2)).prepare(active);
         verify(cache).activate(active);
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void activationLogsSuppressRepeatedStackTracesAndResetAfterRecovery(boolean mongoHead) {
+    @Test
+    void activationLogsSuppressRepeatedStackTracesAndResetAfterRecovery() {
         var active = head("active");
         when(reader.readActivate()).thenReturn(Optional.of(active));
-        when(cache.readSnapshotHead()).thenReturn(active);
         var failure = new SubscriptionCacheSnapshotException("count mismatch");
         doThrow(failure).doThrow(failure).doNothing().doNothing().doThrow(failure)
             .when(cache).prepare(active);
-        Runnable reconcile = mongoHead ? reconciler::reconcileFromMongoHead : reconciler::reconcileActiveHead;
-        var logger = (Logger) LoggerFactory.getLogger(mongoHead
-            ? MongoSubscriptionHeadReconciler.class : ZooKeeperSubscriptionHeadReconciler.class);
+        Runnable reconcile = reconciler::reconcileActiveHead;
+        var logger = (Logger) LoggerFactory.getLogger(ZooKeeperSubscriptionHeadReconciler.class);
         var appender = new ListAppender<ILoggingEvent>();
         appender.start();
         logger.addAppender(appender);
@@ -238,6 +227,13 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         var rollback = head("previous");
         when(reader.readActivate()).thenReturn(Optional.of(original), Optional.of(revised), Optional.of(rollback));
         when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
+        var activeHead = new AtomicReference<SubscriptionSnapshotHead>();
+        doAnswer(invocation -> {
+            activeHead.set(invocation.getArgument(0));
+            return null;
+        }).when(cache).activate(any());
+        when(cache.isActiveSnapshot(any())).thenAnswer(invocation ->
+            SubscriptionSnapshotHeads.isSameSnapshot(invocation.getArgument(0), activeHead.get()));
 
         reconciler.run();
         reconciler.run();
@@ -246,84 +242,34 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         verify(cache).prepare(original);
         verify(cache).prepare(revised);
         verify(cache).prepare(rollback);
+        verify(cache).activate(revised);
         verify(cache).activate(rollback);
     }
 
     @Test
-    void activateReadFailureUsesMongoHeadWithoutRevokingFreshness() {
-        var mongoHead = head("mongo");
+    void activateReadFailureMarksCacheStale() {
         when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
-        when(cache.readSnapshotHead()).thenReturn(mongoHead);
 
         reconciler.run();
 
         var order = inOrder(cache);
-        order.verify(cache).setActivationHead(mongoHead);
-        order.verify(cache).prepare(mongoHead);
-        order.verify(cache).activate(mongoHead);
-        verify(cache, never()).disconnected();
+        verify(cache).disconnected();
         verify(cache, never()).suspended();
     }
 
     @Test
-    void repeatedMongoHeadFallbackReusesActivatedSnapshot() {
-        var mongoHead = head("mongo");
-        when(cache.readSnapshotHead()).thenReturn(mongoHead);
-        when(cache.isActiveSnapshot(mongoHead)).thenReturn(false, true);
-
-        reconciler.reconcileFromMongoHead();
-        reconciler.reconcileFromMongoHead();
-
-        verify(cache).prepare(mongoHead);
-        verify(cache, never()).discardPreparedSnapshot();
-        verify(cache, times(2)).activate(mongoHead);
-    }
-
-    @Test
-    void failedMongoHeadLoadKeepsCacheStale() {
-        var mongoHead = head("mongo");
-        when(cache.readSnapshotHead()).thenReturn(mongoHead);
-        doThrow(new SubscriptionCacheSnapshotException("count mismatch")).when(cache).prepare(mongoHead);
-
-        reconciler.reconcileFromMongoHead();
-
-        verify(cache).activationFailed(mongoHead);
-        verify(cache, never()).activate(mongoHead);
-    }
-
-    @Test
-    void disabledMongoHeadFallbackMarksCacheStaleWithoutReadingMongo() {
-        var withoutFallback = new ZooKeeperSubscriptionHeadReconciler(reader, cache, MongoHeadFallbackMode.NEVER);
-        when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
-
-        withoutFallback.run();
-
-        verify(cache).disconnected();
-        verify(cache, never()).readSnapshotHead();
-    }
-
-    @Test
-    void unreadableMongoHeadMarksCacheStale() {
-        when(cache.readSnapshotHead()).thenThrow(new SubscriptionCacheSnapshotException("no head"));
-
-        reconciler.reconcileFromMongoHead();
-
-        verify(cache).disconnected();
-        verify(cache, never()).setActivationHead(org.mockito.ArgumentMatchers.any());
-        verify(cache, never()).activationFailed(org.mockito.ArgumentMatchers.any());
-    }
-
-    @Test
-    void reconnectRereadsBothHeadsAndReloadsUnchangedActiveHead() {
+    void reconnectRereadsBothHeadsAndReactivatesStaleActiveHead() {
         var active = head("active");
         when(reader.readActivate()).thenReturn(Optional.of(active));
-        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
 
         reconciler.run();
+        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
+        when(cache.isActiveSnapshot(active)).thenReturn(true);
         reconciler.run();
         verify(cache).prepare(active);
 
-        reconciler.reconcileAfterReconnect();
+        when(cache.isActiveSnapshotUpToDate()).thenReturn(false);
+        reconciler.run();
 
         verify(reader, times(3)).readPrepared();
         verify(reader, times(3)).readActivate();
@@ -334,9 +280,17 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void suspensionDuringLoadPreventsLateActivation() throws Exception {
+    void closedGateDuringLoadPreventsLateActivation() throws Exception {
         var active = head("active");
         when(reader.readActivate()).thenReturn(Optional.of(active));
+        var current = new AtomicBoolean(true);
+        reconciler.setActivationGate(commit -> {
+            if (!current.get()) {
+                return false;
+            }
+            commit.run();
+            return true;
+        });
         var loading = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         doAnswer(ignored -> {
@@ -348,96 +302,45 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         try (var executor = Executors.newSingleThreadExecutor()) {
             var reconciliation = executor.submit(reconciler::run);
             assertTrue(loading.await(10, TimeUnit.SECONDS));
-            reconciler.suspended();
-            verify(cache, never()).suspended();
-            verify(cache, never()).disconnected();
+            current.set(false);
             release.countDown();
             reconciliation.get(10, TimeUnit.SECONDS);
         } finally {
             release.countDown();
         }
 
+        verify(cache).setActivationHead(active);
+        verify(cache, never()).activate(active);
+        verify(cache, never()).activationFailed(active);
+        verify(cache, never()).suspended();
+        verify(cache, never()).disconnected();
+    }
+
+    @Test
+    void closedGateSkipsZooKeeperHeadWithoutTouchingCache() {
+        var active = head("active");
+        when(reader.readActivate()).thenReturn(Optional.of(active));
+        reconciler.setActivationGate(commit -> false);
+
+        reconciler.run();
+
+        verify(cache, never()).setActivationHead(active);
+        verify(cache, never()).prepare(active);
         verify(cache, never()).activate(active);
     }
 
-    @Test
-    void lostConnectionKeepsCacheFreshWhenMongoHeadConfirmsIt() {
-        var mongoHead = head("mongo");
-        when(cache.readSnapshotHead()).thenReturn(mongoHead);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void closedGateDoesNotRevokeFreshnessForAnObsoleteHeadRead(boolean readFails) {
+        if (readFails) {
+            when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
+        }
+        reconciler.setActivationGate(commit -> false);
 
-        reconciler.lost();
-        reconciler.reconcileFromMongoHead();
+        reconciler.run();
 
         verify(cache, never()).disconnected();
-        verify(cache, never()).suspended();
-        verify(cache).activate(mongoHead);
-    }
-
-    @ParameterizedTest
-    @EnumSource(MongoHeadFallbackMode.class)
-    void policyControlsFallbackBeforeAndAfterFirstFreshSnapshot(MongoHeadFallbackMode mode) {
-        var mongo = mock(MongoTemplate.class);
-        var active = head("mongo");
-        when(mongo.findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads")))
-            .thenReturn(active);
-        when(mongo.find(any(Query.class), eq(Document.class), eq("snapshots")))
-            .thenReturn(List.of(new Document("resource", new Document("spec",
-                new Document("environment", "integration").append("subscription",
-                    new Document("subscriptionId", "subscription").append("type", "event"))))));
-        var localCache = new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
-            mongo, "snapshots", "heads", Duration.ofSeconds(60)));
-        var policyReconciler = new ZooKeeperSubscriptionHeadReconciler(reader, localCache, mode);
-
-        policyReconciler.run();
-
-        assertEquals(mode != MongoHeadFallbackMode.NEVER, localCache.hasFirstFreshSnapshot());
-        if (mode == MongoHeadFallbackMode.NEVER) {
-            assertEquals(LocalSubscriptionCache.Status.UNINITIALIZED, localCache.status());
-            verify(mongo, never()).findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads"));
-            return;
-        }
-        assertEquals(LocalSubscriptionCache.Status.FRESH, localCache.status());
-        localCache.disconnected();
-        policyReconciler.lost();
-        policyReconciler.reconcileFromMongoHead();
-        policyReconciler.reconcileActiveHead();
-        policyReconciler.reconcileAfterReconnect();
-
-        assertTrue(localCache.hasFirstFreshSnapshot());
-        assertEquals(mode == MongoHeadFallbackMode.ALWAYS
-            ? LocalSubscriptionCache.Status.FRESH : LocalSubscriptionCache.Status.STALE, localCache.status());
-        verify(mongo, times(mode == MongoHeadFallbackMode.ALWAYS ? 4 : 1))
-            .findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads"));
-    }
-
-    @Test
-    void startupOnlyRetriesFailedBootstrapButStopsAfterZooKeeperActivation() {
-        var mongo = mock(MongoTemplate.class);
-        var active = head("active");
-        when(mongo.findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads")))
-            .thenReturn(null, active);
-        when(mongo.find(any(Query.class), eq(Document.class), eq("snapshots")))
-            .thenReturn(List.of(), List.of(new Document("resource", new Document("spec",
-                new Document("environment", "integration").append("subscription",
-                    new Document("subscriptionId", "subscription").append("type", "event"))))));
-        var localCache = new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
-            mongo, "snapshots", "heads", Duration.ofSeconds(60)));
-        var policyReconciler = new ZooKeeperSubscriptionHeadReconciler(reader, localCache);
-
-        policyReconciler.run();
-        policyReconciler.run();
-        assertFalse(localCache.hasFirstFreshSnapshot());
-        when(reader.readActivate()).thenReturn(Optional.of(active));
-        policyReconciler.run();
-        assertTrue(localCache.hasFirstFreshSnapshot());
-
-        when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
-        policyReconciler.run();
-        policyReconciler.reconcileAfterReconnect();
-
-        assertEquals(LocalSubscriptionCache.Status.STALE, localCache.status());
-        assertTrue(localCache.hasFirstFreshSnapshot());
-        verify(mongo, times(2)).findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq("heads"));
+        assertEquals(1, reconciler.headReadFailureCount());
     }
 
     private static SubscriptionSnapshotHead head(String snapshotId) {

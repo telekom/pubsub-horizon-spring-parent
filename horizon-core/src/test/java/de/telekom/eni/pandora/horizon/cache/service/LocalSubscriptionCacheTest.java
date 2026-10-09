@@ -92,16 +92,13 @@ class LocalSubscriptionCacheTest {
         cache.activate(head);
         assertEquals(LocalSubscriptionCache.Status.STALE, cache.status());
         assertFalse(cache.firstFreshSnapshot().toCompletableFuture().isDone());
-        assertFalse(cache.hasFirstFreshSnapshot());
 
         cache.setActivationHead(head);
         cache.activate(head);
         assertTrue(cache.firstFreshSnapshot().toCompletableFuture().isDone());
-        assertTrue(cache.hasFirstFreshSnapshot());
 
         cache.disconnected();
         assertTrue(cache.firstFreshSnapshot().toCompletableFuture().isDone());
-        assertTrue(cache.hasFirstFreshSnapshot());
     }
 
     @Test
@@ -736,6 +733,28 @@ class LocalSubscriptionCacheTest {
         cache.activate(next);
         assertTrue(cache.isActiveSnapshotUpToDate());
         assertTrue(cache.getById("next-id").isPresent());
+    }
+
+    @Test
+    void discardingPreparedSnapshotForHeadKeepsPreparedSnapshotOfOtherVersion() {
+        var active = snapshotHead("active");
+        var pending = snapshotHead("pending");
+        var failed = snapshotHead("failed");
+        when(snapshotLoader.load(active)).thenReturn(snapshot(active,
+            List.of(subscription("active-id", "production", "event"))));
+        when(snapshotLoader.load(pending)).thenReturn(snapshot(pending,
+            List.of(subscription("pending-id", "production", "event"))));
+        cache.setActivationHead(active);
+        cache.prepare(active);
+        cache.activate(active);
+        cache.prepare(pending);
+
+        cache.discardPreparedSnapshot(failed);
+        assertTrue(cache.hasPendingSnapshot());
+
+        cache.discardPreparedSnapshot(pending);
+        assertFalse(cache.hasPendingSnapshot());
+        assertTrue(cache.getById("active-id").isPresent());
     }
 
     @Test

@@ -44,13 +44,8 @@ public class LocalSubscriptionCacheAutoConfiguration {
     public LocalSubscriptionCacheAutoConfiguration() {
     }
 
-    /** Configures the Curator client and watcher when ZooKeeper is the selected head source. */
+    /** Configures the Curator client and watcher for the only supported head source. */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(
-        prefix = "horizon.cache.local-subscription-cache.zoo-keeper",
-        name = "enabled",
-        havingValue = "true",
-        matchIfMissing = true)
     static class ZooKeeperHeadSourceConfiguration {
 
         /**
@@ -136,8 +131,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
             }
             var reader = new ZooKeeperSubscriptionSnapshotHeadReader(
                 client, new ObjectMapper(), preparedPath, activatePath);
-            var reconciler = new ZooKeeperSubscriptionHeadReconciler(
-                reader, cache, localCacheProperties.getMongoHeadFallbackMode());
+            var reconciler = new ZooKeeperSubscriptionHeadReconciler(reader, cache);
             meterRegistryProvider.ifAvailable(registry -> FunctionCounter.builder(
                     LocalSubscriptionCacheMetrics.FAILURES, reconciler,
                     ZooKeeperSubscriptionHeadReconciler::headReadFailureCount)
@@ -147,27 +141,6 @@ public class LocalSubscriptionCacheAutoConfiguration {
             return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatePath, reconciler,
                 localCacheProperties.getReconcileInterval(), localCacheProperties.getMongoSnapshotSyncJitter(),
                 localCacheProperties.getMongoHeadPollJitter());
-        }
-    }
-
-    /** Configures MongoDB-head polling when ZooKeeper is disabled. */
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(
-        prefix = "horizon.cache.local-subscription-cache.zoo-keeper",
-        name = "enabled",
-        havingValue = "false")
-    static class MongoHeadSourceConfiguration {
-
-        @Bean(initMethod = "start", destroyMethod = "close")
-        @ConditionalOnProperty(
-            prefix = "horizon.cache.local-subscription-cache",
-            name = "enabled",
-            havingValue = "true")
-        public MongoSubscriptionHeadPoller subscriptionHeadPoller(LocalSubscriptionCache cache,
-                CacheProperties cacheProperties) {
-            var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
-            return new MongoSubscriptionHeadPoller(new MongoSubscriptionHeadReconciler(cache),
-                localCacheProperties.getReconcileInterval(), localCacheProperties.getMongoHeadPollJitter());
         }
     }
 
@@ -267,7 +240,6 @@ public class LocalSubscriptionCacheAutoConfiguration {
         return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(
             mongoConfigTemplate,
             localCacheProperties.getSnapshotCollection(),
-            localCacheProperties.getHeadCollection(),
             localCacheProperties.getMongoLoadTimeout()), staleLocalCacheReadGracePeriod);
     }
 

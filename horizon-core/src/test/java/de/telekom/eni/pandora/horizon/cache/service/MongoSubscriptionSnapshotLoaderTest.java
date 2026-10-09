@@ -34,26 +34,11 @@ import static org.mockito.Mockito.when;
 class MongoSubscriptionSnapshotLoaderTest {
 
     private static final String SNAPSHOT_COLLECTION = "subscription-snapshots";
-    private static final String HEAD_COLLECTION = "subscription-head";
     private static final Duration LOAD_TIMEOUT = Duration.ofSeconds(60);
 
     private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
     private final MongoSubscriptionSnapshotLoader loader = new MongoSubscriptionSnapshotLoader(
-            mongoTemplate, SNAPSHOT_COLLECTION, HEAD_COLLECTION, LOAD_TIMEOUT);
-
-    @Test
-    void shouldReadHeadFromConfiguredCollectionWithTimeLimit() {
-        var head = snapshotHead("snapshot-1", 1L);
-        when(mongoTemplate.findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq(HEAD_COLLECTION)))
-                .thenReturn(head);
-
-        assertSame(head, loader.readSnapshotHead());
-
-        var queryCaptor = ArgumentCaptor.forClass(Query.class);
-        verify(mongoTemplate).findOne(queryCaptor.capture(), eq(SubscriptionSnapshotHead.class), eq(HEAD_COLLECTION));
-        assertEquals("head", queryCaptor.getValue().getQueryObject().getString("_id"));
-        assertEquals(LOAD_TIMEOUT.toMillis(), queryCaptor.getValue().getMeta().getMaxTimeMsec());
-    }
+            mongoTemplate, SNAPSHOT_COLLECTION, LOAD_TIMEOUT);
 
     @Test
     void shouldLoadEntriesBySnapshotIdFromConfiguredCollection() {
@@ -66,6 +51,7 @@ class MongoSubscriptionSnapshotLoaderTest {
 
         var queryCaptor = ArgumentCaptor.forClass(Query.class);
         verify(mongoTemplate).find(queryCaptor.capture(), eq(Document.class), eq(SNAPSHOT_COLLECTION));
+        verify(mongoTemplate, never()).findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), any(String.class));
         assertEquals("snapshot-1", queryCaptor.getValue().getQueryObject().getString("snapshotId"));
         assertEquals(LOAD_TIMEOUT.toMillis(), queryCaptor.getValue().getMeta().getMaxTimeMsec());
         assertEquals("snapshot-1", snapshot.snapshotId());
@@ -85,27 +71,11 @@ class MongoSubscriptionSnapshotLoaderTest {
     }
 
     @Test
-    void shouldRejectMissingHead() {
-        when(mongoTemplate.findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq(HEAD_COLLECTION)))
-                .thenReturn(null);
-
-        assertThrows(SubscriptionCacheSnapshotException.class, loader::readSnapshotHead);
-    }
-
-    @Test
-    void shouldRejectZeroDocumentCount() {
-        when(mongoTemplate.findOne(any(Query.class), eq(SubscriptionSnapshotHead.class), eq(HEAD_COLLECTION)))
-                .thenReturn(snapshotHead("snapshot-1", 0L));
-
-        assertThrows(SubscriptionCacheSnapshotException.class, loader::readSnapshotHead);
-    }
-
-    @Test
     void shouldRejectNonPositiveLoadTimeout() {
         assertThrows(IllegalArgumentException.class, () -> new MongoSubscriptionSnapshotLoader(
-                mongoTemplate, SNAPSHOT_COLLECTION, HEAD_COLLECTION, Duration.ZERO));
+                mongoTemplate, SNAPSHOT_COLLECTION, Duration.ZERO));
         assertThrows(IllegalArgumentException.class, () -> new MongoSubscriptionSnapshotLoader(
-                mongoTemplate, SNAPSHOT_COLLECTION, HEAD_COLLECTION, null));
+                mongoTemplate, SNAPSHOT_COLLECTION, null));
     }
 
     @Test

@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
 
+    private static final long NO_RUNNING_TASK = -1;
+
     private final CuratorCache preparedCache;
     private final CuratorCache activateCache;
     private final ZooKeeperSubscriptionHeadReconciler reconciler;
@@ -38,6 +40,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
     private boolean watching;
     private boolean zooKeeperConnected = true;
     private long connectionEpoch;
+    private long runningTaskEpoch = NO_RUNNING_TASK;
     private long preparedEventGeneration;
     private ScheduledFuture<?> pendingPreparedReconcile;
     private ScheduledFuture<?> pendingReconnectReconcile;
@@ -86,6 +89,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         this.preparedCache = CuratorCache.build(client, preparedPath);
         this.activateCache = CuratorCache.build(client, activatePath);
         this.reconciler = Objects.requireNonNull(reconciler, "reconciler must not be null");
+        reconciler.setActivationGate(this::commitIfCurrent);
         this.connectionStateListener = this::connectionStateChanged;
         preparedCache.listenable().addListener((type, oldData, data) ->
             preparedHeadChanged(data == null ? null : data.getData()));
@@ -158,9 +162,14 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         if (watching && zooKeeperConnected) {
             cancelPendingPreparedReconcile();
             var epoch = connectionEpoch;
-            Runnable task = reconnectPending ? reconciler::reconcileAfterReconnect : reconciler;
             cancelPendingReconnectReconcile();
-            executor.execute(() -> runIfConnected(epoch, task));
+            executor.execute(() -> {
+                try {
+                    runIfConnected(epoch, reconciler);
+                } catch (RuntimeException exception) {
+                    log.warn("ZooKeeper ACTIVATE reconciliation failed", exception);
+                }
+            });
         }
     }
 
@@ -240,7 +249,11 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             reconnectPending = false;
             pendingReconnectReconcile = null;
         }
-        runIfConnected(epoch, reconciler::reconcileAfterReconnect);
+        try {
+            runIfConnected(epoch, reconciler);
+        } catch (RuntimeException exception) {
+            log.warn("ZooKeeper reconnect reconciliation failed", exception);
+        }
     }
 
     /**
@@ -259,7 +272,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
     }
 
     /**
-     * Periodically re-reads the active ZooKeeper head, or the MongoDB head while ZooKeeper is disconnected.
+    * Periodically re-reads the active ZooKeeper head while connected.
      */
     private void reconcilePeriodically() {
         long epoch;
@@ -274,8 +287,6 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         try {
             if (zooKeeperConnected) {
                 runIfConnected(epoch, reconciler::reconcileActiveHead);
-            } else {
-                reconciler.reconcileFromMongoHead();
             }
         } catch (RuntimeException exception) {
             log.warn("Periodic subscription head reconciliation failed", exception);
@@ -320,27 +331,35 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             if (!watching || !zooKeeperConnected || epoch != connectionEpoch) {
                 return false;
             }
+            runningTaskEpoch = epoch;
         }
-        task.run();
+        try {
+            task.run();
+        } finally {
+            synchronized (this) {
+                runningTaskEpoch = NO_RUNNING_TASK;
+            }
+        }
         synchronized (this) {
             return watching && zooKeeperConnected && epoch == connectionEpoch;
         }
     }
 
     /**
-     * Reconciles from the MongoDB head after ZooKeeper became unavailable; marks the cache stale if that fallback is disabled.
+     * Commits a reconciler cache change only while the running task's connection epoch is still current.
+     *
+     * <p>Runs under this monitor, so a concurrent {@code SUSPENDED}/{@code LOST} is applied either before the check or
+     * after the commit.</p>
+     *
+     * @param commit cache change to apply
+     * @return {@code true} if the commit ran
      */
-    private void reconcileFromMongoHeadWhileDisconnected() {
-        synchronized (this) {
-            if (!watching || zooKeeperConnected) {
-                return;
-            }
+    private synchronized boolean commitIfCurrent(Runnable commit) {
+        if (!watching || !zooKeeperConnected || runningTaskEpoch != connectionEpoch) {
+            return false;
         }
-        try {
-            reconciler.reconcileFromMongoHead();
-        } catch (RuntimeException exception) {
-            log.warn("MongoDB subscription head reconciliation failed", exception);
-        }
+        commit.run();
+        return true;
     }
 
     /**
@@ -354,25 +373,14 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             if (!watching) {
                 return;
             }
-            if (state == ConnectionState.SUSPENDED) {
+            if (state == ConnectionState.SUSPENDED || state == ConnectionState.LOST) {
                 cancelPendingPreparedReconcile();
                 cancelPendingReconnectReconcile();
                 var wasConnected = zooKeeperConnected;
                 zooKeeperConnected = false;
                 connectionEpoch++;
-                reconciler.suspended();
                 if (wasConnected) {
-                    executor.execute(this::reconcileFromMongoHeadWhileDisconnected);
-                }
-            } else if (state == ConnectionState.LOST) {
-                cancelPendingPreparedReconcile();
-                cancelPendingReconnectReconcile();
-                var wasConnected = zooKeeperConnected;
-                zooKeeperConnected = false;
-                connectionEpoch++;
-                reconciler.lost();
-                if (wasConnected) {
-                    executor.execute(this::reconcileFromMongoHeadWhileDisconnected);
+                    reconciler.disconnected();
                 }
             } else if (state == ConnectionState.RECONNECTED
                     // Curator reports CONNECTED, not RECONNECTED, for the first connection after a failed startup.

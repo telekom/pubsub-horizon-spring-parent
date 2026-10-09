@@ -26,7 +26,6 @@ public class MongoSubscriptionSnapshotLoader {
 
     private final MongoTemplate mongoTemplate;
     private final String snapshotCollectionName;
-    private final String snapshotHeadCollectionName;
     private final Duration loadTimeout;
     private final SubscriptionResourceJsonMapper jsonMapper = new SubscriptionResourceJsonMapper();
 
@@ -35,33 +34,17 @@ public class MongoSubscriptionSnapshotLoader {
      *
      * @param mongoTemplate MongoDB template for the configuration database
      * @param snapshotCollectionName collection containing snapshot entries
-     * @param snapshotHeadCollectionName collection containing the snapshot head
-     * @param loadTimeout server-side time limit for each head read and snapshot load
+    * @param loadTimeout server-side time limit for each snapshot load
      */
     public MongoSubscriptionSnapshotLoader(MongoTemplate mongoTemplate,
                                            String snapshotCollectionName,
-                                           String snapshotHeadCollectionName,
                                            Duration loadTimeout) {
         if (loadTimeout == null || loadTimeout.isNegative() || loadTimeout.toMillis() == 0) {
             throw new IllegalArgumentException("MongoDB load timeout must be at least 1ms");
         }
         this.mongoTemplate = mongoTemplate;
         this.snapshotCollectionName = snapshotCollectionName;
-        this.snapshotHeadCollectionName = snapshotHeadCollectionName;
         this.loadTimeout = loadTimeout;
-    }
-
-    /**
-     * Reads and validates the currently published snapshot head.
-     *
-     * @return the valid snapshot head
-    * @throws SubscriptionCacheSnapshotException if no valid head exists
-     */
-    public SubscriptionSnapshotHead readSnapshotHead() {
-        var query = Query.query(Criteria.where("_id").is("head")).maxTime(loadTimeout);
-        var snapshotHead = mongoTemplate.findOne(query, SubscriptionSnapshotHead.class, snapshotHeadCollectionName);
-        SubscriptionSnapshotHeads.requireValid(snapshotHead);
-        return snapshotHead;
     }
 
     /**
