@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.util.Date;
 
+/** Metadata identifying the complete subscription snapshot currently published as active in MongoDB. */
 @Getter
 @Setter
 @NoArgsConstructor

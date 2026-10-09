@@ -33,7 +33,6 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
         this.subscriptionCache = subscriptionCache;
     }
 
-    @Override
     /**
      * Reads a subscription by ID from the shared cache.
      *
@@ -41,6 +40,7 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
      * @return the subscription if present
      * @throws SubscriptionCacheReadException if the shared cache cannot be read
      */
+    @Override
     public Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException {
         if (subscriptionId == null) {
             return Optional.empty();
@@ -58,7 +58,6 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
         }
     }
 
-    @Override
     /**
      * Reads subscriptions matching an environment and event type.
      *
@@ -67,6 +66,7 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
      * @return matching subscriptions
      * @throws SubscriptionCacheReadException if the shared cache cannot be read
      */
+    @Override
     public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
             throws SubscriptionCacheReadException {
         if (environment == null || eventType == null) {
@@ -92,12 +92,12 @@ public class HazelcastCacheReader implements SubscriptionCacheReader {
         }
     }
 
-    @Override
     /**
      * Delegates readiness to the shared cache service.
      *
      * @return {@code true} when the shared cache is available
      */
+    @Override
     public boolean isReady() {
         try {
             return subscriptionCache.isReady();

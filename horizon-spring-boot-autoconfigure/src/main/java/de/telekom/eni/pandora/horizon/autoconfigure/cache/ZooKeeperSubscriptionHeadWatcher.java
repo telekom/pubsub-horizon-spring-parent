@@ -16,6 +16,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Watches ZooKeeper subscription heads and schedules serialized reconciliation work for one pod.
+ *
+ * <p>The watcher owns event timing and connection transitions; snapshot and head-fallback policy is delegated to the
+ * reconciler.</p>
+ */
 @Slf4j
 public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
 

@@ -39,6 +39,11 @@ public final class SubscriptionResourceJsonMapper {
         this(createObjectMapper());
     }
 
+    /**
+     * Creates a mapper using the supplied Jackson configuration.
+     *
+     * @param objectMapper mapper used to deserialize subscription resources
+     */
     public SubscriptionResourceJsonMapper(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }

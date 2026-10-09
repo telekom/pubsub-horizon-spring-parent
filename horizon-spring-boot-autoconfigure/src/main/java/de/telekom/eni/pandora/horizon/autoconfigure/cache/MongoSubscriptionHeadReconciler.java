@@ -23,6 +23,11 @@ public class MongoSubscriptionHeadReconciler {
     private long consecutiveHeadReadFailures;
     private long consecutiveActivationFailures;
 
+    /**
+     * Creates a reconciler that reads the MongoDB head and activates its referenced snapshot.
+     *
+     * @param cache cache used to read the head, load the snapshot, and publish it
+     */
     public MongoSubscriptionHeadReconciler(LocalSubscriptionCache cache) {
         this.cache = cache;
     }

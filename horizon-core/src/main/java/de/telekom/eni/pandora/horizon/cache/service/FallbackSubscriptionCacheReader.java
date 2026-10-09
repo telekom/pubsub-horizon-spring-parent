@@ -13,11 +13,11 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
-@Slf4j
 /**
  * Subscription reader that tries a primary source first and falls back to a secondary source
  * when the primary is unavailable or fails during a read.
  */
+@Slf4j
 public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader {
 
     private final SubscriptionCacheReader primary;
@@ -36,6 +36,13 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         this(primary, fallback, () -> true);
     }
 
+    /**
+     * Creates a primary/fallback chain with a condition controlling whether the primary may serve reads.
+     *
+     * @param primary source preferred for reads
+     * @param fallback source used when the primary is disallowed, not ready, or fails
+     * @param primaryReadAllowed condition that must permit the primary before it is queried
+     */
     public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback,
                                            BooleanSupplier primaryReadAllowed) {
         this(primary, fallback, primaryReadAllowed, () -> { });
@@ -57,7 +64,6 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         this.fallbackReadListener = fallbackReadListener;
     }
 
-    @Override
     /**
      * Reads by ID, falling back when the primary cannot serve the request.
      *
@@ -65,6 +71,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      * @return the subscription if present
      * @throws SubscriptionCacheReadException if both readers fail
      */
+    @Override
     public Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException {
         if (isPrimaryReady()) {
             try {
@@ -85,7 +92,6 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         }
     }
 
-    @Override
     /**
      * Reads by environment and event type, falling back when the primary cannot serve the request.
      *
@@ -94,6 +100,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      * @return matching subscriptions
      * @throws SubscriptionCacheReadException if both readers fail
      */
+    @Override
     public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
             throws SubscriptionCacheReadException {
         if (isPrimaryReady()) {
@@ -115,12 +122,12 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         }
     }
 
-    @Override
     /**
      * Reports readiness when either source can serve requests.
      *
      * @return {@code true} if the primary or fallback is ready
      */
+    @Override
     public boolean isReady() {
         if (isPrimaryReady()) {
             return true;

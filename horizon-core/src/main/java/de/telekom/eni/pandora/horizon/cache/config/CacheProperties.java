@@ -29,6 +29,7 @@ public class CacheProperties {
 
     private Map<String, String> attributes = new HashMap<>();
 
+    /** Configuration properties for the pod-local subscription snapshot cache. */
     @Getter
     @Setter
     public static class LocalSubscriptionCacheProperties {
@@ -68,6 +69,7 @@ public class CacheProperties {
         private ZooKeeperProperties zooKeeper = new ZooKeeperProperties();
     }
 
+    /** ZooKeeper connection settings and ZNode paths for subscription snapshot heads. */
     @Getter
     @Setter
     public static class ZooKeeperProperties {
@@ -89,11 +91,13 @@ public class CacheProperties {
         private Duration sessionTimeout = Duration.ofSeconds(30);
     }
 
+    /** Selects the read source used when the local snapshot cannot serve requests. */
     public enum LocalSubscriptionCacheFallback {
         HAZELCAST_WITH_MONGO_FALLBACK,
         NONE
     }
 
+    /** Controls whether the MongoDB head may replace an unavailable ZooKeeper ACTIVATE head. */
     public enum MongoHeadFallbackMode {
         STARTUP_ONLY,
         ALWAYS,

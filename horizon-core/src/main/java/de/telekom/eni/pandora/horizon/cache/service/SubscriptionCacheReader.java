@@ -30,10 +30,10 @@ public interface SubscriptionCacheReader {
      *
      * @param environment subscription environment
      * @param eventType subscription event type
-    * @return matching subscriptions; treat each resource and its nested objects as read-only
-         * @throws SubscriptionCacheReadException if the underlying cache cannot be read
+     * @return matching subscriptions; treat each resource and its nested objects as read-only
+     * @throws SubscriptionCacheReadException if the underlying cache cannot be read
      */
-        List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
+    List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
             throws SubscriptionCacheReadException;
 
     /**

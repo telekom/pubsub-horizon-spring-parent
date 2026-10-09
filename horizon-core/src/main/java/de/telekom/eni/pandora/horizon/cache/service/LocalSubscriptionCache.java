@@ -24,9 +24,10 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Pod-local subscription cache backed by persisted subscription snapshots.
  *
- * <p>Snapshots are loaded into an immutable set of indexes during
- * {@link #prepare(SubscriptionSnapshotHead)}. A prepared snapshot becomes visible
- * to readers only after a successful call to {@link #activate(SubscriptionSnapshotHead)}.</p>
+ * <p>Snapshots are loaded into structurally immutable lookup indexes during
+ * {@link #prepare(SubscriptionSnapshotHead)}. The contained {@link SubscriptionResource} objects and their nested
+ * models remain mutable and are shared with readers; consumers must treat them as read-only. A prepared snapshot
+ * becomes visible to readers only after a successful call to {@link #activate(SubscriptionSnapshotHead)}.</p>
  */
 @Slf4j
 public class LocalSubscriptionCache implements SubscriptionCacheReader {
@@ -43,8 +44,11 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     private volatile long lastSnapshotLoadNanos;
     private final AtomicLong activationFailures = new AtomicLong();
 
+    /** Freshness state of the active local snapshot. */
     public enum Status {
-        UNINITIALIZED, FRESH, STALE
+        UNINITIALIZED,
+        FRESH,
+        STALE
     }
 
     /**
@@ -57,7 +61,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * @param activatedAt last successful activation of the active snapshot
      * @param expectedSnapshotId snapshot ID of the expected (activation) head
      * @param pendingSnapshotId ID of a prepared snapshot that is not yet active
-     * @param staleSince time since when the cache is stale
+    * @param staleSince instant when the cache most recently became stale; {@code null} unless status is STALE
      */
     public record Diagnostics(Status status, boolean localReadsAllowed, String activeSnapshotId, int subscriptionCount,
                               Instant activatedAt, String expectedSnapshotId, String pendingSnapshotId,
@@ -136,13 +140,21 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     /**
      * Creates a cache backed by persisted subscription snapshots.
      *
-     * @param snapshotLoader loader for snapshot metadata and entries
+    * @param snapshotLoader loader for snapshot metadata and entries
+    * @throws NullPointerException if {@code snapshotLoader} is {@code null}
      */
     public LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader) {
         this(snapshotLoader, Duration.ZERO);
     }
 
-    /** Creates a cache whose stale snapshot may serve reads for the given grace period. */
+    /**
+     * Creates a cache whose stale snapshot may serve reads for the given grace period.
+     *
+     * @param snapshotLoader loader for snapshot metadata and entries
+     * @param staleCacheReadGracePeriod duration for which stale local data may serve reads; zero disables stale reads
+    * @throws NullPointerException if the loader or grace period is {@code null}
+    * @throws IllegalArgumentException if the grace period is negative
+     */
     public LocalSubscriptionCache(MongoSubscriptionSnapshotLoader snapshotLoader, Duration staleCacheReadGracePeriod) {
         this(snapshotLoader, staleCacheReadGracePeriod, Clock.systemUTC());
     }
@@ -158,13 +170,13 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     }
 
     /**
-     * Loads and prepares the persisted snapshot identified by the supplied head.
-     * Preparation is skipped when all head metadata matches the active or the already
-     * prepared snapshot. The active snapshot remains unchanged, including its
-    * freshness while a newer activation-head snapshot is being loaded.
+    * Loads and prepares the persisted snapshot identified by the supplied head without changing the active snapshot.
+    * Preparation is skipped when the supplied version matches the active or already prepared version according to
+    * {@link SubscriptionSnapshotHeads#isSameSnapshot(SubscriptionSnapshotHead, SubscriptionSnapshotHead)}. The
+    * active snapshot and its current freshness status are retained while a newer head is being loaded.
      *
      * @param snapshotHead metadata identifying the snapshot to load
-     * @throws IllegalArgumentException if the head has no snapshot ID
+    * @throws IllegalArgumentException if the head is {@code null} or has no non-blank snapshot ID
      * @throws SubscriptionCacheSnapshotException if the snapshot cannot be validated
      */
     public synchronized void prepare(SubscriptionSnapshotHead snapshotHead) {
@@ -196,38 +208,56 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * Reads the currently published snapshot metadata.
      *
      * @return the current snapshot head
+    * @throws SubscriptionCacheSnapshotException if no valid MongoDB head is available
      */
     public SubscriptionSnapshotHead readSnapshotHead() {
         return snapshotLoader.readSnapshotHead();
     }
 
-    /** Number of successfully loaded snapshots. */
+    /**
+     * Returns the number of snapshots successfully loaded and prepared by this cache.
+     *
+     * @return successful snapshot load count
+     */
     public long snapshotLoadCount() {
         return snapshotLoads.get();
     }
 
-    /** Total time spent loading snapshots successfully, in nanoseconds. */
+    /**
+     * Returns the cumulative time spent loading snapshots successfully.
+     *
+     * @return total successful snapshot-load time in nanoseconds
+     */
     public long snapshotLoadTotalNanos() {
         return snapshotLoadNanos.get();
     }
 
-    /** Duration of the last successful snapshot load, in nanoseconds; 0 if none. */
+    /**
+     * Returns the duration of the most recent successful snapshot load.
+     *
+     * @return last successful load duration in nanoseconds, or {@code 0} if no load has succeeded
+     */
     public long lastSnapshotLoadNanos() {
         return lastSnapshotLoadNanos;
     }
 
-    /** Number of failed snapshot activations, including failed snapshot loads. */
+    /**
+     * Returns the number of failed activation attempts, including failures while loading the requested snapshot.
+     *
+     * @return failed activation count
+     */
     public long activationFailureCount() {
         return activationFailures.get();
     }
 
     /**
-     * Atomically publishes the prepared snapshot when all snapshot version fields
-     * match the expected head. An already active matching snapshot is reused without
-     * touching a pending prepared snapshot.
+    * Atomically publishes a prepared snapshot when its identity matches the supplied head. Identity always compares
+    * {@code snapshotId} and {@code documentCount}; {@code revision} and {@code sourceHash} are compared only when set
+    * on both versions, and {@code createdAt} is not part of identity. An already active matching snapshot is reused
+    * without touching a pending prepared snapshot.
      *
-     * @param snapshotHead expected prepared snapshot head
-     * @throws IllegalArgumentException if the snapshot head is missing a snapshot ID
+    * @param snapshotHead validated head authorizing the snapshot to activate; it must have a non-blank snapshot ID
+    * @throws IllegalArgumentException if the snapshot head is {@code null} or has no non-blank snapshot ID
      * @throws IllegalStateException if the prepared snapshot does not match the requested head, or no snapshot was prepared
      * @throws SubscriptionCacheSnapshotException if the prepared snapshot is empty
      */
@@ -262,11 +292,26 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             prepared.snapshotId(), prepared.subscriptionsById().size());
     }
 
-    /** Completes when the cache becomes FRESH for the first time. */
+    /**
+     * Returns a stage that completes when this cache first reaches FRESH.
+     *
+     * <p>The stage stays completed after later transitions to STALE. It represents a first-fresh milestone, not the
+     * current cache status or completion of the initial head read.</p>
+     *
+     * @return stage completed by the first FRESH activation
+     */
     public CompletionStage<Void> firstFreshSnapshot() {
         return firstFreshSnapshot.minimalCompletionStage();
     }
 
+    /**
+     * Indicates whether this cache has reached FRESH at least once since construction.
+     *
+     * <p>The result remains {@code true} after later transitions to STALE; it is a one-time startup milestone, not the
+     * current freshness status.</p>
+     *
+     * @return {@code true} if the first fresh snapshot has been activated
+     */
     public boolean hasFirstFreshSnapshot() {
         return firstFreshSnapshot.isDone();
     }
@@ -277,13 +322,26 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
     }
 
-    /** Sets the expected active head; the cache is FRESH only while its active snapshot matches it. */
+    /**
+     * Sets the complete head version against which a subsequent activation is evaluated.
+     *
+     * <p>This method does not load or activate a snapshot and does not immediately change the current status. In
+     * particular, an existing FRESH snapshot remains FRESH while a newer expected version is being prepared.</p>
+     *
+     * @param head expected active snapshot head
+     * @throws SubscriptionCacheSnapshotException if the head is invalid
+     */
     public void setActivationHead(SubscriptionSnapshotHead head) {
         var activationHeadVersion = completeVersion(head);
         cacheState.updateAndGet(previous -> previous.withActivationHeadVersion(activationHeadVersion));
     }
 
-    /** Marks the cache STALE if the failed head is still the expected head. */
+    /**
+     * Records a failed activation attempt and marks the cache STALE if this head is still expected.
+     *
+     * @param head head whose activation failed
+     * @throws SubscriptionCacheSnapshotException if the head is invalid
+     */
     public void activationFailed(SubscriptionSnapshotHead head) {
         activationFailures.incrementAndGet();
         var failedVersion = completeVersion(head);
@@ -291,13 +349,19 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         cacheState.updateAndGet(previous -> previous.withActivationFailure(failedVersion, now));
     }
 
-    /** Clears the expected head because no head source is available; an active snapshot becomes STALE. */
+    /**
+     * Clears the expected head because no head source is available.
+     *
+     * <p>An existing active snapshot becomes STALE; a cache without an active snapshot remains UNINITIALIZED.</p>
+     */
     public void disconnected() {
         var now = clock.instant();
         cacheState.updateAndGet(previous -> previous.clearActivationHeadVersion(now));
     }
 
-    /** Marks an initialized cache STALE without clearing the expected head. */
+    /**
+     * Marks an active cache STALE without clearing the expected head; an uninitialized cache remains UNINITIALIZED.
+     */
     public void suspended() {
         var now = clock.instant();
         cacheState.updateAndGet(previous -> previous.withStaleStatus(now));
@@ -323,22 +387,29 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             state.staleSince());
     }
 
-    /** Returns the current freshness status of the local snapshot. */
+    /**
+     * Returns the current freshness status of the local snapshot.
+     *
+     * @return current cache status
+     */
     public Status status() {
         return cacheState.get().status();
     }
 
     /**
-     * Indicates whether the active snapshot matches the current activation head.
+    * Indicates whether the cache's current status is FRESH.
      *
-     * @return {@code true} if the active snapshot is current
+    * <p>This reports the status flag, not a direct comparison with the latest expected head. The cache may remain FRESH
+    * while a newer head is being prepared.</p>
+    *
+    * @return {@code true} if the current cache status is FRESH
      */
     public boolean isActiveSnapshotUpToDate() {
         return status() == Status.FRESH;
     }
 
     /**
-     * Indicates whether the active snapshot was loaded from the supplied head.
+    * Indicates whether the active snapshot has the same identity as the supplied head, regardless of freshness.
      *
      * @param head head to compare with the active snapshot
      * @return {@code true} if the head references the active snapshot (see {@link SubscriptionSnapshotHeads#isSameSnapshot})
@@ -349,7 +420,11 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             && state.activeSnapshot().version().matches(SnapshotVersion.from(head));
     }
 
-    /** Indicates whether an expected head is known and the active snapshot does not reference it. */
+    /**
+     * Indicates whether an expected head is known and the active snapshot has a different identity.
+     *
+     * @return {@code true} if an expected head is known and the active snapshot does not match it
+     */
     public boolean isBehindActivationHead() {
         var state = cacheState.get();
         return state.activationHeadVersion() != null
@@ -359,7 +434,10 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     /**
      * Indicates whether the local snapshot may currently serve reads.
      *
-     * @return {@code true} if local reads are allowed
+    * <p>Reads are allowed for a FRESH snapshot, or for a STALE snapshot while its configured grace period has not
+    * expired. UNINITIALIZED caches cannot serve local reads.</p>
+    *
+    * @return {@code true} if local reads are allowed at the current time
      */
     public boolean canServeLocalReads() {
         return canServeLocalReads(clock.instant());
@@ -409,6 +487,12 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         return SnapshotVersion.from(SubscriptionSnapshotHeads.requireValid(head));
     }
 
+    /**
+     * Looks up a subscription in the active local snapshot.
+     *
+    * @param subscriptionId subscription identifier; {@code null} returns empty
+    * @return the matching shared resource, or empty when absent; callers must not mutate the resource
+     */
     @Override
     public Optional<SubscriptionResource> getById(String subscriptionId) {
         if (subscriptionId == null) {
@@ -419,6 +503,14 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         return result;
     }
 
+    /**
+     * Looks up subscriptions in the active local snapshot by environment and event type.
+     *
+     * @param environment subscription environment
+     * @param eventType subscription event type
+    * @return matching shared resources, or an empty list when either argument is {@code null} or no entries match;
+    *         callers must not mutate the resources
+     */
     @Override
     public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType) {
         if (environment == null || eventType == null) {

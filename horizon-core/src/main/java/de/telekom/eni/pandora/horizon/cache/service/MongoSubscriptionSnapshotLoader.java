@@ -71,7 +71,7 @@ public class MongoSubscriptionSnapshotLoader {
      * @return an indexed, immutable snapshot representation
     * @throws IllegalArgumentException if the head is {@code null}
     * @throws SubscriptionCacheSnapshotException if the head is invalid or the entry count differs
-    *                                       from the expected document count
+    *                                            from the expected document count
      */
     public IndexedSubscriptionSnapshot load(SubscriptionSnapshotHead snapshotHead) {
         if (snapshotHead == null) {

@@ -31,10 +31,20 @@ import java.time.temporal.ChronoUnit;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/**
+ * Configures the pod-local subscription cache, its head source, and related health, metrics, and startup beans.
+ *
+ * <p>The local cache is created only when {@code horizon.cache.local-subscription-cache.enabled=true}.</p>
+ */
 @Slf4j
 @Configuration
 public class LocalSubscriptionCacheAutoConfiguration {
 
+    /** Creates the local subscription cache auto-configuration. */
+    public LocalSubscriptionCacheAutoConfiguration() {
+    }
+
+    /** Configures the Curator client and watcher when ZooKeeper is the selected head source. */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(
         prefix = "horizon.cache.local-subscription-cache.zoo-keeper",
@@ -43,6 +53,13 @@ public class LocalSubscriptionCacheAutoConfiguration {
         matchIfMissing = true)
     static class ZooKeeperHeadSourceConfiguration {
 
+        /**
+         * Creates and starts the Curator client for the local subscription cache.
+         *
+         * @param cacheProperties local cache and ZooKeeper connection settings
+         * @return started Curator client, closed by the Spring context
+         * @throws IllegalArgumentException if the connect string or configured timeouts are invalid
+         */
         @Bean(destroyMethod = "close")
         @ConditionalOnMissingBean(CuratorFramework.class)
         @ConditionalOnProperty(
@@ -69,6 +86,12 @@ public class LocalSubscriptionCacheAutoConfiguration {
             return client;
         }
 
+        /**
+         * Registers a gauge reporting whether the ZooKeeper head source is connected.
+         *
+         * @param clientProvider provider for the configured Curator client
+         * @return meter binder for the ZooKeeper connection gauge
+         */
         @Bean
         @ConditionalOnProperty(
             prefix = "horizon.cache.local-subscription-cache",
@@ -83,6 +106,16 @@ public class LocalSubscriptionCacheAutoConfiguration {
                 .register(registry));
         }
 
+        /**
+         * Creates the ZooKeeper head reader, reconciler, and lifecycle-managed watcher.
+         *
+         * @param client Curator client for the configured ensemble
+         * @param cache pod-local subscription cache
+         * @param cacheProperties paths, fallback policy, and reconciliation timing settings
+         * @param meterRegistryProvider optional registry for ZooKeeper head-read failure metrics
+         * @return watcher started and closed by the Spring context
+         * @throws IllegalArgumentException if the PREPARED and ACTIVATE paths are not distinct absolute paths
+         */
         @Bean(initMethod = "start", destroyMethod = "close")
         @ConditionalOnProperty(
             prefix = "horizon.cache.local-subscription-cache",
@@ -117,6 +150,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
         }
     }
 
+    /** Configures MongoDB-head polling when ZooKeeper is disabled. */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(
         prefix = "horizon.cache.local-subscription-cache.zoo-keeper",
@@ -152,6 +186,14 @@ public class LocalSubscriptionCacheAutoConfiguration {
         }
     }
 
+    /**
+     * Creates the startup barrier for configurations that require a fresh local snapshot.
+     *
+     * @param cache local cache whose first FRESH snapshot completes the barrier
+     * @param cacheProperties startup requirement and timeout settings
+     * @return application runner that waits for the first fresh snapshot when required
+     * @throws IllegalArgumentException if the configured timeout is negative or sub-millisecond
+     */
     @Bean
     @ConditionalOnProperty(
         prefix = "horizon.cache.local-subscription-cache",
@@ -195,6 +237,14 @@ public class LocalSubscriptionCacheAutoConfiguration {
         };
     }
 
+    /**
+     * Creates the MongoDB-backed local cache when no custom cache bean is provided.
+     *
+     * @param mongoTemplateProvider provider for the qualified MongoDB configuration template
+     * @param cachePropertiesProvider provider for local cache collection and timeout settings
+     * @return configured local cache
+     * @throws IllegalStateException if the required MongoDB template is unavailable
+     */
     @Bean
     @ConditionalOnMissingBean(LocalSubscriptionCache.class)
     @ConditionalOnProperty(
@@ -221,6 +271,14 @@ public class LocalSubscriptionCacheAutoConfiguration {
             localCacheProperties.getMongoLoadTimeout()), staleLocalCacheReadGracePeriod);
     }
 
+    /**
+     * Creates a diagnostic health indicator for the local cache and effective reader.
+     *
+     * @param localSubscriptionCache local cache state to report
+     * @param subscriptionCacheReaderProvider provider for the effective reader, including fallback
+     * @param cachePropertiesProvider provider for the configured fallback/read policy
+     * @return local cache health indicator
+     */
     @Bean
     @ConditionalOnMissingBean(LocalSubscriptionCacheHealthIndicator.class)
     @ConditionalOnProperty(
@@ -235,6 +293,12 @@ public class LocalSubscriptionCacheAutoConfiguration {
             cachePropertiesProvider.getIfAvailable(CacheProperties::new).getLocalSubscriptionCache());
     }
 
+    /**
+     * Creates the local cache metrics binder when no custom metrics bean is provided.
+     *
+     * @param localSubscriptionCache cache state and counters to expose
+     * @return local cache metrics binder
+     */
     @Bean
     @ConditionalOnMissingBean(LocalSubscriptionCacheMetrics.class)
     @ConditionalOnProperty(

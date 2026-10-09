@@ -10,10 +10,16 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Date;
 
+/** Parses the ZooKeeper JSON representation of a subscription snapshot head. */
 public class ZooKeeperSubscriptionSnapshotHeadParser {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * Creates a parser using the supplied JSON mapper.
+     *
+     * @param objectMapper mapper used to read the head payload
+     */
     public ZooKeeperSubscriptionSnapshotHeadParser(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }

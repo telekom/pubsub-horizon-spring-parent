@@ -36,32 +36,56 @@ classDiagram
         +isReady()
     }
     class LocalSubscriptionCache {
-        -activeSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
-        -preparedSnapshot: AtomicReference~IndexedSubscriptionSnapshot~
+        -AtomicReference~CacheState~ cacheState
+        -CompletableFuture~Void~ firstFreshSnapshot
         +prepare(snapshotHead)
         +activate(snapshotHead)
+        +setActivationHead(head)
+        +activationFailed(head)
+        +disconnected()
+        +status()
+        +firstFreshSnapshot()
+        +hasFirstFreshSnapshot()
+    }
+    class CacheState {
+        <<record>>
+        -IndexedSubscriptionSnapshot activeSnapshot
+        -IndexedSubscriptionSnapshot preparedSnapshot
+        -SnapshotVersion activationHeadVersion
+        -Status status
+        -boolean activationHeadMustMatch
+        -Instant staleSince
+    }
+    class Status {
+        <<enumeration>>
+        UNINITIALIZED
+        FRESH
+        STALE
     }
     class HazelcastCacheReader
     class FallbackSubscriptionCacheReader
     class IndexedSubscriptionSnapshot {
-        -metadata: SnapshotMetadata
+        <<record>>
+        -SnapshotVersion version
         -subscriptionsById
         -subscriptionsByEnvironmentAndEventType
-        +empty()
-        +fromSnapshotEntries(snapshotHead, entries)
-        +snapshotId()
-        +getById(subscriptionId)
-        +findByEnvironmentAndEventType(environment, eventType)
-        +getAll()
-        +isEmpty()
+        ~empty()$
+        ~fromSnapshotEntries(snapshotHead, entries)$
+        ~snapshotId()
+        ~getById(subscriptionId)
+        ~findByEnvironmentAndEventType(environment, eventType)
+        ~getAll()
+        ~isEmpty()
     }
-    class SnapshotMetadata {
-        +id
-        +snapshotId
-        +documentCount
-        +revision
-        +sourceHash
-        +createdAt
+    class SnapshotVersion {
+        <<record>>
+        -String snapshotId
+        -Long documentCount
+        -Long revision
+        -String sourceHash
+        -Instant createdAt
+        ~from(snapshotHead)$
+        ~matches(other)
     }
     class SubscriptionSnapshotHead {
         +id
@@ -97,9 +121,21 @@ classDiagram
         +parse(data)
     }
     class ZooKeeperSubscriptionHeadReconciler {
+        -MongoHeadFallbackMode mongoHeadFallbackMode
+        -boolean zooKeeperActivationAllowed
         +run()
         +reconcileActiveHead()
+        +preparePreparedEvent(data)
+        +suspended()
+        +lost()
+        +reconcileAfterReconnect()
         +reconcileFromMongoHead()
+    }
+    class MongoHeadFallbackMode {
+        <<enumeration>>
+        STARTUP_ONLY
+        ALWAYS
+        NEVER
     }
     class MongoSubscriptionHeadReconciler {
         +reconcile()
@@ -112,10 +148,14 @@ classDiagram
     SubscriptionCacheReader <|.. LocalSubscriptionCache
     SubscriptionCacheReader <|.. HazelcastCacheReader
     SubscriptionCacheReader <|.. FallbackSubscriptionCacheReader
-    LocalSubscriptionCache *-- IndexedSubscriptionSnapshot
+    LocalSubscriptionCache *-- CacheState : atomic state
+    CacheState --> "1" IndexedSubscriptionSnapshot : activeSnapshot
+    CacheState --> "0..1" IndexedSubscriptionSnapshot : preparedSnapshot
+    CacheState --> "0..1" SnapshotVersion : activationHeadVersion
+    CacheState --> Status : freshness
     IndexedSubscriptionSnapshot *-- EnvironmentEventTypeKey
-    IndexedSubscriptionSnapshot *-- SnapshotMetadata
-    SnapshotMetadata ..> SubscriptionSnapshotHead : created from
+    IndexedSubscriptionSnapshot --> "0..1" SnapshotVersion : version
+    SnapshotVersion ..> SubscriptionSnapshotHead : created from
     LocalSubscriptionCache --> MongoSubscriptionSnapshotLoader
     HazelcastCacheReader --> JsonCacheService~SubscriptionResource~
     FallbackSubscriptionCacheReader --> LocalSubscriptionCache : primary
@@ -125,15 +165,24 @@ classDiagram
     ZooKeeperSubscriptionHeadReconciler --> ZooKeeperSubscriptionSnapshotHeadReader : read heads
     ZooKeeperSubscriptionSnapshotHeadReader --> ZooKeeperSubscriptionSnapshotHeadParser : validate payload
     ZooKeeperSubscriptionHeadReconciler --> LocalSubscriptionCache : prepare/activate ZooKeeper head
-    ZooKeeperSubscriptionHeadReconciler --> MongoSubscriptionHeadReconciler : head fallback
+    ZooKeeperSubscriptionHeadReconciler --> MongoHeadFallbackMode : head authority policy
+    ZooKeeperSubscriptionHeadReconciler --> MongoSubscriptionHeadReconciler : policy-permitted head fallback
     MongoSubscriptionHeadPoller --> MongoSubscriptionHeadReconciler : startup, periodic
     MongoSubscriptionHeadReconciler --> LocalSubscriptionCache : prepare/activate MongoDB head
 ```
 
-`LocalSubscriptionCache` verwaltet `IndexedSubscriptionSnapshot`-Instanzen und hält dabei zwei Referenzen:
+`LocalSubscriptionCache` hält eine einzige `AtomicReference<CacheState>`. Der private, unveränderliche
+`CacheState`-Record bündelt die Snapshot-Referenzen, die erwartete `activationHeadVersion`, den `Status`,
+`activationHeadMustMatch` und `staleSince`:
 
 - `preparedSnapshot` enthält den neu geladenen und validierten Snapshot. Er ist für Leser noch nicht sichtbar.
 - `activeSnapshot` enthält den aktuell veröffentlichten Snapshot, den die Leseoperationen verwenden.
+
+`SnapshotVersion` ist ein in `IndexedSubscriptionSnapshot` verschachtelter Record mit der Snapshot-Identität;
+er enthält keine MongoDB-Head-Dokument-ID. `EnvironmentEventTypeKey` ist ebenfalls dort verschachtelt.
+`Status` gehört zu `LocalSubscriptionCache`, `MongoHeadFallbackMode` zu `CacheProperties`.
+Das separate `firstFreshSnapshot`-Future hält fest, ob der Cache jemals `FRESH` war; ein späterer Wechsel zu
+`STALE` setzt dieses Signal nicht zurück. Der Reconciler verwendet es für den dauerhaften `STARTUP_ONLY`-Cutoff.
 
 `prepare(snapshotHead)` erstellt aus den Snapshot-Einträgen einen neuen `IndexedSubscriptionSnapshot` mit den vorbereiteten
 Lookup-Indizes. `activate(snapshotHead)` veröffentlicht diesen vorbereiteten Snapshot anschließend atomar als aktiven Snapshot.
@@ -262,11 +311,23 @@ The normal publication path has distinct responsibilities:
 
 | Component | Responsibility in a snapshot update |
 |---|---|
-| Quasar (publisher) | Writes a complete versioned snapshot to MongoDB, then publishes the corresponding PREPARED and ACTIVATE heads. |
-| MongoDB | Stores the versioned snapshot entries and a head that refers to the snapshot currently considered active. |
-| ZooKeeper | Stores only the compact PREPARED and ACTIVATE heads; it does not store subscription entries. |
-| Pod watcher and reconciler | Observe heads, preload candidates, resolve the authoritative version, and ask the local cache to activate it. |
-| `LocalSubscriptionCache` | Holds an invisible prepared candidate and the active snapshot; switches the active reference atomically. |
+| Quasar (publisher) | Writes a complete versioned snapshot to MongoDB, then publishes PREPARED followed by ACTIVATE. |
+| MongoDB | Stores the complete snapshot entries and the head for the snapshot currently considered active. |
+| ZooKeeper | Stores only the compact PREPARED and ACTIVATE heads and emits watch events; it does not store subscription entries. |
+| Watcher (per pod) | Decides **when** work runs: observes head and connection events, coalesces/delays PREPARED work, and schedules reconciliation. |
+| Reconciler (per pod) | Decides **what** happens: reads heads, treats ACTIVATE as authoritative, reuses a matching prepared candidate or loads the ACTIVATE version, and applies the configured MongoDB-head fallback policy. |
+| `LocalSubscriptionCache` (per pod) | Keeps the prepared candidate invisible to readers and the current active snapshot; publishes a new snapshot atomically. |
+
+```mermaid
+flowchart LR
+    Q[Quasar] -->|1. write snapshot| M[(MongoDB)]
+    Q -->|2. prepared / activated| Z[(ZooKeeper)]
+    Z -->|events| W[Watcher]
+    W -->|tasks| R[Reconciler]
+    R -->|read heads| Z
+    R -->|load snapshot| M
+    R -->|prepare / activate| C[LocalSubscriptionCache]
+```
 
 A normal update proceeds as follows:
 
@@ -500,61 +561,72 @@ reconcilers, while `LocalSubscriptionCache` owns the active snapshot and its fre
 | `MongoSubscriptionHeadReconciler` | Reads the MongoDB head and prepares/activates its snapshot; shared by the ZooKeeper fallback and MongoDB-only polling mode. |
 | `LocalSubscriptionCache` | Loads snapshot entries from MongoDB, validates and indexes them, atomically publishes snapshots, and tracks `UNINITIALIZED`/`FRESH`/`STALE`. |
 
-```mermaid
-flowchart RL
-    readers["Subscription consumers"]
-    cache["LocalSubscriptionCache<br/>prepared and active snapshots"] --> readers
-
-    reconciler["Head reconciler<br/>ACTIVATE is authoritative"] -- "PREPARED builds candidate;<br/>matching ACTIVATE publishes it" --> cache
-    mongo["MongoDB<br/>snapshot entries + optional head"] --> reconciler
-    watcher["Watcher<br/>observes triggers and coordinates work"] --> reconciler
-
-    prepared["ZooKeeper PREPARED<br/>preload candidate only"] --> watcher
-    activate["ZooKeeper ACTIVATE<br/>authorizes active version"] --> watcher
-    triggers["Startup / events / periodic check / reconnect"] --> watcher
-    disconnect["SUSPENDED / LOST"] --> watcher
-```
-
-The high-level watcher flow is:
+The watcher trigger flow and component routing are shown below.
 
 ```mermaid
-flowchart RL
-    subgraph watcherTriggers["Watcher triggers"]
-        startup["Startup / initial reconciliation"]
-        prepared["PREPARED change"]
-        activate["ACTIVATE change"]
-        periodic["Periodic reconciliation"]
-        connection["SUSPENDED / LOST / RECONNECTED"]
-        shutdown["Spring shutdown"]
+flowchart LR
+    subgraph Triggers
+        S[Pod start]
+        A[ACTIVATE changed]
+        C[RECONNECTED]
+        P[PREPARED changed]
+        D[SUSPENDED / LOST]
+        T[Periodic reconciliation]
+        X[Pod shutdown]
     end
 
-    readers["Subscription consumers"]
-    cache["Local cache<br/>prepared + active snapshot"] --> readers
-    loader["Snapshot loader<br/>validates and builds snapshot"] --> cache
-    mongoData["MongoDB snapshot entries"] --> loader
+    subgraph Thread["Watcher thread: tasks run one after another"]
+        FULL[Read current heads and reconcile]
+        PRE[Schedule preload]
+        ACTIVE[Reconcile active head]
+        FALLBACK[Reconcile from MongoDB head]
+        CLOSE[Cancel pending work and stop executor]
+    end
 
-    reconciler["Head reconciler<br/>ACTIVATE is authoritative"] --> candidateMatch{"Matching PREPARED<br/>snapshot already loaded?"}
-    candidateMatch -- Yes --> cache
-    candidateMatch -- No --> loader
-    reconciler -- "PREPARED: preload candidate" --> loader
-    loader --> preparedSnapshot["Prepared candidate<br/>not visible to readers"]
-    preparedSnapshot --> candidateMatch
-    mongoHead["MongoDB head<br/>optional fallback"] --> reconciler
-    watcher["Watcher<br/>coordinates head and timer triggers"] --> reconciler
-    closed["Close watches and scheduler"]
+    subgraph ZK["ZooKeeper (heads only)"]
+        ZP["prepared"]
+        ZA["activated"]
+    end
 
-    startup --> watcher
-    prepared -- "PREPARED ZNode" --> watcher
-    activate -- "ACTIVATE ZNode" --> watcher
-    periodic --> watcher
-    connection --> watcher
-    shutdown --> watcher --> closed
+    RECONCILER[ZooKeeperSubscriptionHeadReconciler]
+    LOADER[MongoSubscriptionSnapshotLoader]
+    subgraph Mongo["MongoDB"]
+        MH[(Snapshot head<br/>...-head)]
+        ME[(Snapshot entries<br/>...-snapshots)]
+    end
+    CACHE[LocalSubscriptionCache]
+    SERVICES["Galaxy / Comet /<br/>Starlight / Pulsar"]
+    STOP[Close Curator caches]
+
+    S -->|immediately| FULL
+    A -->|immediately| FULL
+    C -->|mongo-snapshot-sync-jitter: 10s<br/>random delay 0-10 s| FULL
+    P -->|mongo-snapshot-sync-jitter: 10s<br/>random delay 0-10 s| PRE
+    D -->|once| FALLBACK
+    T -->|connected<br/>reconcile-interval: 60s<br/>first offset: mongo-head-poll-jitter: 10s| ACTIVE
+    T -->|disconnected| FALLBACK
+    X --> CLOSE --> STOP
+
+    ZK -->|watch events| Thread
+
+    FULL --> RECONCILER
+    PRE --> RECONCILER
+    ACTIVE --> RECONCILER
+    FALLBACK --> RECONCILER
+    RECONCILER -.->|read prepared head| ZP
+    RECONCILER -.->|read active head| ZA
+    RECONCILER -.->|read fallback head when policy permits| MH
+    RECONCILER -->|prepare / activate| CACHE
+    CACHE -->|load snapshot| LOADER
+    LOADER -->|read entries by snapshotId| ME
+    LOADER -->|loaded snapshot| CACHE
+    SERVICES -->|subscription lookups| CACHE
 ```
 
-On ACTIVATE, the reconciler calls `cache.prepare(activateHead)`. If a matching PREPARED snapshot is already loaded,
-`prepare` reuses it and ACTIVATE can publish it without loading the entries again. Otherwise, `prepare` loads the
-ACTIVATE version from MongoDB. Because PREPARED preloading is delayed and a subsequent ACTIVATE event cancels a still
-pending PREPARED task, back-to-back PREPARED/ACTIVATE notifications can take this load-on-ACTIVATE path.
+In this diagram, `FALLBACK` means a MongoDB-head reconciliation attempt; the current `mongo-head-fallback-mode` decides
+whether MongoDB is still allowed to act as head authority. Reconciliation and load tasks are serialized by the watcher
+executor. Curator callbacks schedule those tasks; connection-state callbacks update the activation gate and enqueue work,
+but do not load snapshot entries themselves.
 
 The watcher uses these triggers:
 
