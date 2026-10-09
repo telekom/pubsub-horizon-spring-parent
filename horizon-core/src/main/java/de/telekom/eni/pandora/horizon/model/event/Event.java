@@ -12,9 +12,12 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import lombok.With;
+
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -22,6 +25,7 @@ import java.io.Serializable;
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
 @EventDataConstraint
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class Event implements Serializable {
@@ -61,5 +65,6 @@ public class Event implements Serializable {
     private String time;
 
     @JsonProperty(value = "data")
+    @With
     private Object data;
 }
