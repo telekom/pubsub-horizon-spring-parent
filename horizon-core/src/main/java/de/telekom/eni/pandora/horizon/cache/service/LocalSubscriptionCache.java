@@ -28,6 +28,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link #prepare(SubscriptionSnapshotHead)}. The contained {@link SubscriptionResource} objects and their nested
  * models remain mutable and are shared with readers; consumers must treat them as read-only. A prepared snapshot
  * becomes visible to readers only after a successful call to {@link #activate(SubscriptionSnapshotHead)}.</p>
+ *
+ * <p>Reads are thread-safe. {@code prepare}, {@code activate} and {@code discardPreparedSnapshot} must be called from a
+ * single writer thread; the expected-head methods may be called from any thread.</p>
  */
 @Slf4j
 public class LocalSubscriptionCache implements SubscriptionCacheReader {
@@ -183,13 +186,13 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * {@link SubscriptionSnapshotHeads#isSameSnapshot(SubscriptionSnapshotHead, SubscriptionSnapshotHead)}. The
      * active snapshot and its current freshness status are retained while a newer head is being loaded.
      *
-     * <p>Holds the cache lock while loading; callers are expected to be the single reconciliation thread.</p>
+     * <p>Must be called from the single writer thread; concurrent calls may load the same snapshot twice.</p>
      *
      * @param snapshotHead metadata identifying the snapshot to load
      * @throws IllegalArgumentException if the head is {@code null} or has no non-blank snapshot ID
      * @throws SubscriptionCacheSnapshotException if the snapshot cannot be validated
      */
-    public synchronized void prepare(SubscriptionSnapshotHead snapshotHead) {
+    public void prepare(SubscriptionSnapshotHead snapshotHead) {
         requireSnapshotId(snapshotHead);
 
         var requestedVersion = SnapshotVersion.from(snapshotHead);
@@ -263,7 +266,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * @throws IllegalStateException if the prepared snapshot does not match the requested head, or no snapshot was prepared
      * @throws SubscriptionCacheSnapshotException if the prepared snapshot is empty
      */
-    public synchronized void activate(SubscriptionSnapshotHead snapshotHead) {
+    public void activate(SubscriptionSnapshotHead snapshotHead) {
         requireSnapshotId(snapshotHead);
 
         var requestedVersion = SnapshotVersion.from(snapshotHead);
@@ -429,7 +432,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     /**
      * Discards the currently prepared snapshot without changing the active snapshot.
      */
-    public synchronized void discardPreparedSnapshot() {
+    public void discardPreparedSnapshot() {
         cacheState.updateAndGet(CacheState::withoutPreparedSnapshot);
     }
 
@@ -441,7 +444,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * @param head head whose prepared snapshot should be discarded
      * @throws IllegalArgumentException if the head is {@code null} or has no non-blank snapshot ID
      */
-    public synchronized void discardPreparedSnapshot(SubscriptionSnapshotHead head) {
+    public void discardPreparedSnapshot(SubscriptionSnapshotHead head) {
         requireSnapshotId(head);
         var version = SnapshotVersion.from(head);
         cacheState.updateAndGet(previous -> previous.preparedSnapshot() != null

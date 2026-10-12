@@ -302,18 +302,11 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
      */
     private void reconcileActivatedHeadPeriodically() {
         long epoch;
-        boolean zooKeeperConnected;
         synchronized (this) {
-            if (!watching) {
-                return;
-            }
             epoch = connectionEpoch;
-            zooKeeperConnected = this.zooKeeperConnected;
         }
         try {
-            if (zooKeeperConnected) {
-                tryRunInEpoch(epoch, reconciler::reconcileActivatedHead);
-            }
+            tryRunInEpoch(epoch, reconciler::reconcileActivatedHead);
         } catch (RuntimeException exception) {
             log.warn("Periodic subscription head reconciliation failed", exception);
         }
