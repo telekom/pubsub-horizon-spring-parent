@@ -25,10 +25,10 @@ class LocalSubscriptionCacheMetricsTest {
 
     @Test
     void exposesStaleLaggingCacheState() {
-        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+        when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
             LocalSubscriptionCache.Status.STALE, false, "snapshot-local", 3,
             NOW.minusSeconds(600), "snapshot-new", "snapshot-new", NOW.minusSeconds(90)));
-        when(cache.isBehindActivationHead()).thenReturn(true);
+        when(cache.isBehindExpectedHead()).thenReturn(true);
         new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
 
         assertEquals(1, gauge("state"));
@@ -41,7 +41,7 @@ class LocalSubscriptionCacheMetricsTest {
 
     @Test
     void exposesFreshCurrentCacheState() {
-        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+        when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
             LocalSubscriptionCache.Status.FRESH, true, "snapshot-local", 3, NOW, "snapshot-local", null, null));
         new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
 
@@ -53,7 +53,7 @@ class LocalSubscriptionCacheMetricsTest {
 
     @Test
     void exposesUninitializedState() {
-        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+        when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
             LocalSubscriptionCache.Status.UNINITIALIZED, false, null, 0, null, null, null, null));
         new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
 
@@ -63,10 +63,10 @@ class LocalSubscriptionCacheMetricsTest {
 
     @Test
     void exposesFailuresAndSnapshotLoadTimes() {
-        when(cache.activationFailureCount()).thenReturn(3L);
-        when(cache.snapshotLoadCount()).thenReturn(4L);
-        when(cache.snapshotLoadTotalNanos()).thenReturn(8_000_000_000L);
-        when(cache.lastSnapshotLoadNanos()).thenReturn(1_500_000_000L);
+        when(cache.getActivationFailureCount()).thenReturn(3L);
+        when(cache.getSnapshotLoadCount()).thenReturn(4L);
+        when(cache.getSnapshotLoadTotalNanos()).thenReturn(8_000_000_000L);
+        when(cache.getLastSnapshotLoadNanos()).thenReturn(1_500_000_000L);
         new LocalSubscriptionCacheMetrics(cache, Clock.fixed(NOW, ZoneOffset.UTC)).bindTo(registry);
 
         assertEquals(3, registry.get(LocalSubscriptionCacheMetrics.FAILURES).tag("reason", "activation")

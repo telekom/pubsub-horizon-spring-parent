@@ -5,51 +5,52 @@ import de.telekom.eni.pandora.horizon.cache.service.SubscriptionSnapshotHeads;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Reconciles ZooKeeper subscription heads with the pod-local cache.
  *
- * <p>{@code PREPARED} may preload a snapshot but never authorizes activation. A valid {@code ACTIVATE} head is
- * authoritative; an unavailable ACTIVATE head leaves the local cache without a confirmed head.
- * ZooKeeper-driven cache changes are committed through an {@link ActivationGate} so that the owning watcher can reject
+ * <p>{@code PREPARED} may preload a snapshot but never authorizes activation. A valid {@code ACTIVATED} head is
+ * authoritative; an unavailable ACTIVATED head leaves the local cache without a confirmed head.
+ * ZooKeeper-driven cache changes are committed through a {@link CacheCommitGate} so that the owning watcher can reject
  * them once the connection state that produced the head is no longer current.</p>
+ *
+ * <p>Not thread-safe: the owning watcher invokes all methods serially on its single worker thread, except
+ * {@link #onConnectionLost()}, which only touches the thread-safe cache.</p>
  */
 @Slf4j
-public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
+public class ZooKeeperSubscriptionHeadReconciler {
 
     private final ZooKeeperSubscriptionSnapshotHeadReader reader;
     private final LocalSubscriptionCache cache;
-    private final AtomicLong headReadFailures = new AtomicLong();
-    private volatile ActivationGate activationGate = ActivationGate.OPEN;
+    private final AtomicLong activatedHeadReadFailures = new AtomicLong();
     private long consecutiveHeadReadFailures;
     private long consecutiveActivationFailures;
 
-    /** Commits a ZooKeeper-driven cache change only while the state that produced it is still current. */
+    /** Commits a ZooKeeper-driven cache change only while the decision that produced it is still valid. */
     @FunctionalInterface
-    interface ActivationGate {
+    interface CacheCommitGate {
 
-        /** Gate for standalone use without a watcher; every commit runs. */
-        ActivationGate OPEN = commit -> {
+        /** Gate for tests and standalone use without a watcher; every commit runs. */
+        CacheCommitGate OPEN = commit -> {
             commit.run();
             return true;
         };
 
         /**
-         * Runs the commit if the triggering ZooKeeper state is still current.
+         * Runs the commit if the triggering ZooKeeper decision is still valid.
          *
          * @param commit cache change to apply
          * @return {@code true} if the commit ran
          */
-        boolean runIfCurrent(Runnable commit);
+        boolean commitIfStillValid(Runnable commit);
     }
 
     /**
-    * Creates a reconciler using ZooKeeper as the only head source.
+     * Creates a reconciler using ZooKeeper as the only head source.
      *
-     * @param reader reader for the ZooKeeper PREPARED and ACTIVATE heads
+     * @param reader reader for the ZooKeeper PREPARED and ACTIVATED heads
      * @param cache cache whose snapshot is prepared and activated
      */
     public ZooKeeperSubscriptionHeadReconciler(ZooKeeperSubscriptionSnapshotHeadReader reader,
@@ -59,28 +60,20 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
     }
 
     /**
-     * Sets the gate through which ZooKeeper-driven activation is committed.
+     * Reads the current PREPARED and ACTIVATED heads and reconciles the authoritative ACTIVATED head.
      *
-     * @param activationGate gate supplied by the owning watcher
+     * <p>A PREPARED read failure is logged but does not prevent ACTIVATED reconciliation. If ACTIVATED is missing or
+     * cannot be read, the cache loses its confirmed head.</p>
+     *
+     * <p>Also used after a reconnect: a FRESH snapshot matching ACTIVATED is kept, and a STALE one is reactivated
+     * without reloading.</p>
+     *
+     * @param gate gate through which cache changes of this run are committed
      */
-    void setActivationGate(ActivationGate activationGate) {
-        this.activationGate = Objects.requireNonNull(activationGate, "activationGate must not be null");
-    }
-
-    /**
-     * Reads the current PREPARED and ACTIVATE heads and reconciles the authoritative ACTIVATE head.
-     *
-     * <p>A PREPARED read failure is logged but does not prevent ACTIVATE reconciliation. If ACTIVATE is missing or cannot
-    * be read, the cache loses its confirmed head.</p>
-     *
-     * <p>Also used after a reconnect: a FRESH snapshot matching ACTIVATE is kept, and a STALE one is reactivated without
-     * reloading.</p>
-     */
-    @Override
-    public synchronized void run() {
+    public void reconcilePreparedAndActivatedHeads(CacheCommitGate gate) {
         Optional<SubscriptionSnapshotHead> prepared = Optional.empty();
         try {
-            prepared = reader.readPrepared();
+            prepared = reader.readPreparedHead();
         } catch (RuntimeException exception) {
             if (isInterrupted(exception)) {
                 return;
@@ -88,26 +81,29 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
             log.warn("Could not read prepared subscription head; ignoring it", exception);
         }
 
-        reconcileActiveHead(prepared);
+        reconcileActivatedHead(prepared, gate);
     }
 
     /**
-     * Re-reads and reconciles only the current ACTIVATE head, without reading PREPARED.
+     * Re-reads and reconciles only the current ACTIVATED head, without reading PREPARED.
      *
      * <p>Used by periodic reconciliation while ZooKeeper is connected.</p>
+     *
+     * @param gate gate through which cache changes of this run are committed
      */
-    public synchronized void reconcileActiveHead() {
-        reconcileActiveHead(Optional.empty());
+    public void reconcileActivatedHead(CacheCommitGate gate) {
+        reconcileActivatedHead(Optional.empty(), gate);
     }
 
     /**
-     * Processes a PREPARED watch payload as a preload only; it never activates the snapshot.
+     * Aligns the prepared snapshot with a PREPARED watch payload: preloads it, or discards the prepared snapshot when
+     * the PREPARED ZNode was removed. Never activates a snapshot.
      *
      * @param data serialized PREPARED head, or {@code null} when the PREPARED ZNode was removed
      */
-    public synchronized void preparePreparedEvent(byte[] data) {
+    public void reconcilePreparedHead(byte[] data) {
         try {
-            var prepared = reader.parsePreparedEvent(data);
+            var prepared = reader.parsePreparedHead(data);
             if (prepared.isPresent()) {
                 prepareOnly(prepared.orElseThrow());
             } else {
@@ -118,50 +114,58 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         }
     }
 
-    private void reconcileActiveHead(Optional<SubscriptionSnapshotHead> prepared) {
+    /** Reconciles the authoritative active head and, when distinct, preloads the prepared head. */
+    private void reconcileActivatedHead(Optional<SubscriptionSnapshotHead> prepared, CacheCommitGate gate) {
         Optional<SubscriptionSnapshotHead> active;
         try {
-            active = reader.readActivate();
+            active = reader.readActivatedHead();
         } catch (RuntimeException exception) {
             // Shutdown interrupts the watcher thread; that is not a ZooKeeper failure.
             if (isInterrupted(exception)) {
                 return;
             }
-            headReadFailed("Could not read activate subscription head", exception);
-            activationGate.runIfCurrent(cache::disconnected);
+            // An unreadable ACTIVATED head cannot confirm the current cache state.
+            headReadFailed("Could not read activated subscription head", exception);
+            gate.commitIfStillValid(cache::clearExpectedHead);
             return;
         }
 
         if (active.isEmpty()) {
-            headReadFailed("ZooKeeper activate subscription head is missing", null);
-            activationGate.runIfCurrent(cache::disconnected);
+            // A missing head has the same effect as an unreadable one: clear the confirmed cache head.
+            headReadFailed("ZooKeeper activated subscription head is missing", null);
+            gate.commitIfStillValid(cache::clearExpectedHead);
             return;
         }
         if (consecutiveHeadReadFailures > 0) {
-            log.info("ZooKeeper activate subscription head readable again after {} failed reads",
+            log.info("ZooKeeper activated subscription head readable again after {} failed reads",
                 consecutiveHeadReadFailures);
             consecutiveHeadReadFailures = 0;
         }
 
         var head = active.orElseThrow();
-        if (!activationGate.runIfCurrent(() -> cache.setActivationHead(head))) {
+        // Reject this decision if the watcher has moved to a newer ZooKeeper connection epoch.
+        if (!gate.commitIfStillValid(() -> cache.setExpectedHead(head))) {
             return;
         }
-        if (cache.isActiveSnapshotUpToDate() && cache.isActiveSnapshot(head)) {
+        if (cache.isFresh() && cache.isActiveSnapshot(head)) {
+            // The active snapshot already matches; only preload a distinct prepared snapshot, if available.
             activationSucceeded(head);
             prepared.filter(candidate -> !SubscriptionSnapshotHeads.isSameSnapshot(candidate, head))
                 .ifPresent(this::prepareOnly);
             return;
         }
 
+        // Prepare and activate the subscription snapshot based on the ZooKeeper head.
         try {
             cache.prepare(head);
-            if (!activationGate.runIfCurrent(() -> cache.activate(head))) {
+            // Activation must also pass the gate because the connection may have changed during preparation.
+            if (!gate.commitIfStillValid(() -> cache.activate(head))) {
                 return;
             }
             activationSucceeded(head);
         } catch (RuntimeException exception) {
-            cache.activationFailed(head);
+            // Discard a failed preparation so a later reconciliation can retry from a clean state.
+            cache.recordActivationFailure(head);
             cache.discardPreparedSnapshot(head);
             consecutiveActivationFailures++;
             if (consecutiveActivationFailures == 1) {
@@ -173,6 +177,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         }
     }
 
+    /** Resets the consecutive activation failure count after a successful activation. */
     private void activationSucceeded(SubscriptionSnapshotHead head) {
         if (consecutiveActivationFailures > 0) {
             log.info("Subscription snapshot {} activation from ZooKeeper head recovered after {} failed attempts",
@@ -181,24 +186,25 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         }
     }
 
-    /** Marks the cache unconfirmed when the owning watcher disconnects. */
-    void disconnected() {
-        cache.disconnected();
+    /** Marks the cache unconfirmed when the owning watcher loses its ZooKeeper connection. */
+    void onConnectionLost() {
+        cache.clearExpectedHead();
     }
 
     /**
-     * Returns the cumulative number of missing, invalid, or unreadable ZooKeeper ACTIVATE heads.
+     * Returns the cumulative number of missing, invalid, or unreadable ZooKeeper ACTIVATED heads.
      *
      * <p>Interrupted reads are excluded. Failures while loading or activating snapshots are not included.</p>
      *
-     * @return cumulative ACTIVATE-head read failure count
+     * @return cumulative ACTIVATED-head read failure count
      */
-    public long headReadFailureCount() {
-        return headReadFailures.get();
+    public long getActivatedHeadReadFailureCount() {
+        return activatedHeadReadFailures.get();
     }
 
+    /** Counts and logs a missing or unreadable ACTIVATED head. */
     private void headReadFailed(String message, RuntimeException exception) {
-        headReadFailures.incrementAndGet();
+        activatedHeadReadFailures.incrementAndGet();
         consecutiveHeadReadFailures++;
         if (consecutiveHeadReadFailures == 1) {
             log.warn(message, exception);
@@ -208,6 +214,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         }
     }
 
+    /** Detects interruption in the current thread or exception cause chain. */
     static boolean isInterrupted(Throwable exception) {
         if (Thread.currentThread().isInterrupted()) {
             return true;
@@ -220,6 +227,7 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
         return false;
     }
 
+    /** Prepares the supplied snapshot without activating it. */
     private void prepareOnly(SubscriptionSnapshotHead head) {
         try {
             cache.prepare(head);
@@ -227,4 +235,5 @@ public class ZooKeeperSubscriptionHeadReconciler implements Runnable {
             log.warn("Could not prepare subscription snapshot {}", head.getSnapshotId(), exception);
         }
     }
+
 }

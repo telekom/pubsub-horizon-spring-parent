@@ -63,10 +63,12 @@ public class ZooKeeperSubscriptionSnapshotHeadParser {
         }
     }
 
+    /** Returns whether a JSON field is missing or explicitly null. */
     private static boolean isUnset(JsonNode node) {
         return node.isMissingNode() || node.isNull();
     }
 
+    /** Creates the exception used for invalid serialized ZooKeeper heads. */
     private static SubscriptionCacheSnapshotException invalidHead() {
         return new SubscriptionCacheSnapshotException("Invalid ZooKeeper subscription snapshot head");
     }

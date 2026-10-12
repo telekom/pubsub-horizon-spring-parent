@@ -102,6 +102,7 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
         return subscriptionsById.isEmpty();
     }
 
+        /** Builds an indexed snapshot from subscription resources. */
         private static IndexedSubscriptionSnapshot fromSubscriptionResources(
             SnapshotVersion version,
             List<? extends SubscriptionResource> resources) {
@@ -129,6 +130,7 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
             Map.copyOf(immutableSubscriptionsByEnvironmentAndEventType));
     }
 
+    /** Validates that a subscription resource contains the required lookup fields. */
     private static void validate(SubscriptionResource resource) {
         if (resource == null || resource.getSpec() == null || resource.getSpec().getSubscription() == null) {
             throw new SubscriptionCacheSnapshotException("Invalid subscription document without subscription data");
@@ -149,6 +151,7 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
                            String sourceHash,
                            Instant createdAt) {
 
+        /** Creates a snapshot version from snapshot head metadata. */
         static SnapshotVersion from(SubscriptionSnapshotHead snapshotHead) {
             return new SnapshotVersion(
                 snapshotHead.getSnapshotId(),

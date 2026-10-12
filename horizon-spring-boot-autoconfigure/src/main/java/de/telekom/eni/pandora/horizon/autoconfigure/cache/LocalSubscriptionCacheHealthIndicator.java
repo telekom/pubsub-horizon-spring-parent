@@ -57,7 +57,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
      */
     @Override
     public Health health() {
-        var diagnostics = localSubscriptionCache.diagnostics();
+        var diagnostics = localSubscriptionCache.getDiagnostics();
         var reader = subscriptionCacheReaderProvider.getIfAvailable();
         if (reader != null && reader.isReady()) {
             var source = diagnostics.localReadsAllowed() ? "local" : "fallback";
@@ -68,6 +68,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
             .build();
     }
 
+    /** Adds cache source, snapshot, and fallback details to the health response. */
     private Health.Builder withCacheDetails(Health.Builder builder, String source,
                                             LocalSubscriptionCache.Diagnostics diagnostics) {
         var fallbackMode = properties.getFallbackMode();
@@ -94,6 +95,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
         return builder;
     }
 
+    /** Renders absent diagnostic values as the configured placeholder. */
     private static String orNone(Object value) {
         return value == null ? NONE : value.toString();
     }

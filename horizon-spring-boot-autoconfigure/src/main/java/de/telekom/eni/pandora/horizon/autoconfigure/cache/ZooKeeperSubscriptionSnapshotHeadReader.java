@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Reads and parses the PREPARED and ACTIVATE snapshot heads from their configured ZooKeeper paths.
+ * Reads and parses the PREPARED and ACTIVATED snapshot heads from their configured ZooKeeper paths.
  *
  * <p>ZooKeeper I/O is performed through Curator; head validation is delegated to
  * {@link ZooKeeperSubscriptionSnapshotHeadParser}.</p>
@@ -24,22 +24,22 @@ public class ZooKeeperSubscriptionSnapshotHeadReader {
     private final CuratorFramework client;
     private final ZooKeeperSubscriptionSnapshotHeadParser parser;
     private final String preparedPath;
-    private final String activatePath;
+    private final String activatedPath;
 
     /**
-     * Creates a reader for the configured PREPARED and ACTIVATE paths.
+     * Creates a reader for the configured PREPARED and ACTIVATED paths.
      *
      * @param client Curator client used to read ZooKeeper data
      * @param objectMapper mapper used by the head parser
      * @param preparedPath absolute ZooKeeper path containing the PREPARED head
-     * @param activatePath absolute ZooKeeper path containing the authoritative ACTIVATE head
+     * @param activatedPath absolute ZooKeeper path containing the authoritative ACTIVATED head
      */
     public ZooKeeperSubscriptionSnapshotHeadReader(CuratorFramework client, ObjectMapper objectMapper,
-                                                    String preparedPath, String activatePath) {
+                                                    String preparedPath, String activatedPath) {
         this.client = client;
         this.parser = new ZooKeeperSubscriptionSnapshotHeadParser(objectMapper);
         this.preparedPath = preparedPath;
-        this.activatePath = activatePath;
+        this.activatedPath = activatedPath;
     }
 
     /**
@@ -49,19 +49,19 @@ public class ZooKeeperSubscriptionSnapshotHeadReader {
      * @throws SubscriptionCacheSnapshotException if the node contains an invalid head payload
      * @throws IllegalStateException if the ZooKeeper read fails, times out, or is interrupted
      */
-    public Optional<SubscriptionSnapshotHead> readPrepared() {
+    public Optional<SubscriptionSnapshotHead> readPreparedHead() {
         return read(preparedPath);
     }
 
     /**
-     * Reads and validates the current authoritative ACTIVATE head.
+     * Reads and validates the current authoritative ACTIVATED head.
      *
-     * @return the parsed head, or empty if the ACTIVATE node does not exist
+     * @return the parsed head, or empty if the ACTIVATED node does not exist
      * @throws SubscriptionCacheSnapshotException if the node contains an invalid head payload
      * @throws IllegalStateException if the ZooKeeper read fails, times out, or is interrupted
      */
-    public Optional<SubscriptionSnapshotHead> readActivate() {
-        return read(activatePath);
+    public Optional<SubscriptionSnapshotHead> readActivatedHead() {
+        return read(activatedPath);
     }
 
     /**
@@ -71,7 +71,7 @@ public class ZooKeeperSubscriptionSnapshotHeadReader {
      * @return the parsed head, or empty when {@code data} is {@code null}
      * @throws SubscriptionCacheSnapshotException if a non-null payload is invalid
      */
-    public Optional<SubscriptionSnapshotHead> parsePreparedEvent(byte[] data) {
+    public Optional<SubscriptionSnapshotHead> parsePreparedHead(byte[] data) {
         return data == null ? Optional.empty() : Optional.of(parser.parse(data));
     }
 

@@ -64,6 +64,7 @@ public final class SubscriptionSnapshotHeads {
             && equalIfBothSet(sourceHash, otherSourceHash);
     }
 
+            /** Compares optional metadata only when both values are present. */
     private static boolean equalIfBothSet(Object value, Object otherValue) {
         return value == null || otherValue == null || value.equals(otherValue);
     }

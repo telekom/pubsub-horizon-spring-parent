@@ -109,7 +109,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
          * @param cacheProperties paths, fallback policy, and reconciliation timing settings
          * @param meterRegistryProvider optional registry for ZooKeeper head-read failure metrics
          * @return watcher started and closed by the Spring context
-         * @throws IllegalArgumentException if the PREPARED and ACTIVATE paths are not distinct absolute paths
+         * @throws IllegalArgumentException if the PREPARED and ACTIVATED paths are not distinct absolute paths
          */
         @Bean(initMethod = "start", destroyMethod = "close")
         @ConditionalOnProperty(
@@ -122,28 +122,29 @@ public class LocalSubscriptionCacheAutoConfiguration {
             var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
             var zooKeeper = localCacheProperties.getZooKeeper();
             var preparedPath = zooKeeper.getPreparedPath();
-            var activatePath = zooKeeper.getActivatePath();
+            var activatedPath = zooKeeper.getActivatedPath();
             if (preparedPath == null || !preparedPath.startsWith("/") || preparedPath.isBlank()
-                    || activatePath == null || !activatePath.startsWith("/") || activatePath.isBlank()
-                    || preparedPath.equals(activatePath)) {
+                    || activatedPath == null || !activatedPath.startsWith("/") || activatedPath.isBlank()
+                    || preparedPath.equals(activatedPath)) {
                 throw new IllegalArgumentException(
-                    "Distinct absolute ZooKeeper prepared and activate paths are required");
+                    "Distinct absolute ZooKeeper prepared and activated paths are required");
             }
             var reader = new ZooKeeperSubscriptionSnapshotHeadReader(
-                client, new ObjectMapper(), preparedPath, activatePath);
+                client, new ObjectMapper(), preparedPath, activatedPath);
             var reconciler = new ZooKeeperSubscriptionHeadReconciler(reader, cache);
             meterRegistryProvider.ifAvailable(registry -> FunctionCounter.builder(
                     LocalSubscriptionCacheMetrics.FAILURES, reconciler,
-                    ZooKeeperSubscriptionHeadReconciler::headReadFailureCount)
+                    ZooKeeperSubscriptionHeadReconciler::getActivatedHeadReadFailureCount)
                 .description(LocalSubscriptionCacheMetrics.FAILURES_DESCRIPTION)
                 .tag("reason", "zookeeper_head_read")
                 .register(registry));
-            return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatePath, reconciler,
-                localCacheProperties.getReconcileInterval(), localCacheProperties.getMongoSnapshotSyncJitter(),
-                localCacheProperties.getMongoHeadPollJitter());
+            return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatedPath, reconciler,
+                localCacheProperties.getReconcileInterval(), localCacheProperties.getSnapshotSyncJitter(),
+                localCacheProperties.getHeadCheckJitter());
         }
     }
 
+    /** Converts a positive timeout to milliseconds within the supported integer range. */
     private static int timeoutMillis(Duration timeout, String name) {
         if (timeout == null || timeout.isNegative() || timeout.isZero()) {
             throw new IllegalArgumentException("ZooKeeper " + name + " timeout must be positive");
@@ -191,14 +192,14 @@ public class LocalSubscriptionCacheAutoConfiguration {
             log.info("Waiting for initial local subscription snapshot (timeout {})",
                 timeout.isZero() ? "none" : timeout);
             try {
-                var firstFreshSnapshot = cache.firstFreshSnapshot().toCompletableFuture();
+                var firstFreshSnapshot = cache.getFirstFreshSnapshot().toCompletableFuture();
                 if (timeout.isZero()) {
                     firstFreshSnapshot.get();
                 } else {
                     firstFreshSnapshot.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
                 }
                 log.info("Initial local subscription snapshot {} fresh after {} ms",
-                    cache.localSnapshotId().orElse("none"),
+                    cache.getLocalSnapshotId().orElse("none"),
                     TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStart));
             } catch (TimeoutException exception) {
                 throw new IllegalStateException("Initial subscription snapshot did not become fresh within " + timeout,

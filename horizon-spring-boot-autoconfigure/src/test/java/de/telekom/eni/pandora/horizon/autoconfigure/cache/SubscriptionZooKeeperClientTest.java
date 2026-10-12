@@ -49,7 +49,7 @@ class SubscriptionZooKeeperClientTest {
         .withPropertyValues(
             "horizon.cache.local-subscription-cache.enabled=true",
             "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/subscriptions/prepared",
-            "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/subscriptions/activated");
+            "horizon.cache.local-subscription-cache.zoo-keeper.activated-path=/subscriptions/activated");
 
     @Test
     void clientIsDisabledByDefault() {
@@ -72,12 +72,12 @@ class SubscriptionZooKeeperClientTest {
                     "horizon.cache.local-subscription-cache.enabled=true",
                     "horizon.cache.local-subscription-cache.zoo-keeper.connect-string=" + server.getConnectString(),
                     "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/subscriptions/prepared",
-                    "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/subscriptions/activate")
+                    "horizon.cache.local-subscription-cache.zoo-keeper.activated-path=/subscriptions/activate")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(LocalSubscriptionCacheHealthIndicator.class);
                     context.getBean(ZooKeeperSubscriptionHeadWatcher.class)
-                        .initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                        .getInitialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
                 });
         }
     }
@@ -90,7 +90,7 @@ class SubscriptionZooKeeperClientTest {
             .withPropertyValues(
                 "horizon.cache.local-subscription-cache.enabled=true",
                 "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/subscriptions/head",
-                "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/subscriptions/head")
+                "horizon.cache.local-subscription-cache.zoo-keeper.activated-path=/subscriptions/head")
             .run(context -> assertThat(context.getStartupFailure())
                 .hasRootCauseInstanceOf(IllegalArgumentException.class));
     }
@@ -113,21 +113,39 @@ class SubscriptionZooKeeperClientTest {
             .withPropertyValues(
                 "horizon.cache.local-subscription-cache.stale-local-cache-read-grace-period=30s",
                 "horizon.cache.local-subscription-cache.initial-snapshot-timeout=45s",
-                "horizon.cache.local-subscription-cache.mongo-head-poll-jitter=3s",
-                "horizon.cache.local-subscription-cache.mongo-snapshot-sync-jitter=12s",
+                "horizon.cache.local-subscription-cache.head-check-jitter=3s",
+                "horizon.cache.local-subscription-cache.snapshot-sync-jitter=12s",
                 "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/horizon/subscriptions/prepared",
-                "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/horizon/subscriptions/activated",
+                "horizon.cache.local-subscription-cache.zoo-keeper.activated-path=/horizon/subscriptions/activated",
                 "horizon.cache.local-subscription-cache.reconcile-interval=7m")
             .run(context -> {
                 var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
                 assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(30));
                 assertThat(localCache.getInitialSnapshotTimeout()).isEqualTo(Duration.ofSeconds(45));
-                assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(3));
-                assertThat(localCache.getMongoSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(12));
+                assertThat(localCache.getHeadCheckJitter()).isEqualTo(Duration.ofSeconds(3));
+                assertThat(localCache.getSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(12));
                 assertThat(localCache.getReconcileInterval()).isEqualTo(Duration.ofMinutes(7));
                 var properties = localCache.getZooKeeper();
                 assertThat(properties.getPreparedPath()).isEqualTo("/horizon/subscriptions/prepared");
-                assertThat(properties.getActivatePath()).isEqualTo("/horizon/subscriptions/activated");
+                assertThat(properties.getActivatedPath()).isEqualTo("/horizon/subscriptions/activated");
+            });
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void deprecatedPropertyNamesStillBind() {
+        contextRunner
+            .withPropertyValues(
+                "horizon.cache.local-subscription-cache.mongo-head-poll-jitter=4s",
+                "horizon.cache.local-subscription-cache.mongo-snapshot-sync-jitter=13s",
+                "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/legacy/activated")
+            .run(context -> {
+                var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
+                assertThat(localCache.getHeadCheckJitter()).isEqualTo(Duration.ofSeconds(4));
+                assertThat(localCache.getSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(13));
+                assertThat(localCache.getZooKeeper().getActivatedPath()).isEqualTo("/legacy/activated");
+                assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(4));
+                assertThat(localCache.getZooKeeper().getActivatePath()).isEqualTo("/legacy/activated");
             });
     }
 
@@ -136,8 +154,8 @@ class SubscriptionZooKeeperClientTest {
         contextRunner.run(context -> {
             var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
             assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(120));
-            assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(10));
-            assertThat(localCache.getMongoSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(localCache.getHeadCheckJitter()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(localCache.getSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(10));
         });
     }
 
@@ -150,7 +168,7 @@ class SubscriptionZooKeeperClientTest {
 
     @ParameterizedTest
     @EnumSource(CacheProperties.LocalSubscriptionCacheFallback.class)
-    void missingActivateHeadIsUnconfirmedIndependentlyOfDataFallback(CacheProperties.LocalSubscriptionCacheFallback fallback)
+    void missingActivatedHeadIsUnconfirmedIndependentlyOfDataFallback(CacheProperties.LocalSubscriptionCacheFallback fallback)
             throws Exception {
         try (var server = new TestingServer()) {
             var cache = mock(LocalSubscriptionCache.class);
@@ -161,12 +179,12 @@ class SubscriptionZooKeeperClientTest {
                     "horizon.cache.local-subscription-cache.reconcile-interval=0s",
                     "horizon.cache.local-subscription-cache.zoo-keeper.connect-string=" + server.getConnectString(),
                     "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/subscriptions/prepared",
-                    "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/subscriptions/activated")
+                    "horizon.cache.local-subscription-cache.zoo-keeper.activated-path=/subscriptions/activated")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     context.getBean(ZooKeeperSubscriptionHeadWatcher.class)
-                        .initialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
-                    verify(cache, org.mockito.Mockito.atLeastOnce()).disconnected();
+                        .getInitialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    verify(cache, org.mockito.Mockito.atLeastOnce()).clearExpectedHead();
                 });
         }
     }
@@ -188,7 +206,7 @@ class SubscriptionZooKeeperClientTest {
     void startupBarrierWaitsForFirstFreshSnapshot() throws Exception {
         var cache = mock(LocalSubscriptionCache.class);
         var firstFreshSnapshot = new CompletableFuture<Void>();
-        when(cache.firstFreshSnapshot()).thenReturn(firstFreshSnapshot);
+        when(cache.getFirstFreshSnapshot()).thenReturn(firstFreshSnapshot);
         var properties = new CacheProperties();
         properties.getLocalSubscriptionCache().setRequireLocalCacheAtStartup(true);
         properties.getLocalSubscriptionCache().setInitialSnapshotTimeout(Duration.ofMillis(1));
@@ -207,7 +225,7 @@ class SubscriptionZooKeeperClientTest {
     void startupBarrierWaitsIndefinitelyWhenTimeoutIsZero() throws Exception {
         var cache = mock(LocalSubscriptionCache.class);
         var firstFreshSnapshot = new CompletableFuture<Void>();
-        when(cache.firstFreshSnapshot()).thenReturn(firstFreshSnapshot);
+        when(cache.getFirstFreshSnapshot()).thenReturn(firstFreshSnapshot);
         var properties = new CacheProperties();
         properties.getLocalSubscriptionCache().setRequireLocalCacheAtStartup(true);
         properties.getLocalSubscriptionCache().setInitialSnapshotTimeout(Duration.ZERO);
@@ -222,7 +240,7 @@ class SubscriptionZooKeeperClientTest {
             }
         });
 
-        verify(cache, timeout(1000)).firstFreshSnapshot();
+        verify(cache, timeout(1000)).getFirstFreshSnapshot();
         assertFalse(barrierRun.isDone());
         firstFreshSnapshot.complete(null);
         barrierRun.get(1, TimeUnit.SECONDS);
@@ -238,13 +256,13 @@ class SubscriptionZooKeeperClientTest {
 
         barrier.run(null);
 
-        verify(cache, never()).firstFreshSnapshot();
+        verify(cache, never()).getFirstFreshSnapshot();
     }
 
     @Test
     void startupBarrierAlwaysRequiresLocalCacheWithoutSharedFallback() {
         var cache = mock(LocalSubscriptionCache.class);
-        when(cache.firstFreshSnapshot()).thenReturn(new CompletableFuture<>());
+        when(cache.getFirstFreshSnapshot()).thenReturn(new CompletableFuture<>());
         var properties = new CacheProperties();
         properties.getLocalSubscriptionCache().setRequireLocalCacheAtStartup(false);
         properties.getLocalSubscriptionCache().setFallbackMode(CacheProperties.LocalSubscriptionCacheFallback.NONE);
@@ -349,20 +367,20 @@ class SubscriptionZooKeeperClientTest {
             var reader = new ZooKeeperSubscriptionSnapshotHeadReader(client, new ObjectMapper(),
                 "/subscriptions/prepared", "/subscriptions/activate");
 
-            assertThat(reader.readPrepared()).isEmpty();
-            assertThat(reader.readActivate()).isEmpty();
+            assertThat(reader.readPreparedHead()).isEmpty();
+            assertThat(reader.readActivatedHead()).isEmpty();
 
             client.create().creatingParentsIfNeeded().forPath("/subscriptions/prepared", head("first"));
             client.create().forPath("/subscriptions/activate", head("second"));
 
-            assertThat(reader.readPrepared()).get().extracting("snapshotId").isEqualTo("first");
-            var activated = reader.readActivate().orElseThrow();
+            assertThat(reader.readPreparedHead()).get().extracting("snapshotId").isEqualTo("first");
+            var activated = reader.readActivatedHead().orElseThrow();
             assertThat(activated.getSnapshotId()).isEqualTo("second");
             assertThat(activated.getDocumentCount()).isEqualTo(1L);
             assertThat(activated.getCreatedAt().toInstant()).isEqualTo(Instant.parse("2026-09-30T12:30:00Z"));
 
             client.setData().forPath("/subscriptions/activate", head("third"));
-            assertThat(reader.readActivate().orElseThrow().getSnapshotId()).isEqualTo("third");
+            assertThat(reader.readActivatedHead().orElseThrow().getSnapshotId()).isEqualTo("third");
         }
     }
 
@@ -376,11 +394,11 @@ class SubscriptionZooKeeperClientTest {
                 "/subscriptions/prepared", "/subscriptions/activate");
             client.create().creatingParentsIfNeeded().forPath("/subscriptions/prepared", "{}".getBytes(StandardCharsets.UTF_8));
 
-            assertThatThrownBy(reader::readPrepared).isInstanceOf(SubscriptionCacheSnapshotException.class);
-            assertThat(reader.readActivate()).isEmpty();
+            assertThatThrownBy(reader::readPreparedHead).isInstanceOf(SubscriptionCacheSnapshotException.class);
+            assertThat(reader.readActivatedHead()).isEmpty();
 
             client.close();
-            assertThatThrownBy(reader::readActivate).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(reader::readActivatedHead).isInstanceOf(IllegalStateException.class);
         }
     }
 
@@ -398,11 +416,11 @@ class SubscriptionZooKeeperClientTest {
             client.create().creatingParentsIfNeeded().forPath("/subscriptions/activate", head("active"));
             var reader = new ZooKeeperSubscriptionSnapshotHeadReader(client, new ObjectMapper(),
                 "/subscriptions/prepared", "/subscriptions/activate");
-            assertThat(reader.readActivate()).get().extracting("snapshotId").isEqualTo("active");
+            assertThat(reader.readActivatedHead()).get().extracting("snapshotId").isEqualTo("active");
 
             server.stop();
             var start = System.nanoTime();
-            assertThatThrownBy(reader::readActivate)
+            assertThatThrownBy(reader::readActivatedHead)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Timed out after 500 ms");
             // Unbounded, the retries alone would take at least 10 seconds.

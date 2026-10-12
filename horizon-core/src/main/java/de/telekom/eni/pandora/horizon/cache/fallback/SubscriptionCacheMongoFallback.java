@@ -93,10 +93,12 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         return mapDocuments(mongoTemplate.findAll(Document.class, COLLECTION_NAME));
     }
 
+    /** Converts MongoDB documents into subscription resources. */
     private List<SubscriptionResource> mapDocuments(List<Document> docs) {
         return docs.stream().map(jsonMapper::fromDocument).toList();
     }
 
+    /** Builds a MongoDB query for the subscription document with the given ID. */
     private static org.springframework.data.mongodb.core.query.Query byId(String id) {
         return org.springframework.data.mongodb.core.query.Query.query(Criteria.where("_id").is(id));
     }

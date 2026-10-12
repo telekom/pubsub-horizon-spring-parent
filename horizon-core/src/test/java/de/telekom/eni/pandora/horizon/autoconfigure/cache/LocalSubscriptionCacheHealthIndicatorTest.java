@@ -36,7 +36,7 @@ class LocalSubscriptionCacheHealthIndicatorTest {
 
     @Test
     void healthRequiresEffectiveReaderEvenWhenOldSnapshotExists() {
-        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+        when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.STALE, false, "snapshot-local", 3,
                 NOW.minusSeconds(600), "snapshot-new", "snapshot-new", NOW.minusSeconds(150)));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
@@ -66,7 +66,7 @@ class LocalSubscriptionCacheHealthIndicatorTest {
 
     @Test
     void healthReportsLocalSourceWhenLocalReadsAreAllowed() {
-        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+        when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.FRESH, true, "snapshot-local", 3, NOW, "snapshot-local", null, null));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
         when(subscriptionCacheReader.isReady()).thenReturn(true);
@@ -82,7 +82,7 @@ class LocalSubscriptionCacheHealthIndicatorTest {
     @Test
         void staleReadGraceIsOmittedWithoutHazelcastFallbackAndHeadSourceIsZooKeeper() {
         properties.setFallbackMode(CacheProperties.LocalSubscriptionCacheFallback.NONE);
-        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+        when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.STALE, true, "snapshot-local", 3, NOW, null, null, NOW));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
         when(subscriptionCacheReader.isReady()).thenReturn(true);
@@ -97,7 +97,7 @@ class LocalSubscriptionCacheHealthIndicatorTest {
 
     @Test
     void healthStaysUpWithoutReader() {
-        when(cache.diagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
+        when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.UNINITIALIZED, false, null, 0, null, null, null, null));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(null);
 

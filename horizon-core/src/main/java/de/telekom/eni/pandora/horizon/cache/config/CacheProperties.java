@@ -7,6 +7,7 @@ package de.telekom.eni.pandora.horizon.cache.config;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.DeprecatedConfigurationProperty;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -53,16 +54,42 @@ public class CacheProperties {
         // Only applies when startup waits; expiry fails startup, zero waits indefinitely.
         private Duration initialSnapshotTimeout = Duration.ofSeconds(15);
 
-        // Re-check of the ZooKeeper active head. Zero disables it.
+        // Re-check of the ZooKeeper activated head. Zero disables it.
         private Duration reconcileInterval = Duration.ofSeconds(60);
 
-        // Random initial offset of the periodic head reconciliation.
-        private Duration mongoHeadPollJitter = Duration.ofSeconds(10);
+        // Random initial offset of the periodic activated-head check.
+        private Duration headCheckJitter = Duration.ofSeconds(10);
 
-        // Maximum random delay before loading a snapshot for prepared preloads and reconnects (ZooKeeper mode only).
-        private Duration mongoSnapshotSyncJitter = Duration.ofSeconds(10);
+        // Maximum random delay before loading a snapshot for prepared preloads and reconnects.
+        private Duration snapshotSyncJitter = Duration.ofSeconds(10);
 
         private ZooKeeperProperties zooKeeper = new ZooKeeperProperties();
+
+        /** @deprecated use {@code head-check-jitter}; set only one of both names */
+        @Deprecated
+        @DeprecatedConfigurationProperty(replacement = "horizon.cache.local-subscription-cache.head-check-jitter")
+        public Duration getMongoHeadPollJitter() {
+            return headCheckJitter;
+        }
+
+        /** @deprecated use {@code head-check-jitter}; set only one of both names */
+        @Deprecated
+        public void setMongoHeadPollJitter(Duration mongoHeadPollJitter) {
+            this.headCheckJitter = mongoHeadPollJitter;
+        }
+
+        /** @deprecated use {@code snapshot-sync-jitter}; set only one of both names */
+        @Deprecated
+        @DeprecatedConfigurationProperty(replacement = "horizon.cache.local-subscription-cache.snapshot-sync-jitter")
+        public Duration getMongoSnapshotSyncJitter() {
+            return snapshotSyncJitter;
+        }
+
+        /** @deprecated use {@code snapshot-sync-jitter}; set only one of both names */
+        @Deprecated
+        public void setMongoSnapshotSyncJitter(Duration mongoSnapshotSyncJitter) {
+            this.snapshotSyncJitter = mongoSnapshotSyncJitter;
+        }
     }
 
     /** ZooKeeper connection settings and ZNode paths for subscription snapshot heads. */
@@ -77,11 +104,25 @@ public class CacheProperties {
 
         private String preparedPath;
 
-        private String activatePath;
+        private String activatedPath;
 
         private Duration connectionTimeout = Duration.ofSeconds(5);
 
         private Duration sessionTimeout = Duration.ofSeconds(30);
+
+        /** @deprecated use {@code activated-path}; set only one of both names */
+        @Deprecated
+        @DeprecatedConfigurationProperty(
+            replacement = "horizon.cache.local-subscription-cache.zoo-keeper.activated-path")
+        public String getActivatePath() {
+            return activatedPath;
+        }
+
+        /** @deprecated use {@code activated-path}; set only one of both names */
+        @Deprecated
+        public void setActivatePath(String activatePath) {
+            this.activatedPath = activatePath;
+        }
     }
 
     /** Selects the read source used when the local snapshot cannot serve requests. */

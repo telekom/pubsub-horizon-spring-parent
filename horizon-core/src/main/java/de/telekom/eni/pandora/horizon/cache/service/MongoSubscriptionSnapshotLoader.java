@@ -73,6 +73,7 @@ public class MongoSubscriptionSnapshotLoader {
     }
 
     // Same mapping as for subscriptions read from Hazelcast, not Spring Data entity mapping.
+    /** Maps a MongoDB snapshot document to a snapshot entry. */
     private SubscriptionSnapshotEntry toEntry(Document document) {
         try {
             var entry = new SubscriptionSnapshotEntry();

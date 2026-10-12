@@ -25,7 +25,7 @@ public class LocalSubscriptionCacheMetrics implements MeterBinder {
     static final String FALLBACK_READS = PREFIX + ".fallback.reads";
     static final String FAILURES = PREFIX + ".failures";
     static final String FAILURES_DESCRIPTION =
-        "Failed snapshot activations (including failed snapshot loads) and unusable ZooKeeper activate heads";
+        "Failed snapshot activations (including failed snapshot loads) and unusable ZooKeeper activated heads";
 
     private final LocalSubscriptionCache cache;
     private final Clock clock;
@@ -58,32 +58,34 @@ public class LocalSubscriptionCacheMetrics implements MeterBinder {
             "Epoch seconds of the last successful snapshot activation, 0 if none",
             diagnostics -> diagnostics.activatedAt() == null ? 0 : diagnostics.activatedAt().getEpochSecond())
             .register(registry);
-        Gauge.builder(PREFIX + ".snapshot.behind", cache, c -> c.isBehindActivationHead() ? 1 : 0)
+        Gauge.builder(PREFIX + ".snapshot.behind", cache, c -> c.isBehindExpectedHead() ? 1 : 0)
             .description("1 if the active snapshot differs from the expected head")
             .strongReference(true)
             .register(registry);
-        FunctionCounter.builder(FAILURES, cache, LocalSubscriptionCache::activationFailureCount)
+        FunctionCounter.builder(FAILURES, cache, LocalSubscriptionCache::getActivationFailureCount)
             .description(FAILURES_DESCRIPTION)
             .tag("reason", "activation")
             .register(registry);
         FunctionTimer.builder(PREFIX + ".snapshot.load", cache,
-                LocalSubscriptionCache::snapshotLoadCount, LocalSubscriptionCache::snapshotLoadTotalNanos,
+                LocalSubscriptionCache::getSnapshotLoadCount, LocalSubscriptionCache::getSnapshotLoadTotalNanos,
                 TimeUnit.NANOSECONDS)
             .description("Successful snapshot loads from MongoDB")
             .register(registry);
-        Gauge.builder(PREFIX + ".snapshot.load.last.seconds", cache, c -> c.lastSnapshotLoadNanos() / 1e9)
+        Gauge.builder(PREFIX + ".snapshot.load.last.seconds", cache, c -> c.getLastSnapshotLoadNanos() / 1e9)
             .description("Duration of the last successful snapshot load, 0 if none")
             .strongReference(true)
             .register(registry);
     }
 
+    /** Creates a gauge backed by a value from the cache diagnostics. */
     private Gauge.Builder<LocalSubscriptionCache> gauge(String name, String description,
                                                         ToDoubleFunction<LocalSubscriptionCache.Diagnostics> value) {
-        return Gauge.builder(name, cache, c -> value.applyAsDouble(c.diagnostics()))
+        return Gauge.builder(name, cache, c -> value.applyAsDouble(c.getDiagnostics()))
             .description(description)
             .strongReference(true);
     }
 
+    /** Maps cache statuses to stable numeric metric values. */
     private static int stateValue(LocalSubscriptionCache.Status status) {
         return switch (status) {
             case UNINITIALIZED -> 0;
@@ -92,6 +94,7 @@ public class LocalSubscriptionCacheMetrics implements MeterBinder {
         };
     }
 
+    /** Returns elapsed stale time in seconds, or zero when the cache is not stale. */
     private double staleSeconds(LocalSubscriptionCache.Diagnostics diagnostics) {
         var staleSince = diagnostics.staleSince();
         return staleSince == null ? 0 : Duration.between(staleSince, clock.instant()).toMillis() / 1000.0;

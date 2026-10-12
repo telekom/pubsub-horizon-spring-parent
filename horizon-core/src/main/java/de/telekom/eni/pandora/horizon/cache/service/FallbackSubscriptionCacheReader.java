@@ -140,6 +140,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         }
     }
 
+    /** Marks the primary reader degraded and logs its failure. */
     private void primaryReadFailed(String operation, Exception exception) {
         if (primaryDegraded.compareAndSet(false, true)) {
             log.warn("Primary subscription cache {} failed, using fallback until the primary recovers",
@@ -149,6 +150,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         }
     }
 
+    /** Clears the degraded state after a successful primary read. */
     private void primaryReadSucceeded() {
         // get() first keeps the healthy hot path free of CAS writes.
         if (primaryDegraded.get() && primaryDegraded.compareAndSet(true, false)) {
@@ -156,6 +158,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         }
     }
 
+    /** Checks primary readiness, treating readiness errors as unavailable. */
     private boolean isPrimaryReady() {
         try {
             return primaryReadAllowed.getAsBoolean() && primary.isReady();

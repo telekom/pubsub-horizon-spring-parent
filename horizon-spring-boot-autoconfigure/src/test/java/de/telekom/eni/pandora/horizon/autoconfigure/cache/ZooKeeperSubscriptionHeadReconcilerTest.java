@@ -48,33 +48,60 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
 
     private final ZooKeeperSubscriptionSnapshotHeadReader reader = mock(ZooKeeperSubscriptionSnapshotHeadReader.class);
     private final LocalSubscriptionCache cache = mock(LocalSubscriptionCache.class);
-    private final ZooKeeperSubscriptionHeadReconciler reconciler = new ZooKeeperSubscriptionHeadReconciler(
-        reader, cache);
+    private final GatedReconciler reconciler = new GatedReconciler(
+        new ZooKeeperSubscriptionHeadReconciler(reader, cache));
 
-    @Test
-    void interruptedHeadReadIsNeitherCountedNorFallsBackToMongo() {
-        when(reader.readActivate()).thenThrow(new IllegalStateException("Interrupted while reading",
-            new InterruptedException()));
+    /** Test adapter that passes a configurable gate to every reconciliation call. */
+    private static final class GatedReconciler {
+        private final ZooKeeperSubscriptionHeadReconciler target;
+        private ZooKeeperSubscriptionHeadReconciler.CacheCommitGate gate =
+            ZooKeeperSubscriptionHeadReconciler.CacheCommitGate.OPEN;
 
-        reconciler.run();
+        private GatedReconciler(ZooKeeperSubscriptionHeadReconciler target) {
+            this.target = target;
+        }
 
-        assertEquals(0, reconciler.headReadFailureCount());
-        verify(cache, never()).disconnected();
+        void setCommitGate(ZooKeeperSubscriptionHeadReconciler.CacheCommitGate gate) {
+            this.gate = gate;
+        }
+
+        void reconcilePreparedAndActivatedHeads() {
+            target.reconcilePreparedAndActivatedHeads(gate);
+        }
+
+        void reconcileActivatedHead() {
+            target.reconcileActivatedHead(gate);
+        }
+
+        long getActivatedHeadReadFailureCount() {
+            return target.getActivatedHeadReadFailureCount();
+        }
     }
 
     @Test
-    void prioritizesActivateHeadOnStartupWithoutLoadingPreparedTwice() {
+    void interruptedHeadReadIsNeitherCountedNorFallsBackToMongo() {
+        when(reader.readActivatedHead()).thenThrow(new IllegalStateException("Interrupted while reading",
+            new InterruptedException()));
+
+        reconciler.reconcilePreparedAndActivatedHeads();
+
+        assertEquals(0, reconciler.getActivatedHeadReadFailureCount());
+        verify(cache, never()).clearExpectedHead();
+    }
+
+    @Test
+    void prioritizesActivatedHeadOnStartupWithoutLoadingPreparedTwice() {
         var prepared = head("prepared");
         var active = head("active");
-        when(reader.readPrepared()).thenReturn(Optional.of(prepared));
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readPreparedHead()).thenReturn(Optional.of(prepared));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
         var order = inOrder(reader, cache);
-        order.verify(reader).readPrepared();
-        order.verify(reader).readActivate();
-        order.verify(cache).setActivationHead(active);
+        order.verify(reader).readPreparedHead();
+        order.verify(reader).readActivatedHead();
+        order.verify(cache).setExpectedHead(active);
         order.verify(cache).prepare(active);
         order.verify(cache).activate(active);
         verify(cache, never()).prepare(prepared);
@@ -84,13 +111,13 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     void preloadsNewPreparedHeadWithoutReactivatingConfirmedHead() {
         var active = head("active");
         var prepared = head("next");
-        when(reader.readActivate()).thenReturn(Optional.of(active));
-        reconciler.run();
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
+        when(cache.isFresh()).thenReturn(true);
         when(cache.isActiveSnapshot(active)).thenReturn(true);
-        when(reader.readPrepared()).thenReturn(Optional.of(prepared));
-        reconciler.run();
+        when(reader.readPreparedHead()).thenReturn(Optional.of(prepared));
+        reconciler.reconcilePreparedAndActivatedHeads();
 
         verify(cache).activate(active);
         verify(cache).prepare(active);
@@ -98,85 +125,85 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void missingActivateHeadMarksCacheStale() {
+    void missingActivatedHeadMarksCacheStale() {
         var prepared = head("next");
-        when(reader.readPrepared()).thenReturn(Optional.of(prepared));
+        when(reader.readPreparedHead()).thenReturn(Optional.of(prepared));
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
         verify(cache, never()).prepare(prepared);
-        verify(cache).disconnected();
-        assertEquals(1, reconciler.headReadFailureCount());
+        verify(cache).clearExpectedHead();
+        assertEquals(1, reconciler.getActivatedHeadReadFailureCount());
     }
 
     @Test
-    void invalidPreparedHeadDoesNotBlockValidActivateHead() {
+    void invalidPreparedHeadDoesNotBlockValidActivatedHead() {
         var active = head("active");
-        when(reader.readPrepared()).thenThrow(new SubscriptionCacheSnapshotException("invalid prepared"));
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readPreparedHead()).thenThrow(new SubscriptionCacheSnapshotException("invalid prepared"));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        verify(cache).setActivationHead(active);
+        verify(cache).setExpectedHead(active);
         verify(cache).prepare(active);
         verify(cache).activate(active);
     }
 
     @Test
-    void preparedReadFailureDoesNotBlockActivateHead() {
+    void preparedReadFailureDoesNotBlockActivatedHead() {
         var active = head("active");
-        when(reader.readPrepared()).thenThrow(new IllegalStateException("ZooKeeper read denied"));
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readPreparedHead()).thenThrow(new IllegalStateException("ZooKeeper read denied"));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        verify(reader).readActivate();
-        verify(cache).setActivationHead(active);
+        verify(reader).readActivatedHead();
+        verify(cache).setExpectedHead(active);
         verify(cache).prepare(active);
         verify(cache).activate(active);
     }
 
     @Test
-    void activeOnlyReconciliationDoesNotReadPreparedHead() {
+    void activatedOnlyReconciliationDoesNotReadPreparedHead() {
         var active = head("active");
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
 
-        reconciler.reconcileActiveHead();
+        reconciler.reconcileActivatedHead();
 
-        verify(reader).readActivate();
-        verify(reader, never()).readPrepared();
-        verify(cache).setActivationHead(active);
+        verify(reader).readActivatedHead();
+        verify(reader, never()).readPreparedHead();
+        verify(cache).setExpectedHead(active);
         verify(cache).prepare(active);
         verify(cache).activate(active);
-        assertEquals(0, reconciler.headReadFailureCount());
+        assertEquals(0, reconciler.getActivatedHeadReadFailureCount());
     }
 
     @Test
-    void invalidActivateHeadMarksCacheStaleWithoutLoadingPrepared() {
+    void invalidActivatedHeadMarksCacheStaleWithoutLoadingPrepared() {
         var prepared = head("next");
-        when(reader.readPrepared()).thenReturn(Optional.of(prepared));
-        when(reader.readActivate()).thenThrow(new SubscriptionCacheSnapshotException("invalid activate"));
+        when(reader.readPreparedHead()).thenReturn(Optional.of(prepared));
+        when(reader.readActivatedHead()).thenThrow(new SubscriptionCacheSnapshotException("invalid activated"));
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        verify(cache).disconnected();
+        verify(cache).clearExpectedHead();
         verify(cache, never()).prepare(prepared);
-        assertEquals(1, reconciler.headReadFailureCount());
+        assertEquals(1, reconciler.getActivatedHeadReadFailureCount());
     }
 
     @Test
     void failedActivationRevokesFreshnessAndCanRetryOnNextEvent() {
         var active = head("active");
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
         doThrow(new SubscriptionCacheSnapshotException("MongoDB unavailable"))
             .doNothing().when(cache).prepare(active);
 
-        reconciler.run();
-        verify(cache).activationFailed(active);
+        reconciler.reconcilePreparedAndActivatedHeads();
+        verify(cache).recordActivationFailure(active);
         verify(cache).discardPreparedSnapshot(active);
         verify(cache, never()).discardPreparedSnapshot();
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
         verify(cache, times(2)).prepare(active);
         verify(cache).activate(active);
     }
@@ -184,11 +211,11 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     @Test
     void activationLogsSuppressRepeatedStackTracesAndResetAfterRecovery() {
         var active = head("active");
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
         var failure = new SubscriptionCacheSnapshotException("count mismatch");
         doThrow(failure).doThrow(failure).doNothing().doNothing().doThrow(failure)
             .when(cache).prepare(active);
-        Runnable reconcile = reconciler::reconcileActiveHead;
+        Runnable reconcile = reconciler::reconcileActivatedHead;
         var logger = (Logger) LoggerFactory.getLogger(ZooKeeperSubscriptionHeadReconciler.class);
         var appender = new ListAppender<ILoggingEvent>();
         appender.start();
@@ -210,7 +237,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
             assertEquals(1, recoveries.size());
             assertEquals(Level.INFO, recoveries.getFirst().getLevel());
             assertTrue(recoveries.getFirst().getFormattedMessage().contains("2 failed attempts"));
-            verify(cache, times(3)).activationFailed(active);
+            verify(cache, times(3)).recordActivationFailure(active);
             verify(cache, times(2)).activate(active);
         } finally {
             logger.detachAppender(appender);
@@ -225,8 +252,8 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         var revised = head("active");
         revised.setRevision(2L);
         var rollback = head("previous");
-        when(reader.readActivate()).thenReturn(Optional.of(original), Optional.of(revised), Optional.of(rollback));
-        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
+        when(reader.readActivatedHead()).thenReturn(Optional.of(original), Optional.of(revised), Optional.of(rollback));
+        when(cache.isFresh()).thenReturn(true);
         var activeHead = new AtomicReference<SubscriptionSnapshotHead>();
         doAnswer(invocation -> {
             activeHead.set(invocation.getArgument(0));
@@ -235,9 +262,9 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         when(cache.isActiveSnapshot(any())).thenAnswer(invocation ->
             SubscriptionSnapshotHeads.isSameSnapshot(invocation.getArgument(0), activeHead.get()));
 
-        reconciler.run();
-        reconciler.run();
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
+        reconciler.reconcilePreparedAndActivatedHeads();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
         verify(cache).prepare(original);
         verify(cache).prepare(revised);
@@ -247,33 +274,31 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void activateReadFailureMarksCacheStale() {
-        when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
+    void activatedReadFailureMarksCacheStale() {
+        when(reader.readActivatedHead()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        var order = inOrder(cache);
-        verify(cache).disconnected();
-        verify(cache, never()).suspended();
+        verify(cache).clearExpectedHead();
     }
 
     @Test
     void reconnectRereadsBothHeadsAndReactivatesStaleActiveHead() {
         var active = head("active");
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
 
-        reconciler.run();
-        when(cache.isActiveSnapshotUpToDate()).thenReturn(true);
+        reconciler.reconcilePreparedAndActivatedHeads();
+        when(cache.isFresh()).thenReturn(true);
         when(cache.isActiveSnapshot(active)).thenReturn(true);
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
         verify(cache).prepare(active);
 
-        when(cache.isActiveSnapshotUpToDate()).thenReturn(false);
-        reconciler.run();
+        when(cache.isFresh()).thenReturn(false);
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        verify(reader, times(3)).readPrepared();
-        verify(reader, times(3)).readActivate();
-        verify(cache, never()).disconnected();
+        verify(reader, times(3)).readPreparedHead();
+        verify(reader, times(3)).readActivatedHead();
+        verify(cache, never()).clearExpectedHead();
         verify(cache, never()).discardPreparedSnapshot();
         verify(cache, times(2)).prepare(active);
         verify(cache, times(2)).activate(active);
@@ -282,9 +307,9 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     @Test
     void closedGateDuringLoadPreventsLateActivation() throws Exception {
         var active = head("active");
-        when(reader.readActivate()).thenReturn(Optional.of(active));
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
         var current = new AtomicBoolean(true);
-        reconciler.setActivationGate(commit -> {
+        reconciler.setCommitGate(commit -> {
             if (!current.get()) {
                 return false;
             }
@@ -300,7 +325,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         }).when(cache).prepare(active);
 
         try (var executor = Executors.newSingleThreadExecutor()) {
-            var reconciliation = executor.submit(reconciler::run);
+            var reconciliation = executor.submit(reconciler::reconcilePreparedAndActivatedHeads);
             assertTrue(loading.await(10, TimeUnit.SECONDS));
             current.set(false);
             release.countDown();
@@ -309,22 +334,21 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
             release.countDown();
         }
 
-        verify(cache).setActivationHead(active);
+        verify(cache).setExpectedHead(active);
         verify(cache, never()).activate(active);
-        verify(cache, never()).activationFailed(active);
-        verify(cache, never()).suspended();
-        verify(cache, never()).disconnected();
+        verify(cache, never()).recordActivationFailure(active);
+        verify(cache, never()).clearExpectedHead();
     }
 
     @Test
     void closedGateSkipsZooKeeperHeadWithoutTouchingCache() {
         var active = head("active");
-        when(reader.readActivate()).thenReturn(Optional.of(active));
-        reconciler.setActivationGate(commit -> false);
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
+        reconciler.setCommitGate(commit -> false);
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        verify(cache, never()).setActivationHead(active);
+        verify(cache, never()).setExpectedHead(active);
         verify(cache, never()).prepare(active);
         verify(cache, never()).activate(active);
     }
@@ -333,14 +357,14 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     @ValueSource(booleans = {false, true})
     void closedGateDoesNotRevokeFreshnessForAnObsoleteHeadRead(boolean readFails) {
         if (readFails) {
-            when(reader.readActivate()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
+            when(reader.readActivatedHead()).thenThrow(new IllegalStateException("ZooKeeper unavailable"));
         }
-        reconciler.setActivationGate(commit -> false);
+        reconciler.setCommitGate(commit -> false);
 
-        reconciler.run();
+        reconciler.reconcilePreparedAndActivatedHeads();
 
-        verify(cache, never()).disconnected();
-        assertEquals(1, reconciler.headReadFailureCount());
+        verify(cache, never()).clearExpectedHead();
+        assertEquals(1, reconciler.getActivatedHeadReadFailureCount());
     }
 
     private static SubscriptionSnapshotHead head(String snapshotId) {
