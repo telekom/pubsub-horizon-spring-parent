@@ -28,6 +28,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -138,10 +139,27 @@ public class LocalSubscriptionCacheAutoConfiguration {
                 .description(LocalSubscriptionCacheMetrics.FAILURES_DESCRIPTION)
                 .tag("reason", "zookeeper_head_read")
                 .register(registry));
+            var fallbackMode = localCacheProperties.getFallbackMode();
+            // Keys match the horizon.cache.local-subscription-cache properties.
+            log.info("Local subscription cache configuration: fallback-mode={}, stale-local-cache-read-grace-period={}, "
+                    + "zoo-keeper.prepared-path={}, zoo-keeper.activated-path={}, reconcile-interval={}, "
+                    + "snapshot-sync-jitter={}, head-check-jitter={}",
+                fallbackMode.name().toLowerCase(Locale.ROOT).replace('_', '-'),
+                fallbackMode == CacheProperties.LocalSubscriptionCacheFallback.NONE
+                    ? "unlimited" : formatDuration(localCacheProperties.getStaleLocalCacheReadGracePeriod()),
+                preparedPath, activatedPath, formatDuration(localCacheProperties.getReconcileInterval()),
+                formatDuration(localCacheProperties.getSnapshotSyncJitter()),
+                formatDuration(localCacheProperties.getHeadCheckJitter()));
             return new ZooKeeperSubscriptionHeadWatcher(client, preparedPath, activatedPath, reconciler,
                 localCacheProperties.getReconcileInterval(), localCacheProperties.getSnapshotSyncJitter(),
                 localCacheProperties.getHeadCheckJitter());
         }
+    }
+
+    /** Formats a duration like the configuration values, e.g. {@code 300s} or {@code 1500ms}. */
+    static String formatDuration(Duration duration) {
+        var millis = duration.toMillis();
+        return millis % 1000 == 0 ? millis / 1000 + "s" : millis + "ms";
     }
 
     /** Converts a positive timeout to milliseconds within the supported integer range. */
@@ -190,7 +208,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
             }
             var waitStart = System.nanoTime();
             log.info("Waiting for initial local subscription snapshot (timeout {})",
-                timeout.isZero() ? "none" : timeout);
+                timeout.isZero() ? "none" : formatDuration(timeout));
             try {
                 var firstFreshSnapshot = cache.getFirstFreshSnapshot().toCompletableFuture();
                 if (timeout.isZero()) {
@@ -198,7 +216,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
                 } else {
                     firstFreshSnapshot.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
                 }
-                log.info("Initial local subscription snapshot {} fresh after {} ms",
+                log.info("Startup barrier passed: local subscription snapshot {} is fresh after waiting {} ms",
                     cache.getLocalSnapshotId().orElse("none"),
                     TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waitStart));
             } catch (TimeoutException exception) {

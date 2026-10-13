@@ -38,7 +38,7 @@ class LocalSubscriptionCacheHealthIndicatorTest {
     void healthRequiresEffectiveReaderEvenWhenOldSnapshotExists() {
         when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.STALE, false, "snapshot-local", 3,
-                NOW.minusSeconds(600), "snapshot-new", "snapshot-new", NOW.minusSeconds(150)));
+                NOW.minusSeconds(600), "snapshot-new", "snapshot-new", NOW.minusSeconds(450)));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);
         when(subscriptionCacheReader.isReady()).thenReturn(false, true);
 
@@ -56,8 +56,8 @@ class LocalSubscriptionCacheHealthIndicatorTest {
         assertEquals("2026-10-06T09:50:00Z", health.getDetails().get("activatedAt"));
         assertEquals("snapshot-new", health.getDetails().get("expectedSnapshotId"));
         assertEquals("snapshot-new", health.getDetails().get("pendingSnapshotId"));
-        assertEquals("2026-10-06T09:57:30Z", health.getDetails().get("staleSince"));
-        assertEquals("PT0S", health.getDetails().get("staleLocalReadsRemaining"));
+        assertEquals("2026-10-06T09:52:30Z", health.getDetails().get("staleSince"));
+        assertEquals("0s", health.getDetails().get("staleLocalReadsRemaining"));
         assertEquals(List.of("source", "fallbackMode", "headSource", "cacheStatus", "localSnapshotId",
                         "subscriptionCount", "activatedAt", "expectedSnapshotId", "pendingSnapshotId", "staleSince",
                         "staleLocalReadsRemaining"),

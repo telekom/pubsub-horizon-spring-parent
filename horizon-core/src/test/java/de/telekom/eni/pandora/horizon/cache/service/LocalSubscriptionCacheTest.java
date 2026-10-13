@@ -90,6 +90,32 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
+    void activationThatLeavesCacheStaleIsLoggedAsWarning() {
+        var head = snapshotHead("snapshot-1");
+        var otherHead = snapshotHead("snapshot-2");
+        when(snapshotLoader.load(head)).thenReturn(snapshot(head,
+            List.of(subscription("active-id", "production", "event"))));
+        var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(LocalSubscriptionCache.class);
+        var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            cache.setExpectedHead(otherHead);
+            cache.prepare(head);
+            cache.activate(head);
+
+            assertEquals(LocalSubscriptionCache.Status.STALE, cache.getStatus());
+            assertTrue(appender.list.stream().anyMatch(event ->
+                event.getLevel() == ch.qos.logback.classic.Level.WARN
+                    && event.getFormattedMessage().equals(
+                        "Activated local subscription snapshot snapshot-1 but cache remains STALE; expected head snapshot-2")));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
     void shouldRejectActivationWithoutPreparedSnapshot() {
         var exception = assertThrows(IllegalStateException.class, () -> cache.activate(snapshotHead("snapshot-1")));
 

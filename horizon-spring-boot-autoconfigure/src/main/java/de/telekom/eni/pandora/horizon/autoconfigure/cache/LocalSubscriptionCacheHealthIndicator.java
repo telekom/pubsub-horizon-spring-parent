@@ -13,6 +13,7 @@ import org.springframework.boot.actuate.health.HealthIndicator;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 
 /**
@@ -88,8 +89,8 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
             if (fallbackMode == CacheProperties.LocalSubscriptionCacheFallback.HAZELCAST_WITH_MONGO_FALLBACK) {
                 var remaining = properties.getStaleLocalCacheReadGracePeriod()
                     .minus(Duration.between(staleSince, clock.instant()));
-                builder.withDetail("staleLocalReadsRemaining",
-                    (remaining.isNegative() ? Duration.ZERO : remaining).toString());
+                builder.withDetail("staleLocalReadsRemaining", LocalSubscriptionCacheAutoConfiguration.formatDuration(
+                    remaining.isNegative() ? Duration.ZERO : remaining.truncatedTo(ChronoUnit.SECONDS)));
             }
         }
         return builder;

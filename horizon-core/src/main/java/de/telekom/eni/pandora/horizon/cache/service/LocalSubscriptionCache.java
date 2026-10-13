@@ -199,10 +199,12 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         var currentState = cacheState.get();
         var prepared = currentState.preparedSnapshot();
         if (prepared != null && requestedVersion.matches(prepared.version())) {
+            log.debug("Skipped preparing local subscription snapshot {}; already prepared", snapshotHead.getSnapshotId());
             return;
         }
         // Keeps a pending preload of a newer snapshot when the active one is requested again, e.g. after a reconnect.
         if (currentState.hasActiveSnapshot() && requestedVersion.matches(currentState.activeSnapshot().version())) {
+            log.debug("Skipped preparing local subscription snapshot {}; already active", snapshotHead.getSnapshotId());
             return;
         }
 
@@ -214,8 +216,8 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         snapshotLoadNanos.addAndGet(loadNanos);
         lastSnapshotLoadNanos = loadNanos;
         cacheState.updateAndGet(previous -> previous.withPreparedSnapshot(snapshot));
-        log.debug("Prepared local subscription snapshot {} with {} subscriptions",
-            snapshot.snapshotId(), snapshot.subscriptionsById().size());
+        LocalSubscriptionCacheEvents.SNAPSHOT.info("Prepared local subscription snapshot {} ({} subscriptions, loaded in {} ms)",
+            snapshot.snapshotId(), snapshot.subscriptionsById().size(), Duration.ofNanos(loadNanos).toMillis());
     }
 
     /**
@@ -274,9 +276,14 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         if (currentState.hasActiveSnapshot() && requestedVersion.matches(currentState.activeSnapshot().version())) {
             // Reuse the matching active snapshot without requiring a prepared copy.
             var now = clock.instant();
-            cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
+            var next = cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
             activatedAt = now;
             completeFirstFreshSnapshot();
+            if (currentState.status() == Status.STALE && next.status() == Status.FRESH) {
+                LocalSubscriptionCacheEvents.SNAPSHOT.info(
+                    "Local subscription snapshot {} confirmed again; cache is FRESH after being STALE for {}s",
+                    next.activeSnapshot().snapshotId(), Duration.between(currentState.staleSince(), now).toSeconds());
+            }
             return;
         }
 
@@ -293,11 +300,20 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         }
         var now = clock.instant();
         // Publish atomically; CacheState recalculates freshness against the expected and active versions.
-        cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(prepared, now));
+        var next = cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(prepared, now));
         activatedAt = now;
         completeFirstFreshSnapshot();
-        log.debug("Activated local subscription snapshot {} with {} subscriptions",
-            prepared.snapshotId(), prepared.subscriptionsById().size());
+        var previousSnapshotId = currentState.activeSnapshot().snapshotId();
+        if (next.status() == Status.FRESH) {
+            LocalSubscriptionCacheEvents.SNAPSHOT.info("Activated local subscription snapshot {} ({} subscriptions, previous {})",
+                prepared.snapshotId(), prepared.subscriptionsById().size(),
+                previousSnapshotId == null ? "none" : previousSnapshotId);
+        } else {
+            // The reconciler sets the expected head before activating, so this indicates an inconsistency.
+            var expected = next.expectedHeadVersion();
+            log.warn("Activated local subscription snapshot {} but cache remains {}; expected head {}",
+                prepared.snapshotId(), next.status(), expected == null ? "none" : expected.snapshotId());
+        }
     }
 
     /**
@@ -433,7 +449,10 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
      * Discards the currently prepared snapshot without changing the active snapshot.
      */
     public void discardPreparedSnapshot() {
-        cacheState.updateAndGet(CacheState::withoutPreparedSnapshot);
+        var previous = cacheState.getAndUpdate(CacheState::withoutPreparedSnapshot);
+        if (previous.preparedSnapshot() != null) {
+            log.debug("Discarded prepared local subscription snapshot {}", previous.preparedSnapshot().snapshotId());
+        }
     }
 
     /**
@@ -447,10 +466,13 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     public void discardPreparedSnapshot(SubscriptionSnapshotHead head) {
         requireSnapshotId(head);
         var version = SnapshotVersion.from(head);
-        cacheState.updateAndGet(previous -> previous.preparedSnapshot() != null
-            && version.matches(previous.preparedSnapshot().version())
-            ? previous.withoutPreparedSnapshot()
-            : previous);
+        var previous = cacheState.getAndUpdate(state -> state.preparedSnapshot() != null
+            && version.matches(state.preparedSnapshot().version())
+            ? state.withoutPreparedSnapshot()
+            : state);
+        if (previous.preparedSnapshot() != null && version.matches(previous.preparedSnapshot().version())) {
+            log.debug("Discarded prepared local subscription snapshot {}", previous.preparedSnapshot().snapshotId());
+        }
     }
 
     /**
@@ -526,8 +548,11 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
 
     /** Completes the first-fresh milestone once the cache reaches FRESH. */
     private void completeFirstFreshSnapshot() {
-        if (getStatus() == Status.FRESH) {
-            firstFreshSnapshot.complete(null);
+        if (getStatus() == Status.FRESH && firstFreshSnapshot.complete(null)) {
+            var snapshot = cacheState.get().activeSnapshot();
+            log.info("Local subscription cache is fresh for the first time with snapshot {} ({} subscriptions, "
+                    + "last load {} ms)", snapshot.snapshotId(), snapshot.subscriptionsById().size(),
+                Duration.ofNanos(lastSnapshotLoadNanos).toMillis());
         }
     }
 

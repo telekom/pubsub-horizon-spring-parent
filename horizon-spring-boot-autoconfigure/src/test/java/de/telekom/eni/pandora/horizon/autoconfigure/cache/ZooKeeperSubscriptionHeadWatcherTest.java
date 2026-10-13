@@ -119,7 +119,8 @@ class ZooKeeperSubscriptionHeadWatcherTest {
         when(client.getZookeeperClient().isConnected()).thenReturn(true);
         try (var caches = org.mockito.Mockito.mockStatic(org.apache.curator.framework.recipes.cache.CuratorCache.class)) {
             caches.when(() -> org.apache.curator.framework.recipes.cache.CuratorCache.build(
-                    org.mockito.ArgumentMatchers.eq(client), org.mockito.ArgumentMatchers.anyString()))
+                    org.mockito.ArgumentMatchers.eq(client), org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.eq(CuratorCache.Options.SINGLE_NODE_CACHE)))
                 .thenAnswer(ignored -> mock(org.apache.curator.framework.recipes.cache.CuratorCache.class,
                     org.mockito.Mockito.RETURNS_DEEP_STUBS));
             var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
@@ -471,8 +472,113 @@ class ZooKeeperSubscriptionHeadWatcherTest {
 
                 assertThat(appender.list).anySatisfy(event -> {
                     assertThat(event.getLevel()).isEqualTo(Level.WARN);
-                    assertThat(event.getFormattedMessage()).contains("ACTIVATED reconciliation failed");
+                    assertThat(event.getFormattedMessage())
+                        .contains("Unexpected failure in ACTIVATED event subscription head reconciliation");
                 });
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+        }
+    }
+
+    @Test
+    void bothHeadsAreWatchedAsSingleNodes() throws Exception {
+        var client = mock(CuratorFramework.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        try (var caches = mockCuratorCaches(client)) {
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(5), Duration.ZERO, Duration.ZERO, manualScheduler(new AtomicReference<>()))) {
+                caches.verify(() -> CuratorCache.build(client, "/subscriptions/prepared",
+                    CuratorCache.Options.SINGLE_NODE_CACHE));
+                caches.verify(() -> CuratorCache.build(client, "/subscriptions/activate",
+                    CuratorCache.Options.SINGLE_NODE_CACHE));
+            }
+        }
+    }
+
+    @Test
+    void childNodesBelowPreparedHeadAreNotReportedAsHeadChanges() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            client.create().creatingParentsIfNeeded().forPath("/subscriptions/prepared", head("prepared-1"));
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(5), Duration.ZERO, Duration.ZERO)) {
+                watcher.start();
+                watcher.getInitialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+                client.create().forPath("/subscriptions/prepared/child", head("child"));
+                client.setData().forPath("/subscriptions/prepared", head("prepared-2"));
+
+                var payload = org.mockito.ArgumentCaptor.forClass(byte[].class);
+                verify(reconciler, org.mockito.Mockito.timeout(10_000).atLeastOnce())
+                    .reconcilePreparedHead(payload.capture());
+                assertThat(payload.getAllValues())
+                    .allSatisfy(value -> assertThat(new String(value, StandardCharsets.UTF_8))
+                        .doesNotContain("\"child\""));
+            }
+        }
+    }
+
+    @Test
+    void connectionLossAndReconnectAreLoggedAsConnectionEvents() throws Exception {
+        var client = mock(CuratorFramework.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        try (var ignored = mockCuratorCaches(client)) {
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var logger = (Logger) LoggerFactory.getLogger(
+                de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCacheEvents.EVENTS_LOGGER + ".connection");
+            var appender = new ListAppender<ILoggingEvent>();
+            appender.start();
+            logger.addAppender(appender);
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(5), Duration.ZERO, Duration.ZERO, manualScheduler(new AtomicReference<>()))) {
+                watcher.start();
+
+                watcher.onConnectionStateChanged(client, ConnectionState.SUSPENDED);
+                watcher.onConnectionStateChanged(client, ConnectionState.LOST);
+                watcher.onConnectionStateChanged(client, ConnectionState.RECONNECTED);
+                // A second reconnect without a preceding loss is not reported again.
+                watcher.onConnectionStateChanged(client, ConnectionState.RECONNECTED);
+
+                assertThat(appender.list).extracting(ILoggingEvent::getLevel)
+                    .containsOnly(Level.INFO);
+                assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage).containsExactly(
+                    "ZooKeeper connection SUSPENDED; local subscription cache is no longer confirmed",
+                    "ZooKeeper session LOST after 0s disconnected; watches are re-registered on reconnect",
+                    "ZooKeeper reconnected after 0s; rereading subscription heads in 0 ms");
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+        }
+    }
+
+    @Test
+    void initialConnectionIsNotLoggedAsReconnect() throws Exception {
+        var client = mock(CuratorFramework.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
+        try (var ignored = mockCuratorCaches(client)) {
+            when(client.getZookeeperClient().isConnected()).thenReturn(false);
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            var logger = (Logger) LoggerFactory.getLogger(
+                de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCacheEvents.EVENTS_LOGGER + ".connection");
+            var appender = new ListAppender<ILoggingEvent>();
+            appender.start();
+            logger.addAppender(appender);
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(5), Duration.ZERO, Duration.ZERO, manualScheduler(new AtomicReference<>()))) {
+                watcher.start();
+                watcher.onConnectionStateChanged(client, ConnectionState.LOST);
+                watcher.onConnectionStateChanged(client, ConnectionState.CONNECTED);
+
+                assertThat(appender.list).isEmpty();
             } finally {
                 logger.detachAppender(appender);
                 appender.stop();
@@ -513,7 +619,8 @@ class ZooKeeperSubscriptionHeadWatcherTest {
         when(client.getZookeeperClient().isConnected()).thenReturn(true);
         var caches = org.mockito.Mockito.mockStatic(CuratorCache.class);
         caches.when(() -> CuratorCache.build(org.mockito.ArgumentMatchers.eq(client),
-                org.mockito.ArgumentMatchers.anyString()))
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq(CuratorCache.Options.SINGLE_NODE_CACHE)))
             .thenAnswer(ignored -> mock(CuratorCache.class, org.mockito.Mockito.RETURNS_DEEP_STUBS));
         return caches;
     }
@@ -578,6 +685,10 @@ class ZooKeeperSubscriptionHeadWatcherTest {
             doAnswer(ignored -> {
                 throw new IllegalStateException("ZooKeeper unavailable");
             }).when(reconciler).reconcilePreparedAndActivatedHeads(anyGate());
+            var logger = (Logger) LoggerFactory.getLogger(ZooKeeperSubscriptionHeadWatcher.class);
+            var appender = new ListAppender<ILoggingEvent>();
+            appender.start();
+            logger.addAppender(appender);
 
             try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
                 "/subscriptions/prepared", "/subscriptions/activate", reconciler,
@@ -587,6 +698,15 @@ class ZooKeeperSubscriptionHeadWatcherTest {
                     () -> watcher.getInitialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS));
                 assertThat(error.getCause()).isInstanceOf(IllegalStateException.class)
                     .hasMessage("ZooKeeper unavailable");
+                assertThat(appender.list).anySatisfy(event -> {
+                    assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                    assertThat(event.getFormattedMessage())
+                        .isEqualTo("Unexpected failure in initial subscription head reconciliation");
+                    assertThat(event.getThrowableProxy()).isNotNull();
+                });
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
             }
         }
     }

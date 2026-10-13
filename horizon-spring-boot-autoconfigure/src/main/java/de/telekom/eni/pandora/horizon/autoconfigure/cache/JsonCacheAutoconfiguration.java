@@ -82,7 +82,7 @@ public class JsonCacheAutoconfiguration {
         // If local subscription cache is enabled and fallback mode is NONE, use the local cache exclusively
         if (localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
             if (localSubscriptionCache == null) {
-                throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.local-subscription-cache is true");
+                throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.local-subscription-cache.enabled is true");
             }
             log.info("Using local subscription cache reader without fallback");
             return localSubscriptionCache;
@@ -90,7 +90,7 @@ public class JsonCacheAutoconfiguration {
         // Otherwise, use the local cache with Hazelcast as a fallback
         var hazelcastCacheReader = new HazelcastCacheReader(subscriptionCache);
         if (localSubscriptionCache == null) {
-            log.info("Using Hazelcast subscription cache reader; local subscription cache bean is unavailable");
+            log.warn("Using Hazelcast subscription cache reader; local subscription cache is enabled but its bean is unavailable");
             return hazelcastCacheReader;
         }
         log.info("Using local subscription cache reader with Hazelcast/MongoDB fallback");

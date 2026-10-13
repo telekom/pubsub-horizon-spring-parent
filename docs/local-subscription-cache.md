@@ -272,46 +272,8 @@ Head handling is split into two classes:
   authoritative, reuses or loads snapshots, and marks the cache unconfirmed when ACTIVATED is unavailable. It is not
   thread-safe and is only called from the watcher thread.
 
-The table separates who provides each method from who calls it. For `CacheCommitGate`, the Reconciler declares the
-contract and the Watcher supplies its implementation as a lambda.
-
-| Method / contract | Provided by | Used by | Role in the interaction |
-|---|---|---|---|
-| `start()` | Watcher | Spring bean lifecycle | Starts Curator watches and schedules initial and periodic reconciliation. |
-| `onPreparedHeadChanged(data)` | Watcher | PREPARED CuratorCache listener | Coalesces PREPARED events and schedules delayed preload work. |
-| `onActivatedHeadChanged()` | Watcher | ACTIVATED CuratorCache listener | Cancels superseded pending work and schedules immediate reconciliation of both heads. |
-| `onConnectionStateChanged(state)` | Watcher | Curator connection listener | Advances the connection epoch; clears confirmation on loss or schedules a reread on reconnect. |
-| `reconcilePreparedAndActivatedHeads(gate)` | Reconciler | Watcher startup, ACTIVATED, and reconnect tasks | Reads both heads; ACTIVATED remains authoritative. |
-| `reconcileActivatedHead(gate)` | Reconciler | Watcher periodic task | Re-reads only ACTIVATED during periodic reconciliation. |
-| `reconcilePreparedHead(data)` | Reconciler | Watcher delayed PREPARED task | Preloads or discards a candidate; never activates it. |
-| `onConnectionLost()` | Reconciler | Watcher on `SUSPENDED` / `LOST` | Clears the expected head while the watcher monitor is held. |
-| `CacheCommitGate.commitIfStillValid(commit)` | Reconciler declares the contract; Watcher supplies the implementation | Reconciler | Runs a cache mutation only while the task's connection epoch is current. |
-| `setExpectedHead(head)` | LocalSubscriptionCache | Reconciler through the commit gate | Records which snapshot version ZooKeeper currently authorizes. |
-| `prepare(head)` | LocalSubscriptionCache | Reconciler directly | Loads an invisible candidate; preparation is not cancelled or guarded by the commit gate. |
-| `activate(head)` | LocalSubscriptionCache | Reconciler through the commit gate | Publishes the matching prepared snapshot atomically. |
-| `clearExpectedHead()` | LocalSubscriptionCache | Reconciler through the gate after a head-read failure, or via `onConnectionLost()` | Removes head confirmation and marks an active snapshot stale. |
-| `recordActivationFailure(head)` | LocalSubscriptionCache | Reconciler after load or activation failure | Counts the failure and marks the cache stale if this version is still expected. |
-| `discardPreparedSnapshot(...)` | LocalSubscriptionCache | Reconciler on PREPARED removal or activation failure | Removes the prepared candidate, preserving a different version when a specific head is supplied. |
-
-The commit gate protects only mutations explicitly run through it, including `setExpectedHead`, `activate`, and
-`clearExpectedHead` after an ACTIVATED-head read failure. On connection loss, the watcher instead calls
-`onConnectionLost()` while holding its monitor. Snapshot preparation is not gated or cancelled: a load finishing after
-disconnect may remain as an invisible prepared candidate, but work from the old epoch cannot activate it. Reconnect
-reconciliation rereads the authoritative heads before activation. Locks are only taken in the order watcher monitor,
-then cache.
-
-### Safeguards and failure boundaries
-
-| Safeguard | Protects against | Boundary |
-|---|---|---|
-| Single-thread executor and PREPARED task generation | Overlapping reconciliation and running obsolete, still-pending PREPARED work. | Does not interrupt a task or MongoDB load that has already started. |
-| Connection epoch (`tryRunInEpoch`) | Delayed work from an old ZooKeeper connection starting after reconnect. | Detects an epoch change but does not stop in-flight work. |
-| `CacheCommitGate` under the watcher monitor | A stale head decision changing the expected head or activating a snapshot after a connection transition. | Only mutations routed through the gate are checked; `prepare` may finish with an invisible candidate. |
-| ACTIVATED-only authority and snapshot validation | PREPARED, malformed, incomplete, or version-mismatched data becoming active. | PREPARED remains a preload hint; it never authorizes activation. |
-| Atomic `CacheState` transition | Readers observing a partially built or mixed-version snapshot. | Protects the in-pod switch; pods may still switch at different times. |
-| Jitter | Many pods loading snapshots or checking heads simultaneously. | Spreads load; it is not a correctness or coordination mechanism. |
-| STALE grace period and data fallback | An unavailable head immediately making reads unavailable while a usable local snapshot remains. | After grace expiry, fallback must be usable; `fallback-mode: none` has no shared source. |
-| Startup barrier | Starting to serve before the required local cache has reached its first `FRESH` snapshot. | Applies only when local cache is required; timeout can fail startup. |
+Their method-level interaction and the commit gate are described in
+[Watcher-reconciler interaction](#watcher-reconciler-interaction), after the flows that trigger them.
 
 ## Lifecycle and flows
 
@@ -437,6 +399,36 @@ flowchart LR
 considers the session gone. For the cache the distinction does not matter: in both cases the ACTIVATED head is no
 longer confirmed, and every reconnect rereads both heads.
 
+### Watcher-reconciler interaction
+
+The table separates who provides each method from who calls it. For `CacheCommitGate`, the Reconciler declares the
+contract and the Watcher supplies its implementation as a lambda.
+
+| Method / contract | Provided by | Used by | Role in the interaction |
+|---|---|---|---|
+| `start()` | Watcher | Spring bean lifecycle | Starts Curator watches and schedules initial and periodic reconciliation. |
+| `onPreparedHeadChanged(data)` | Watcher | PREPARED CuratorCache listener | Coalesces PREPARED events and schedules delayed preload work. |
+| `onActivatedHeadChanged()` | Watcher | ACTIVATED CuratorCache listener | Cancels superseded pending work and schedules immediate reconciliation of both heads. |
+| `onConnectionStateChanged(state)` | Watcher | Curator connection listener | Advances the connection epoch; clears confirmation on loss or schedules a reread on reconnect. |
+| `reconcilePreparedAndActivatedHeads(gate)` | Reconciler | Watcher startup, ACTIVATED, and reconnect tasks | Reads both heads; ACTIVATED remains authoritative. |
+| `reconcileActivatedHead(gate)` | Reconciler | Watcher periodic task | Re-reads only ACTIVATED during periodic reconciliation. |
+| `reconcilePreparedHead(data)` | Reconciler | Watcher delayed PREPARED task | Preloads or discards a candidate; never activates it. |
+| `onConnectionLost()` | Reconciler | Watcher on `SUSPENDED` / `LOST` | Clears the expected head while the watcher monitor is held. |
+| `CacheCommitGate.commitIfStillValid(commit)` | Reconciler declares the contract; Watcher supplies the implementation | Reconciler | Runs a cache mutation only while the task's connection epoch is current. |
+| `setExpectedHead(head)` | LocalSubscriptionCache | Reconciler through the commit gate | Records which snapshot version ZooKeeper currently authorizes. |
+| `prepare(head)` | LocalSubscriptionCache | Reconciler directly | Loads an invisible candidate; preparation is not cancelled or guarded by the commit gate. |
+| `activate(head)` | LocalSubscriptionCache | Reconciler through the commit gate | Publishes the matching prepared snapshot atomically. |
+| `clearExpectedHead()` | LocalSubscriptionCache | Reconciler through the gate after a head-read failure, or via `onConnectionLost()` | Removes head confirmation and marks an active snapshot stale. |
+| `recordActivationFailure(head)` | LocalSubscriptionCache | Reconciler after load or activation failure | Counts the failure and marks the cache stale if this version is still expected. |
+| `discardPreparedSnapshot(...)` | LocalSubscriptionCache | Reconciler on PREPARED removal or activation failure | Removes the prepared candidate, preserving a different version when a specific head is supplied. |
+
+The commit gate protects only mutations explicitly run through it, including `setExpectedHead`, `activate`, and
+`clearExpectedHead` after an ACTIVATED-head read failure. On connection loss, the watcher instead calls
+`onConnectionLost()` while holding its monitor. Snapshot preparation is not gated or cancelled: a load finishing after
+disconnect may remain as an invisible prepared candidate, but work from the old epoch cannot activate it. Reconnect
+reconciliation rereads the authoritative heads before activation. Locks are only taken in the order watcher monitor,
+then cache.
+
 ### Cache operations
 
 `prepare(snapshotHead)` loads all entries with `snapshotId` from `snapshot-collection` (bounded by
@@ -509,7 +501,7 @@ API is intentionally limited; additional query shapes need an implementation for
 `FallbackSubscriptionCacheReader` uses the local cache only while it may serve reads (`canServeLocalReads()`):
 
 - `FRESH`: local reads;
-- `STALE`: local reads until `stale-local-cache-read-grace-period` (default `120s`) has elapsed since the cache became
+- `STALE`: local reads until `stale-local-cache-read-grace-period` (default `300s`) has elapsed since the cache became
   stale, then the fallback reader; `0s` switches immediately;
 - `UNINITIALIZED`: fallback reader.
 
@@ -570,7 +562,7 @@ with the prefix `<SERVICE>_CACHE_LOCAL_SUBSCRIPTION_CACHE_` (`STARLIGHT`, `COMET
 | `fallback-mode` | `hazelcast-with-mongo-fallback` | all | Read source when the local cache cannot serve reads. `none` never reads Hazelcast. |
 | `snapshot-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-snapshots` | all | MongoDB collection with snapshot entries. |
 | `mongo-load-timeout` | `60s` | all | Server-side limit (`maxTimeMS`) for loading a snapshot; does not cover unresponsive connections. Not mapped in the service YAMLs; override via `HORIZON_CACHE_LOCALSUBSCRIPTIONCACHE_MONGOLOADTIMEOUT`. |
-| `stale-local-cache-read-grace-period` | `120s` | `hazelcast-with-mongo-fallback` | How long a `STALE` snapshot may serve reads. `0s` switches immediately. |
+| `stale-local-cache-read-grace-period` | `300s` | `hazelcast-with-mongo-fallback` | How long a `STALE` snapshot may serve reads. `0s` switches immediately. |
 | `require-local-cache-at-startup` | `true` | `hazelcast-with-mongo-fallback` | Startup waits for the first `FRESH` snapshot. `none` always waits. With `false`, startup does not check Hazelcast either. |
 | `initial-snapshot-timeout` | `15s` | when startup waits | Maximum wait for the first `FRESH` snapshot; expiry fails startup. `0s` waits indefinitely. |
 | `reconcile-interval` | `60s` | all | Periodic ACTIVATED re-check while connected. `0s` disables it. |
@@ -622,7 +614,7 @@ MongoDB load is not cancelled by a disconnect; its result is only prevented from
 | `expectedSnapshotId` | Snapshot of the current ACTIVATED head; `none` while no head is confirmed |
 | `pendingSnapshotId` | Prepared but not yet active snapshot, or `none` |
 | `staleSince` | Only while `STALE` |
-| `staleLocalReadsRemaining` | Only while `STALE` with `hazelcast-with-mongo-fallback`: remaining grace |
+| `staleLocalReadsRemaining` | Only while `STALE` with `hazelcast-with-mongo-fallback`: remaining grace in whole seconds (`0s` once expired) |
 
 ### Metrics
 
@@ -640,14 +632,46 @@ MongoDB load is not cancelled by a disconnect; its result is only prevented from
 | `horizon_local_subscription_cache_snapshot_load_seconds` | Timer | Count and total duration of successful snapshot loads |
 | `horizon_local_subscription_cache_snapshot_load_last_seconds` | Gauge | Duration of the last successful load |
 
+### Loggers
+
+Cache state changes must be visible even when the service runs with root level `WARN`. Snapshot and connection
+events therefore use dedicated event loggers (`LocalSubscriptionCacheEvents`) that can be set independently of the
+implementation classes.
+
+| Logger | Content | Helm value (`commonHorizon.localSubscriptionCacheLogging.*`) | Default |
+|---|---|---|---|
+| `de.telekom.eni.pandora.horizon.cache` | Cache core and fallback reader: first `FRESH`, fallback switches, warnings | `level` | `INFO` |
+| `de.telekom.eni.pandora.horizon.autoconfigure.cache` | Configuration, startup barrier, watcher and reconciler failures | `level` | `INFO` |
+| `de.telekom.eni.pandora.horizon.cache.events.snapshot` | Prepared, activated, confirmed again | `snapshotEvents` | `INFO` |
+| `de.telekom.eni.pandora.horizon.cache.events.connection` | ZooKeeper `SUSPENDED`/`LOST`, session lost, reconnected | `connectionEvents` | `INFO` |
+| `org.apache.zookeeper` | ZooKeeper client library; logs every connection retry at `WARN`/`ERROR` | `zooKeeperClient` | `ERROR` |
+
+The charts set these levels as `LOGGING_LEVEL_*` environment variables. Spring Boot maps such variables only to
+lowercase package names, which is why the event loggers are package-like names instead of class names. Curator stays
+on the root level.
+
 ### Key log messages
 
 | Message (excerpt) | Meaning |
 |---|---|
-| `Using local subscription cache reader ...` / `Using Hazelcast subscription cache reader ...` | Selected reader at startup |
-| `Waiting for initial local subscription snapshot` / `... fresh after N ms` | Startup barrier |
-| `Could not activate subscription snapshot` | Load or activation failed; repeats are logged without stack trace |
-| `ZooKeeper activated subscription head is missing` / `Could not read activated subscription head` | ACTIVATED unavailable; cache becomes `STALE` |
+| `Using local subscription cache reader ...` / `Using Hazelcast subscription cache reader ...` | Selected reader at startup; `WARN` if the local cache is enabled but its bean is unavailable |
+| `Local subscription cache configuration: fallback-mode=...` | Effective configuration as `key=value` pairs named like the properties |
+| `ZooKeeper is not connected yet; ...` / `ZooKeeper connected; starting initial ...` | Initial head reconciliation deferred until the first ZooKeeper connection |
+| `Local subscription cache is fresh for the first time ...` | First `FRESH` snapshot with subscription count and load duration, logged with or without startup barrier |
+| `Waiting for initial local subscription snapshot` / `Startup barrier passed: ... after waiting N ms` | Startup barrier; `N` is the wait time of the barrier, not the load duration |
+| `Unexpected failure in initial subscription head reconciliation` | Initial reconciliation failed (`WARN` with stack trace); without startup barrier this is the only trace |
+| `Prepared local subscription snapshot ... loaded in N ms` / `Activated local subscription snapshot ... previous ...` | Snapshot loaded / activated (`INFO`, snapshot event logger); skipped preparations and discarded candidates are logged at `DEBUG` |
+| `Activated local subscription snapshot ... but cache remains STALE; expected head ...` | Activation did not match the expected head (`WARN`); indicates an inconsistency |
+| `Local subscription snapshot ... confirmed again; cache is FRESH after being STALE for Ns` | End of a `STALE` phase with the same snapshot, e.g. after a reconnect |
+| `ZooKeeper connection SUSPENDED\|LOST; local subscription cache is no longer confirmed` | Connection lost (connection event logger); cache becomes `STALE` |
+| `ZooKeeper session LOST after Ns disconnected; ...` | Session expired during an ongoing outage |
+| `ZooKeeper reconnected after Ns; rereading subscription heads in N ms` | Reconnect after a loss; heads are re-read after the jitter |
+| `Could not activate subscription snapshot` | Load or activation failed; repeats are logged without stack trace but with the root cause |
+| `ZooKeeper ACTIVATED subscription head is missing` / `Could not read ACTIVATED subscription head` | ACTIVATED unavailable; local cache is no longer confirmed and becomes `STALE` |
+| `ZooKeeper ACTIVATED subscription head ... readable again` / `Subscription snapshot activation recovered` | Recovery after failed reads or activations |
+| `Unexpected failure in {PREPARED event\|ACTIVATED event\|reconnect\|periodic} subscription head reconciliation` | Unexpected exception in a watcher task (`WARN` with stack trace) |
+| `Primary subscription cache is not ready yet` / `... is ready` / `... is not ready` / `... is ready again` | Switch between local reads and fallback; `WARN` only when the primary was ready before |
+| `Failed to determine {primary\|fallback} subscription cache readiness` / `... readiness check recovered` | Readiness check failed; first failure `WARN` with stack trace, repeats `DEBUG` |
 | `Primary subscription cache ... failed, using fallback until the primary recovers` | Local reads failed; fallback active |
 | `Primary subscription cache recovered` | Local reads served again |
 
@@ -668,6 +692,21 @@ Not provided:
 - cancellation of a running MongoDB load on disconnect;
 - deep immutability of `SubscriptionResource` objects;
 - an effect on Kubernetes readiness after startup.
+
+### Safeguards
+
+The guarantees rely on these mechanisms; each has a deliberate boundary.
+
+| Safeguard | Protects against | Boundary |
+|---|---|---|
+| Single-thread executor and latest-task tracking | Overlapping reconciliation and running obsolete, still-pending PREPARED or reconnect work. | Does not interrupt a task or MongoDB load that has already started. |
+| Connection epoch (`tryRunInEpoch`) | Delayed work from an old ZooKeeper connection starting after reconnect. | Detects an epoch change but does not stop in-flight work. |
+| `CacheCommitGate` under the watcher monitor | A stale head decision changing the expected head or activating a snapshot after a connection transition. | Only mutations routed through the gate are checked; `prepare` may finish with an invisible candidate. |
+| ACTIVATED-only authority and snapshot validation | PREPARED, malformed, incomplete, or version-mismatched data becoming active. | PREPARED remains a preload hint; it never authorizes activation. |
+| Atomic `CacheState` transition | Readers observing a partially built or mixed-version snapshot. | Protects the in-pod switch; pods may still switch at different times. |
+| Jitter | Many pods loading snapshots or checking heads simultaneously. | Spreads load; it is not a correctness or coordination mechanism. |
+| STALE grace period and data fallback | An unavailable head immediately making reads unavailable while a usable local snapshot remains. | After grace expiry, fallback must be usable; `fallback-mode: none` has no shared source. |
+| Startup barrier | Starting to serve before the required local cache has reached its first `FRESH` snapshot. | Applies only when local cache is required; timeout can fail startup. |
 
 ## Code map
 

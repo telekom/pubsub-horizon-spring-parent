@@ -4,13 +4,20 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -183,5 +190,81 @@ class FallbackSubscriptionCacheReaderTest {
         when(fallback.isReady()).thenThrow(new IllegalStateException("fallback unavailable"));
 
         assertFalse(reader.isReady());
+    }
+
+    @Test
+    void shouldLogEachSwitchBetweenPrimaryAndFallbackOnce() {
+        var primaryReady = new java.util.concurrent.atomic.AtomicBoolean(false);
+        when(primary.isReady()).thenAnswer(ignored -> primaryReady.get());
+        when(fallback.isReady()).thenReturn(true);
+        var appender = attachAppender();
+        try {
+            reader.isReady();
+            reader.isReady();
+            primaryReady.set(true);
+            reader.isReady();
+            reader.isReady();
+            primaryReady.set(false);
+            reader.isReady();
+            reader.isReady();
+            primaryReady.set(true);
+            reader.isReady();
+
+            assertThat(appender.list).extracting(ILoggingEvent::getLevel, ILoggingEvent::getFormattedMessage)
+                .containsExactly(
+                    tuple(Level.INFO, "Primary subscription cache is not ready yet; reads are served by the fallback"),
+                    tuple(Level.INFO, "Primary subscription cache is ready; reads are served by the primary"),
+                    tuple(Level.WARN, "Primary subscription cache is not ready; reads are served by the fallback"),
+                    tuple(Level.INFO, "Primary subscription cache is ready again; reads are served by the primary"));
+        } finally {
+            detachAppender(appender);
+        }
+    }
+
+    @Test
+    void shouldLogRepeatedReadinessCheckFailuresOnlyOnceAtWarn() {
+        var failing = new java.util.concurrent.atomic.AtomicBoolean(true);
+        when(primary.isReady()).thenAnswer(ignored -> {
+            if (failing.get()) {
+                throw new IllegalStateException("primary unavailable");
+            }
+            return true;
+        });
+        when(fallback.isReady()).thenReturn(true);
+        var appender = attachAppender();
+        try {
+            reader.isReady();
+            reader.isReady();
+            reader.isReady();
+            failing.set(false);
+            reader.isReady();
+
+            var checkFailures = appender.list.stream()
+                .filter(event -> event.getFormattedMessage().startsWith("Failed to determine primary"))
+                .toList();
+            assertThat(checkFailures).extracting(ILoggingEvent::getLevel)
+                .containsExactly(Level.WARN, Level.DEBUG, Level.DEBUG);
+            assertThat(checkFailures.get(0).getThrowableProxy()).isNotNull();
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                .contains("Primary subscription cache readiness check recovered");
+        } finally {
+            detachAppender(appender);
+        }
+    }
+
+    private static ListAppender<ILoggingEvent> attachAppender() {
+        var logger = (Logger) LoggerFactory.getLogger(FallbackSubscriptionCacheReader.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(Level.DEBUG);
+        return appender;
+    }
+
+    private static void detachAppender(ListAppender<ILoggingEvent> appender) {
+        var logger = (Logger) LoggerFactory.getLogger(FallbackSubscriptionCacheReader.class);
+        logger.detachAppender(appender);
+        logger.setLevel(null);
+        appender.stop();
     }
 }

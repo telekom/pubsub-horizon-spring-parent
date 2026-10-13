@@ -46,7 +46,7 @@ public class CacheProperties {
         private Duration mongoLoadTimeout = Duration.ofSeconds(60);
 
         // Only applies to HAZELCAST_WITH_MONGO_FALLBACK.
-        private Duration staleLocalCacheReadGracePeriod = Duration.ofSeconds(120);
+        private Duration staleLocalCacheReadGracePeriod = Duration.ofSeconds(300);
 
         // Only applies to HAZELCAST_WITH_MONGO_FALLBACK; NONE always requires a local cache at startup.
         private boolean requireLocalCacheAtStartup = true;

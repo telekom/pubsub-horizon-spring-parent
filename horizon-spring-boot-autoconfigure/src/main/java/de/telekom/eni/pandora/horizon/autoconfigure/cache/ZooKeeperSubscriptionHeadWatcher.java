@@ -1,5 +1,6 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
+import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCacheEvents;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.cache.CuratorCache;
 import org.apache.curator.framework.state.ConnectionState;
@@ -41,6 +42,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
     private boolean watching;
     private boolean zooKeeperConnected;
     private long connectionEpoch;
+    private long disconnectedAtNanos = -1;
 
     /**
      * Keeps at most one pending reconciliation. Replacing delayed work coalesces rapid head updates so only the latest
@@ -115,8 +117,9 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         this.snapshotSyncJitterMillis = nonNegativeMillis(snapshotSyncJitter, "snapshot sync jitter");
         this.headCheckJitterMillis = nonNegativeMillis(headCheckJitter, "head check jitter");
         this.executor = Objects.requireNonNull(executor, "executor must not be null");
-        this.preparedCache = CuratorCache.build(client, preparedPath);
-        this.activatedCache = CuratorCache.build(client, activatedPath);
+        // Single-node caches: the heads are leaf ZNodes, so children must neither be read nor reported as head events.
+        this.preparedCache = CuratorCache.build(client, preparedPath, CuratorCache.Options.SINGLE_NODE_CACHE);
+        this.activatedCache = CuratorCache.build(client, activatedPath, CuratorCache.Options.SINGLE_NODE_CACHE);
         this.reconciler = Objects.requireNonNull(reconciler, "reconciler must not be null");
         this.connectionStateListener = this::onConnectionStateChanged;
         preparedCache.listenable().addListener((type, oldData, data) ->
@@ -143,6 +146,8 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         if (zooKeeperConnected) {
             var epoch = connectionEpoch;
             executor.execute(() -> runInitialReconciliation(epoch));
+        } else {
+            log.info("ZooKeeper is not connected yet; initial subscription head reconciliation starts on first connection");
         }
         if (reconcileIntervalMillis > 0) {
             // The random first delay spreads periodic head reads of all pods; later runs keep the fixed interval.
@@ -171,7 +176,8 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             preparedReconcile.cancel();
             reconnectReconcile.cancel();
             var epoch = connectionEpoch;
-            executor.execute(() -> reconcileAllHeads(epoch, "ZooKeeper ACTIVATED reconciliation failed"));
+            executor.execute(() -> reconcileAllHeads(epoch,
+                "Unexpected failure in ACTIVATED event subscription head reconciliation"));
         }
     }
 
@@ -190,7 +196,7 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             try {
                 tryRunInEpoch(epoch, gate -> reconciler.reconcilePreparedHead(eventData));
             } catch (RuntimeException exception) {
-                log.warn("Jittered ZooKeeper PREPARED reconciliation failed", exception);
+                log.warn("Unexpected failure in PREPARED event subscription head reconciliation", exception);
             }
         }, randomDelayMillis(snapshotSyncJitterMillis));
     }
@@ -214,8 +220,15 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
                 zooKeeperConnected = false;
                 connectionEpoch++;
                 if (wasConnected) {
+                    disconnectedAtNanos = System.nanoTime();
+                    LocalSubscriptionCacheEvents.CONNECTION.info(
+                        "ZooKeeper connection {}; local subscription cache is no longer confirmed", state);
                     // Without a confirmed ZooKeeper connection, the cached expected head is no longer trusted.
                     reconciler.onConnectionLost();
+                } else if (state == ConnectionState.LOST && disconnectedAtNanos >= 0) {
+                    LocalSubscriptionCacheEvents.CONNECTION.info(
+                        "ZooKeeper session LOST after {}s disconnected; watches are re-registered on reconnect",
+                        secondsSince(disconnectedAtNanos));
                 }
             } else if (state == ConnectionState.RECONNECTED
                     // Curator reports CONNECTED, not RECONNECTED, for the first connection after a disconnected start.
@@ -226,8 +239,17 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
                 var epoch = ++connectionEpoch;
                 // Reconcile immediately the first time; jitter later reconnects to spread load across pods.
                 var delayMillis = initialReconciliation.isDone() ? randomDelayMillis(snapshotSyncJitterMillis) : 0;
+                if (!initialReconciliation.isDone()) {
+                    log.info("ZooKeeper connected; starting initial subscription head reconciliation");
+                } else if (disconnectedAtNanos >= 0) {
+                    LocalSubscriptionCacheEvents.CONNECTION.info(
+                        "ZooKeeper reconnected after {}s; rereading subscription heads in {} ms",
+                        secondsSince(disconnectedAtNanos), delayMillis);
+                }
+                disconnectedAtNanos = -1;
                 reconnectReconcile.schedule(
-                    () -> reconcileAllHeads(epoch, "ZooKeeper reconnect reconciliation failed"), delayMillis);
+                    () -> reconcileAllHeads(epoch, "Unexpected failure in reconnect subscription head reconciliation"),
+                    delayMillis);
             }
         }
     }
@@ -276,6 +298,8 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
                     new IllegalStateException("Initial subscription head reconciliation was interrupted"));
             }
         } catch (RuntimeException | Error exception) {
+            // Executor tasks swallow exceptions; without a startup barrier this log is the only trace.
+            log.warn("Unexpected failure in initial subscription head reconciliation", exception);
             initialReconciliation.completeExceptionally(exception);
             throw exception;
         }
@@ -308,8 +332,13 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         try {
             tryRunInEpoch(epoch, reconciler::reconcileActivatedHead);
         } catch (RuntimeException exception) {
-            log.warn("Periodic subscription head reconciliation failed", exception);
+            log.warn("Unexpected failure in periodic subscription head reconciliation", exception);
         }
+    }
+
+    /** Returns the whole seconds elapsed since the supplied {@link System#nanoTime()} value. */
+    private static long secondsSince(long startNanos) {
+        return TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - startNanos);
     }
 
     /**

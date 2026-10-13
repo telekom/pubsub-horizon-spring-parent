@@ -78,7 +78,7 @@ public class ZooKeeperSubscriptionHeadReconciler {
             if (isInterrupted(exception)) {
                 return;
             }
-            log.warn("Could not read prepared subscription head; ignoring it", exception);
+            log.warn("Could not read PREPARED subscription head; ignoring it: {}", describe(exception));
         }
 
         reconcileActivatedHead(prepared, gate);
@@ -110,7 +110,7 @@ public class ZooKeeperSubscriptionHeadReconciler {
                 cache.discardPreparedSnapshot();
             }
         } catch (RuntimeException exception) {
-            log.warn("Could not process prepared subscription head event", exception);
+            log.warn("Could not process PREPARED subscription head event", exception);
         }
     }
 
@@ -125,24 +125,25 @@ public class ZooKeeperSubscriptionHeadReconciler {
                 return;
             }
             // An unreadable ACTIVATED head cannot confirm the current cache state.
-            headReadFailed("Could not read activated subscription head", exception);
+            headReadFailed("Could not read ACTIVATED subscription head; local cache is no longer confirmed", exception);
             gate.commitIfStillValid(cache::clearExpectedHead);
             return;
         }
 
         if (active.isEmpty()) {
             // A missing head has the same effect as an unreadable one: clear the confirmed cache head.
-            headReadFailed("ZooKeeper activated subscription head is missing", null);
+            headReadFailed("ZooKeeper ACTIVATED subscription head is missing; local cache is no longer confirmed", null);
             gate.commitIfStillValid(cache::clearExpectedHead);
             return;
         }
+
+        var head = active.orElseThrow();
         if (consecutiveHeadReadFailures > 0) {
-            log.info("ZooKeeper activated subscription head readable again after {} failed reads",
-                consecutiveHeadReadFailures);
+            log.info("ZooKeeper ACTIVATED subscription head {} readable again after {} failed reads",
+                head.getSnapshotId(), consecutiveHeadReadFailures);
             consecutiveHeadReadFailures = 0;
         }
 
-        var head = active.orElseThrow();
         // Reject this decision if the watcher has moved to a newer ZooKeeper connection epoch.
         if (!gate.commitIfStillValid(() -> cache.setExpectedHead(head))) {
             return;
@@ -172,7 +173,7 @@ public class ZooKeeperSubscriptionHeadReconciler {
                 log.warn("Could not activate subscription snapshot {}", head.getSnapshotId(), exception);
             } else {
                 log.warn("Could not activate subscription snapshot {} ({} consecutive failed attempts): {}",
-                    head.getSnapshotId(), consecutiveActivationFailures, exception.getMessage());
+                    head.getSnapshotId(), consecutiveActivationFailures, describe(exception));
             }
         }
     }
@@ -180,8 +181,8 @@ public class ZooKeeperSubscriptionHeadReconciler {
     /** Resets the consecutive activation failure count after a successful activation. */
     private void activationSucceeded(SubscriptionSnapshotHead head) {
         if (consecutiveActivationFailures > 0) {
-            log.info("Subscription snapshot {} activation from ZooKeeper head recovered after {} failed attempts",
-                head.getSnapshotId(), consecutiveActivationFailures);
+            log.info("Subscription snapshot activation recovered after {} failed attempts; active snapshot {}",
+                consecutiveActivationFailures, head.getSnapshotId());
             consecutiveActivationFailures = 0;
         }
     }
@@ -210,8 +211,18 @@ public class ZooKeeperSubscriptionHeadReconciler {
             log.warn(message, exception);
         } else {
             log.warn("{} ({} consecutive failed reads): {}", message, consecutiveHeadReadFailures,
-                exception == null ? "missing" : exception.getMessage());
+                exception == null ? "missing" : describe(exception));
         }
+    }
+
+    /** Returns the exception message, extended by the root cause when it differs. */
+    private static String describe(Throwable exception) {
+        var root = exception;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root == exception ? exception.getMessage()
+            : exception.getMessage() + " (cause: " + root.getClass().getSimpleName() + ": " + root.getMessage() + ")";
     }
 
     /** Detects interruption in the current thread or exception cause chain. */
@@ -232,7 +243,7 @@ public class ZooKeeperSubscriptionHeadReconciler {
         try {
             cache.prepare(head);
         } catch (RuntimeException exception) {
-            log.warn("Could not prepare subscription snapshot {}", head.getSnapshotId(), exception);
+            log.warn("Could not preload PREPARED subscription snapshot {}", head.getSnapshotId(), exception);
         }
     }
 

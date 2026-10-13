@@ -153,7 +153,7 @@ class SubscriptionZooKeeperClientTest {
     void localCacheDefaults() {
         contextRunner.run(context -> {
             var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
-            assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(120));
+            assertThat(localCache.getStaleLocalCacheReadGracePeriod()).isEqualTo(Duration.ofSeconds(300));
             assertThat(localCache.getHeadCheckJitter()).isEqualTo(Duration.ofSeconds(10));
             assertThat(localCache.getSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(10));
         });

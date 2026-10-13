@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -25,6 +26,16 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     private final BooleanSupplier primaryReadAllowed;
     private final Runnable fallbackReadListener;
     private final AtomicBoolean primaryDegraded = new AtomicBoolean();
+    private final AtomicReference<Readiness> primaryReadiness = new AtomicReference<>(Readiness.UNKNOWN);
+    private final AtomicBoolean primaryEverReady = new AtomicBoolean();
+    private final AtomicBoolean primaryReadinessCheckFailing = new AtomicBoolean();
+    private final AtomicBoolean fallbackReadinessCheckFailing = new AtomicBoolean();
+
+    private enum Readiness {
+        UNKNOWN,
+        READY,
+        NOT_READY
+    }
 
     /**
      * Creates a primary/fallback reader chain.
@@ -133,9 +144,12 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
             return true;
         }
         try {
-            return fallback.isReady();
+            var ready = fallback.isReady();
+            readinessCheckSucceeded(fallbackReadinessCheckFailing, "Fallback");
+            return ready;
         } catch (RuntimeException exception) {
-            log.warn("Failed to determine fallback subscription cache readiness", exception);
+            readinessCheckFailed(fallbackReadinessCheckFailing,
+                "Failed to determine fallback subscription cache readiness", exception);
             return false;
         }
     }
@@ -158,13 +172,59 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
         }
     }
 
-    /** Checks primary readiness, treating readiness errors as unavailable. */
+    /** Checks primary readiness, treating readiness errors as unavailable, and logs readiness transitions. */
     private boolean isPrimaryReady() {
+        boolean ready;
         try {
-            return primaryReadAllowed.getAsBoolean() && primary.isReady();
+            ready = primaryReadAllowed.getAsBoolean() && primary.isReady();
+            readinessCheckSucceeded(primaryReadinessCheckFailing, "Primary");
         } catch (RuntimeException exception) {
-            log.warn("Failed to determine primary subscription cache readiness, using fallback", exception);
-            return false;
+            readinessCheckFailed(primaryReadinessCheckFailing,
+                "Failed to determine primary subscription cache readiness, using fallback", exception);
+            ready = false;
+        }
+        primaryReadinessObserved(ready);
+        return ready;
+    }
+
+    /** Logs each switch between primary and fallback once; not being ready before the first success is expected. */
+    private void primaryReadinessObserved(boolean ready) {
+        var next = ready ? Readiness.READY : Readiness.NOT_READY;
+        // get() first keeps the steady state free of CAS writes.
+        if (primaryReadiness.get() == next) {
+            return;
+        }
+        var previous = primaryReadiness.getAndSet(next);
+        if (previous == next) {
+            return;
+        }
+        if (ready) {
+            var wasEverReady = primaryEverReady.getAndSet(true);
+            if (previous == Readiness.NOT_READY) {
+                log.info(wasEverReady
+                    ? "Primary subscription cache is ready again; reads are served by the primary"
+                    : "Primary subscription cache is ready; reads are served by the primary");
+            }
+        } else if (primaryEverReady.get()) {
+            log.warn("Primary subscription cache is not ready; reads are served by the fallback");
+        } else {
+            log.info("Primary subscription cache is not ready yet; reads are served by the fallback");
+        }
+    }
+
+    /** Logs the first failure of a readiness check with stack trace and repeats at DEBUG. */
+    private void readinessCheckFailed(AtomicBoolean failing, String message, RuntimeException exception) {
+        if (failing.compareAndSet(false, true)) {
+            log.warn(message, exception);
+        } else {
+            log.debug(message, exception);
+        }
+    }
+
+    /** Logs the recovery of a previously failing readiness check. */
+    private void readinessCheckSucceeded(AtomicBoolean failing, String source) {
+        if (failing.get() && failing.compareAndSet(true, false)) {
+            log.info("{} subscription cache readiness check recovered", source);
         }
     }
 }
