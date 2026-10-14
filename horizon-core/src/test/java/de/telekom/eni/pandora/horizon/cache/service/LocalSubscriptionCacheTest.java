@@ -390,7 +390,7 @@ class LocalSubscriptionCacheTest {
         cache.activate(head);
         assertEquals(LocalSubscriptionCache.Status.STALE, cache.getStatus());
         assertTrue(cache.isInitialized());
-        assertFalse(cache.canServeLocalReads());
+        assertFalse(cache.isReady());
 
         cache.setExpectedHead(head);
         cache.activate(head);
@@ -416,16 +416,14 @@ class LocalSubscriptionCacheTest {
         assertEquals(LocalSubscriptionCache.Status.STALE, graceCache.getStatus());
         assertTrue(graceCache.isInitialized());
         assertFalse(graceCache.isFresh());
-        assertTrue(graceCache.canServeLocalReads());
         assertTrue(graceCache.isReady());
         assertTrue(graceCache.getById("local-id").isPresent());
 
         clock.advance(Duration.ofSeconds(3));
         graceCache.clearExpectedHead();
-        assertTrue(graceCache.canServeLocalReads(), "another stale cause must not restart the grace period");
+        assertTrue(graceCache.isReady(), "another stale cause must not restart the grace period");
 
         clock.advance(Duration.ofSeconds(2));
-        assertFalse(graceCache.canServeLocalReads());
         assertTrue(graceCache.isInitialized());
         assertFalse(graceCache.isReady());
     }
@@ -446,8 +444,9 @@ class LocalSubscriptionCacheTest {
         graceCache.recordActivationFailure(snapshotHead("new-head"));
 
         assertEquals(LocalSubscriptionCache.Status.STALE, graceCache.getStatus());
-        assertTrue(graceCache.canServeLocalReads());
-        assertFalse(graceCache.canServeLocalReads(clock.instant().plusSeconds(5)));
+        assertTrue(graceCache.isReady());
+        clock.advance(Duration.ofSeconds(5));
+        assertFalse(graceCache.isReady());
     }
 
     @Test
@@ -496,7 +495,6 @@ class LocalSubscriptionCacheTest {
 
         assertEquals(LocalSubscriptionCache.Status.UNINITIALIZED, cache.getStatus());
         assertFalse(cache.isInitialized());
-        assertFalse(cache.canServeLocalReads());
         assertFalse(cache.isReady());
     }
 

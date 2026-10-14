@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BooleanSupplier;
 
 /**
  * Subscription reader that tries a primary source first and falls back to a secondary source
@@ -23,7 +22,6 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
 
     private final SubscriptionCacheReader primary;
     private final SubscriptionCacheReader fallback;
-    private final BooleanSupplier primaryReadAllowed;
     private final Runnable fallbackReadListener;
     private final AtomicBoolean primaryDegraded = new AtomicBoolean();
     private final AtomicReference<Readiness> primaryReadiness = new AtomicReference<>(Readiness.UNKNOWN);
@@ -44,34 +42,20 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
      * @param fallback source used when the primary is not ready or fails
      */
     public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback) {
-        this(primary, fallback, () -> true);
-    }
-
-    /**
-     * Creates a primary/fallback chain with a condition controlling whether the primary may serve reads.
-     *
-     * @param primary source preferred for reads
-     * @param fallback source used when the primary is disallowed, not ready, or fails
-     * @param primaryReadAllowed condition that must permit the primary before it is queried
-     */
-    public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback,
-                                           BooleanSupplier primaryReadAllowed) {
-        this(primary, fallback, primaryReadAllowed, () -> { });
+        this(primary, fallback, () -> { });
     }
 
     /**
      * Creates a primary/fallback reader chain that reports every read served by the fallback.
      *
-     * @param primary source preferred for reads
+     * @param primary source preferred for reads while {@link SubscriptionCacheReader#isReady()} is {@code true}
      * @param fallback source used when the primary is not ready or fails
-     * @param primaryReadAllowed whether the primary may currently serve reads
      * @param fallbackReadListener invoked before each read that is served by the fallback
      */
     public FallbackSubscriptionCacheReader(SubscriptionCacheReader primary, SubscriptionCacheReader fallback,
-                                           BooleanSupplier primaryReadAllowed, Runnable fallbackReadListener) {
+                                           Runnable fallbackReadListener) {
         this.primary = primary;
         this.fallback = fallback;
-        this.primaryReadAllowed = primaryReadAllowed;
         this.fallbackReadListener = fallbackReadListener;
     }
 
@@ -176,7 +160,7 @@ public class FallbackSubscriptionCacheReader implements SubscriptionCacheReader 
     private boolean isPrimaryReady() {
         boolean ready;
         try {
-            ready = primaryReadAllowed.getAsBoolean() && primary.isReady();
+            ready = primary.isReady();
             readinessCheckSucceeded(primaryReadinessCheckFailing, "Primary");
         } catch (RuntimeException exception) {
             readinessCheckFailed(primaryReadinessCheckFailing,

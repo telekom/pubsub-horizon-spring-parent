@@ -100,9 +100,7 @@ public class JsonCacheAutoconfiguration {
             : Counter.builder(LocalSubscriptionCacheMetrics.FALLBACK_READS)
                 .description("Subscription reads served by the Hazelcast/MongoDB fallback instead of the local cache")
                 .register(meterRegistry)::increment;
-        return new FallbackSubscriptionCacheReader(
-            localSubscriptionCache, hazelcastCacheReader, localSubscriptionCache::canServeLocalReads,
-            fallbackReadListener);
+        return new FallbackSubscriptionCacheReader(localSubscriptionCache, hazelcastCacheReader, fallbackReadListener);
     }
 
     @Bean

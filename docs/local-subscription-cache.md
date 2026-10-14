@@ -541,7 +541,7 @@ API is intentionally limited; additional query shapes need an implementation for
 
 ### Fallback behavior
 
-`FallbackSubscriptionCacheReader` uses the local cache only while it may serve reads (`canServeLocalReads()`):
+`FallbackSubscriptionCacheReader` uses the local cache only while `LocalSubscriptionCache.isReady()` returns `true`:
 
 - `FRESH`: local reads;
 - `STALE`: local reads until `stale-local-cache-read-grace-period` (default `300s`) has elapsed since the cache became

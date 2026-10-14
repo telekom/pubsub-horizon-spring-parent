@@ -62,7 +62,7 @@ class JsonCacheAutoconfigurationTest {
                 var cacheProperties = new CacheProperties();
                 cacheProperties.getLocalSubscriptionCache().setEnabled(true);
                 var localCache = mock(LocalSubscriptionCache.class);
-                when(localCache.isReady()).thenReturn(true);
+                when(localCache.isReady()).thenReturn(false);
 
                 contextRunner(cacheProperties)
                                 .withBean(LocalSubscriptionCache.class, () -> localCache)
@@ -70,7 +70,7 @@ class JsonCacheAutoconfigurationTest {
                                         var reader = context.getBean(SubscriptionCacheReader.class);
                                         reader.getById("subscription-1");
                                         verify(localCache, never()).getById("subscription-1");
-                                        when(localCache.canServeLocalReads()).thenReturn(true);
+                                        when(localCache.isReady()).thenReturn(true);
                                         reader.getById("subscription-1");
                                         verify(localCache).getById("subscription-1");
                                 });

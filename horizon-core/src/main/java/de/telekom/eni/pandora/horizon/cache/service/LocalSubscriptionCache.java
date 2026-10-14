@@ -278,12 +278,13 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             var now = clock.instant();
             var next = cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(previous.activeSnapshot(), now));
             activatedAt = now;
-            completeFirstFreshSnapshot();
             if (currentState.status() == Status.STALE && next.status() == Status.FRESH) {
                 LocalSubscriptionCacheEvents.SNAPSHOT.info(
                     "Local subscription snapshot {} confirmed again; cache is FRESH after being STALE for {}s",
                     next.activeSnapshot().snapshotId(), Duration.between(currentState.staleSince(), now).toSeconds());
             }
+            // Check if cache has become FRESH for the first time and complete pod's startup barrier if so.
+            completeFirstFreshSnapshot();
             return;
         }
 
@@ -302,7 +303,6 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
         // Publish atomically; CacheState recalculates freshness against the expected and active versions.
         var next = cacheState.updateAndGet(previous -> previous.withActivatedSnapshot(prepared, now));
         activatedAt = now;
-        completeFirstFreshSnapshot();
         var previousSnapshotId = currentState.activeSnapshot().snapshotId();
         if (next.status() == Status.FRESH) {
             LocalSubscriptionCacheEvents.SNAPSHOT.info("Activated local subscription snapshot {} ({} subscriptions, previous {})",
@@ -314,6 +314,7 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
             log.warn("Activated local subscription snapshot {} but cache remains {}; expected head {}",
                 prepared.snapshotId(), next.status(), expected == null ? "none" : expected.snapshotId());
         }
+        completeFirstFreshSnapshot();
     }
 
     /**
@@ -430,22 +431,6 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     }
 
     /**
-     * Indicates whether the local snapshot may currently serve reads.
-     *
-     * <p>Reads are allowed for a FRESH snapshot, or for a STALE snapshot while its configured grace period has not
-     * expired. UNINITIALIZED caches cannot serve local reads.</p>
-     *
-     * @return {@code true} if local reads are allowed at the current time
-     */
-    public boolean canServeLocalReads() {
-        return canServeLocalReads(clock.instant());
-    }
-
-    boolean canServeLocalReads(Instant now) {
-        return canServeLocalReads(cacheState.get(), now);
-    }
-
-    /**
      * Discards the currently prepared snapshot without changing the active snapshot.
      */
     public void discardPreparedSnapshot() {
@@ -537,13 +522,16 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     }
 
     /**
-     * Indicates whether this reader can currently serve requests.
+     * Indicates whether the local snapshot may currently serve reads.
      *
-     * @return {@code true} if local reads are allowed
+     * <p>Reads are allowed for a FRESH snapshot, or for a STALE snapshot while its configured grace period has not
+     * expired. UNINITIALIZED caches cannot serve local reads.</p>
+     *
+     * @return {@code true} if local reads are allowed at the current time
      */
     @Override
     public boolean isReady() {
-        return canServeLocalReads();
+        return canServeLocalReads(cacheState.get(), clock.instant());
     }
 
     /** Completes the first-fresh milestone once the cache reaches FRESH. */
