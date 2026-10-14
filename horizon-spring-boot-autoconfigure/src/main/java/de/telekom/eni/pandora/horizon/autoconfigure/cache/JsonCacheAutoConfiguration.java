@@ -10,12 +10,16 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
+import de.telekom.eni.pandora.horizon.cache.fallback.PublisherCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
+import de.telekom.eni.pandora.horizon.cache.listener.PublisherResourceEventBroadcaster;
 import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
+import de.telekom.eni.pandora.horizon.kubernetes.resource.PublisherResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
+import de.telekom.eni.pandora.horizon.mongo.repository.PublisherMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
 import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
@@ -29,16 +33,17 @@ import org.springframework.context.annotation.Configuration;
 @Slf4j
 @Configuration
 @ConditionalOnProperty(value = "horizon.cache.enabled")
-public class JsonCacheAutoconfiguration {
+public class JsonCacheAutoConfiguration {
 
     private static final String SUBSCRIPTION_RESOURCE_V1 = "subscriptions.subscriber.horizon.telekom.de.v1";
+    private static final String EVENT_SPECIFICATION_RESOURCE_V1 = "specifications.event.horizon.telekom.de.v1";
 
     private static final String CIRCUITBREAKER_MAP = "circuit-breakers";
 
-    private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
 
     @Bean
-    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo, MongoProperties mongoProperties) {
+    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher,
+                                                                    SubscriptionsMongoRepo subscriptionsMongoRepo, MongoProperties mongoProperties) {
         var module = new SimpleModule();
         module.addSerializer(Operator.class, new OperatorSerializer());
         module.addDeserializer(Operator.class, new OperatorDeserializer());
@@ -51,14 +56,39 @@ public class JsonCacheAutoconfiguration {
         try {
             map = hazelcastInstance.getMap(SUBSCRIPTION_RESOURCE_V1);
             map.addEntryListener(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher), true);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.error("Hazelcast map {} is not available", SUBSCRIPTION_RESOURCE_V1);
         }
 
-        var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1);
+        var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance, SUBSCRIPTION_RESOURCE_V1);
         svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
         svc.setJsonEntryMapEventBroadcaster(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher));
+        return svc;
+    }
+
+    @Bean
+    public JsonCacheService<PublisherResource> eventSpecificationCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher,
+                                                                       PublisherMongoRepo mongoRepo, MongoProperties mongoProperties) {
+        log.info("---------------");
+        var module = new SimpleModule();
+        module.addSerializer(Operator.class, new OperatorSerializer());
+        module.addDeserializer(Operator.class, new OperatorDeserializer());
+
+        var mapper = new ObjectMapper();
+        mapper.registerModule(module);
+
+        IMap<String, HazelcastJsonValue> map = null;
+
+        try {
+            map = hazelcastInstance.getMap(EVENT_SPECIFICATION_RESOURCE_V1);
+            map.addEntryListener(new PublisherResourceEventBroadcaster(mapper, applicationEventPublisher), true);
+        } catch (Exception e) {
+            log.error("Hazelcast map {} is not available", EVENT_SPECIFICATION_RESOURCE_V1);
+        }
+
+        var svc = new JsonCacheService<>(PublisherResource.class, map, mapper, hazelcastInstance, EVENT_SPECIFICATION_RESOURCE_V1);
+        svc.setJsonCacheFallback(new PublisherCacheMongoFallback(mongoRepo, mongoProperties));
+        svc.setJsonEntryMapEventBroadcaster(new PublisherResourceEventBroadcaster(mapper, applicationEventPublisher));
         return svc;
     }
 
@@ -68,8 +98,7 @@ public class JsonCacheAutoconfiguration {
 
         try {
             map = hazelcastInstance.getMap(CIRCUITBREAKER_MAP);
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             log.error("Hazelcast map {} is not available", CIRCUITBREAKER_MAP);
         }
 

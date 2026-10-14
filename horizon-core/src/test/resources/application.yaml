@@ -1,0 +1,3 @@
+logging:
+  level:
+    de.telekom.eni.pandora.horizon.cache.service: DEBUG
