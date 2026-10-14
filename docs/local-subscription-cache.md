@@ -453,14 +453,57 @@ only if it belongs to the failed version; a preload of a different version is ke
 
 ### Startup barrier
 
-When a local cache is required, an `ApplicationRunner` waits for the first `FRESH` snapshot:
+The startup barrier keeps a new pod out of traffic until its local cache has reached `FRESH` for the first time.
+Otherwise the first requests of a new pod would be served from Hazelcast or MongoDB, i.e. from a different source than
+the other pods.
 
-- always with `fallback-mode: none`;
-- with `hazelcast-with-mongo-fallback` only if `require-local-cache-at-startup: true` (default).
+| Building block | Location | Role |
+|---|---|---|
+| `firstFreshSnapshot` (`CompletableFuture`) | `LocalSubscriptionCache` | Completed once when the cache first becomes `FRESH`; stays completed afterwards. |
+| `completeFirstFreshSnapshot()` | End of `LocalSubscriptionCache.activate()` | Completes the future if the status is `FRESH` and logs `Local subscription cache is fresh for the first time ...`. |
+| Watcher thread `subscription-head-watcher` | `ZooKeeperSubscriptionHeadWatcher` | Starts the initial reconciliation when the watcher bean starts: reads ACTIVATED, prepares and activates the snapshot. |
+| `localSubscriptionCacheStartupBarrier` (`ApplicationRunner`) | `LocalSubscriptionCacheAutoConfiguration` | Waits on the `main` thread for the future, at most `initial-snapshot-timeout`. |
 
-The wait is limited by `initial-snapshot-timeout` (default `15s`; `0s` waits indefinitely). On expiry startup fails.
-Spring publishes `ApplicationReadyEvent`, and Kubernetes readiness turns ready, only after the barrier succeeds. Comet
-and Galaxy start their Kafka listeners on that event. Later cache transitions do not change readiness.
+```mermaid
+sequenceDiagram
+    participant M as main thread (Spring)
+    participant W as Watcher thread
+    participant C as LocalSubscriptionCache
+    M->>W: create and start watcher bean
+    Note over M: Spring continues starting (web server, security, ...)
+    W->>C: setExpectedHead(H)
+    W->>C: prepare(H) loads snapshot from MongoDB
+    W->>C: activate(H), status FRESH
+    C->>C: completeFirstFreshSnapshot() completes future
+    Note over M: application context started
+    M->>C: barrier waits for future (max initial-snapshot-timeout)
+    C-->>M: future completed
+    Note over M: barrier passed, readiness ACCEPTING_TRAFFIC
+```
+
+1. The watcher starts the initial reconciliation as soon as its bean is created. Without a ZooKeeper connection it
+   waits for the first `CONNECTED` event.
+2. Loading the snapshot runs in parallel to the remaining Spring startup.
+3. Once the activated snapshot matches the expected head, the cache becomes `FRESH` and the future is completed.
+4. After the application context has started, Spring runs the barrier. If the future is already completed, the barrier
+   passes immediately; otherwise it waits for the watcher. If the timeout expires, startup fails with
+   `IllegalStateException` and Kubernetes restarts the pod.
+5. Spring publishes `ApplicationReadyEvent`, and Kubernetes readiness turns ready, only after the barrier succeeds.
+   Comet and Galaxy start their Kafka listeners on that event.
+
+| Configuration | Barrier |
+|---|---|
+| `fallback-mode: hazelcast-with-mongo-fallback`, `require-local-cache-at-startup: true` (default) | Waits |
+| `fallback-mode: hazelcast-with-mongo-fallback`, `require-local-cache-at-startup: false` | Does not wait; reads use the fallback until the cache is `FRESH` |
+| `fallback-mode: none` | Always waits |
+| `initial-snapshot-timeout: 0s` | Waits without limit |
+
+- `Startup barrier passed: ... after waiting N ms` reports only the wait time of the barrier. Because the snapshot is
+  usually loaded while Spring is still starting, `N` is often close to `0`. The load duration is logged by
+  `Prepared local subscription snapshot ... loaded in N ms`.
+- `initial-snapshot-timeout` starts when the barrier runs, not when loading starts. Loading effectively has the
+  remaining context startup time plus the timeout.
+- The future completes only once. Later transitions to `STALE` do not change readiness.
 
 ## Read path, fallback and legacy compatibility
 
