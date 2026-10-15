@@ -328,6 +328,35 @@ The preload is an optimization, not a correctness requirement: if ACTIVATED arri
 ACTIVATED version and then activates it. Publisher ordering, snapshot durability and cross-pod coordination are
 publisher responsibilities.
 
+### Publisher contract
+
+The cache relies on the following rules agreed with the publisher (Quasar). The cache validates what it can check,
+but it cannot repair a violated contract.
+
+| Rule | Checked by the cache |
+|---|---|
+| All entries of a snapshot are written to `snapshot-collection` before PREPARED or ACTIVATED references it. | Yes, via `documentCount` |
+| Each entry contains `snapshotId`, `subscriptionId` and the complete subscription custom resource in `resource`, in the same JSON structure as in Hazelcast. | Yes, the entry must be mappable |
+| Each `resource` has `spec.subscription.subscriptionId`, `spec.subscription.type` and `spec.environment`; subscription IDs are unique within a snapshot. | Yes |
+| `documentCount` is the exact number of entries with this `snapshotId` and is greater than `0`. | Yes |
+| A `snapshotId` is never reused for different content, and entries of a published snapshot are never modified. Entries are loaded by `snapshotId` only. | No |
+| Entries are deleted only when neither PREPARED nor ACTIVATED references their snapshot. | No; deleted entries cause a count mismatch |
+| `snapshot-collection` has an index on `snapshotId`; otherwise every pod load scans the collection. | No |
+| Heads follow the format in [Snapshot identity](#snapshot-identity). `revision` and `sourceHash` only identify a version; the cache does not verify them against the entries. | Format yes, content no |
+| Only the publisher may write the PREPARED and ACTIVATED ZNodes (ZooKeeper ACL). | No |
+
+Behavior when the contract is violated:
+
+| Violation | Running pods | New pods | Signals |
+|---|---|---|---|
+| Invalid or duplicate entry, count mismatch, deleted entries | Keep the previous snapshot and become `STALE`; local reads during grace, then fallback (`none`: stale local reads). Retried on every head event and `reconcile-interval`. | Stay `UNINITIALIZED`; startup fails after `initial-snapshot-timeout` if the local cache is required | `failures_total{reason="activation"}`, `snapshot_behind`, log `Could not activate subscription snapshot` |
+| Invalid ACTIVATED head (e.g. missing `createdAt`, `documentCount` not positive) | Same as a missing ACTIVATED head: `STALE`, grace, then fallback | Startup fails if the local cache is required | `failures_total{reason="zookeeper_head_read"}`, log `Could not read ACTIVATED subscription head` |
+
+An empty subscription set cannot be published because `documentCount` must be positive. In such an environment the
+ACTIVATED head is missing or invalid, so new pods fail startup whenever the local cache is required (default, and
+always with `fallback-mode: none`). Environments that may have no subscriptions should keep the local cache disabled
+or use `hazelcast-with-mongo-fallback` with `require-local-cache-at-startup: false`.
+
 ### Watcher triggers
 
 ```mermaid
@@ -585,14 +614,6 @@ Compared to earlier releases, only the MongoDB fallback of `JsonCacheService` be
 ZooKeeper ACTIVATED is the only head authority. The settings `mongo-head-fallback-mode`, `head-collection` and
 `zoo-keeper.enabled`, their service-prefixed environment variables and Helm values are obsolete and should be removed.
 
-Three properties were renamed. The old names remain bindable as deprecated aliases; set only one name per property:
-
-| Deprecated name | New name |
-|---|---|
-| `mongo-head-poll-jitter` | `head-check-jitter` |
-| `mongo-snapshot-sync-jitter` | `snapshot-sync-jitter` |
-| `zoo-keeper.activate-path` | `zoo-keeper.activated-path` |
-
 ## Configuration reference
 
 All properties are under `horizon.cache.local-subscription-cache`. The service YAMLs map them to environment variables
@@ -604,16 +625,16 @@ with the prefix `<SERVICE>_CACHE_LOCAL_SUBSCRIPTION_CACHE_` (`STARLIGHT`, `COMET
 | `enabled` | `false` | all | Enables the local cache. When `false`, no local-cache or ZooKeeper bean is created. |
 | `fallback-mode` | `hazelcast-with-mongo-fallback` | all | Read source when the local cache cannot serve reads. `none` never reads Hazelcast. |
 | `snapshot-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-snapshots` | all | MongoDB collection with snapshot entries. |
-| `mongo-load-timeout` | `60s` | all | Server-side limit (`maxTimeMS`) for loading a snapshot; does not cover unresponsive connections. Not mapped in the service YAMLs; override via `HORIZON_CACHE_LOCALSUBSCRIPTIONCACHE_MONGOLOADTIMEOUT`. |
+| `mongo-load-timeout` | `60s` | all | Client-side limit for a complete snapshot load (driver operation timeout `timeoutMS`), including connections that never answer. Not mapped in the service YAMLs; override via `HORIZON_CACHE_LOCALSUBSCRIPTIONCACHE_MONGOLOADTIMEOUT`. |
 | `stale-local-cache-read-grace-period` | `300s` | `hazelcast-with-mongo-fallback` | How long a `STALE` snapshot may serve reads. `0s` switches immediately. |
 | `require-local-cache-at-startup` | `true` | `hazelcast-with-mongo-fallback` | Startup waits for the first `FRESH` snapshot. `none` always waits. With `false`, startup does not check Hazelcast either. |
 | `initial-snapshot-timeout` | `15s` | when startup waits | Maximum wait for the first `FRESH` snapshot; expiry fails startup. `0s` waits indefinitely. |
 | `reconcile-interval` | `60s` | all | Periodic ACTIVATED re-check while connected. `0s` disables it. |
-| `head-check-jitter` | `10s` | all | Random offset of the first periodic check. Deprecated alias: `mongo-head-poll-jitter`. |
-| `snapshot-sync-jitter` | `10s` | all | Random delay before PREPARED preloads and reconnect rereads. `0s` disables it. Deprecated alias: `mongo-snapshot-sync-jitter`. |
+| `head-check-jitter` | `10s` | all | Random offset of the first periodic check. |
+| `snapshot-sync-jitter` | `10s` | all | Random delay before PREPARED preloads and reconnect rereads. `0s` disables it. |
 | `zoo-keeper.connect-string` | none | all | ZooKeeper connect string; required. |
 | `zoo-keeper.prepared-path` | none | all | Absolute ZNode path of the PREPARED head. |
-| `zoo-keeper.activated-path` | none | all | Absolute ZNode path of the ACTIVATED head; must differ from `prepared-path`. Deprecated alias: `zoo-keeper.activate-path`. |
+| `zoo-keeper.activated-path` | none | all | Absolute ZNode path of the ACTIVATED head; must differ from `prepared-path`. |
 | `zoo-keeper.connection-timeout` | `5s` | all | Curator connection timeout; also bounds each head read. Must be positive. |
 | `zoo-keeper.session-timeout` | `30s` | all | ZooKeeper session timeout; the server may cap it. Must be positive. |
 | `zoo-keeper.ensemble-tracker-enabled` | `true` | all | Lets Curator follow ZooKeeper-published ensemble addresses. Set `false` locally when the ensemble is reached through mapped ports (e.g. Docker), so reconnects keep using `connect-string`. |
@@ -631,7 +652,9 @@ fail startup with `IllegalArgumentException`.
 | ZooKeeper `SUSPENDED`/`LOST` after activation | `STALE` | Local during grace, then fallback | Local (stale) | Already running |
 | ACTIVATED missing, invalid or unreadable | `STALE` | Local during grace, then fallback | Local (stale) | Already running |
 | ACTIVATED references an invalid or incomplete snapshot | `STALE`, previous snapshot kept | Local during grace, then fallback | Local (stale) | Already running |
-| `Error` (e.g. `OutOfMemoryError`) while loading or activating | `STALE`, previous snapshot kept; watcher tasks keep running and retry | Local during grace, then fallback | Local (stale) | Already running |
+| `Error` (e.g. `OutOfMemoryError`) while reading the ACTIVATED head, loading or activating | `STALE`, previous snapshot kept; watcher tasks keep running and retry | Local during grace, then fallback | Local (stale) | Already running |
+| MongoDB does not answer during a load | `STALE` after `mongo-load-timeout`, previous snapshot kept; retried | Local during grace, then fallback | Local (stale) | Fails after `initial-snapshot-timeout` if required |
+| Shutdown during a running load | unchanged; the interrupted load is not counted as a failure | unchanged | unchanged | n/a |
 | Reconnect with unchanged ACTIVATED | `FRESH` (no reload) | Local | Local | n/a |
 | Local read throws | unchanged | Fallback for that request | Error | n/a |
 | Local and fallback read fail | unchanged | `SubscriptionCacheReadException` | Error | n/a |

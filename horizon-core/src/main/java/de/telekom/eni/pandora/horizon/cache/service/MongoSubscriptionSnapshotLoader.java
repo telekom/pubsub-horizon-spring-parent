@@ -4,16 +4,17 @@
 
 package de.telekom.eni.pandora.horizon.cache.service;
 
+import com.mongodb.client.model.Filters;
 import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotEntry;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Loads versioned subscription snapshots from MongoDB.
@@ -34,7 +35,7 @@ public class MongoSubscriptionSnapshotLoader {
      *
      * @param mongoTemplate MongoDB template for the configuration database
      * @param snapshotCollectionName collection containing snapshot entries
-    * @param loadTimeout server-side time limit for each snapshot load
+     * @param loadTimeout client-side time limit for each complete snapshot load, including unresponsive connections
      */
     public MongoSubscriptionSnapshotLoader(MongoTemplate mongoTemplate,
                                            String snapshotCollectionName,
@@ -62,8 +63,11 @@ public class MongoSubscriptionSnapshotLoader {
         }
         SubscriptionSnapshotHeads.requireValid(snapshotHead);
 
-        var query = Query.query(Criteria.where("snapshotId").is(snapshotHead.getSnapshotId())).maxTime(loadTimeout);
-        var documents = mongoTemplate.find(query, Document.class, snapshotCollectionName);
+        // Client-side operation timeout (driver CSOT, @Alpha in 5.2) also ends loads on connections that never answer.
+        var documents = mongoTemplate.getCollection(snapshotCollectionName)
+            .withTimeout(loadTimeout.toMillis(), TimeUnit.MILLISECONDS)
+            .find(Filters.eq("snapshotId", snapshotHead.getSnapshotId()))
+            .into(new ArrayList<>());
         if (documents.size() != snapshotHead.getDocumentCount()) {
             throw new SubscriptionCacheSnapshotException("Subscription snapshot document count mismatch: expected "
                     + snapshotHead.getDocumentCount() + ", actual " + documents.size());

@@ -4,21 +4,24 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.MongoSubscriptionSnapshotLoader;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionSnapshotHeads;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -43,6 +46,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 
 class ZooKeeperSubscriptionHeadReconcilerTest {
@@ -247,6 +251,28 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
+    void interruptedLoadIsNeitherCountedNorMarksCacheStale() {
+        var active = head("active");
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
+        doThrow(new IllegalStateException("load interrupted", new InterruptedException()))
+            .when(cache).prepare(active);
+        var logger = (Logger) LoggerFactory.getLogger(ZooKeeperSubscriptionHeadReconciler.class);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            reconciler.reconcileActivatedHead();
+
+            verify(cache, never()).recordActivationFailure(active);
+            verify(cache, never()).activate(active);
+            assertTrue(appender.list.stream().noneMatch(event -> event.getLevel() == Level.WARN));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
     void errorDuringActivationIsRecordedAndRethrown() {
         var active = head("active");
         when(reader.readActivatedHead()).thenReturn(Optional.of(active));
@@ -259,15 +285,25 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void errorWhileLoadingNewerHeadRevokesFreshnessUntilRetrySucceeds() {
         var template = mock(MongoTemplate.class);
+        MongoCollection<Document> collection = mock(MongoCollection.class);
+        when(template.getCollection("snapshots")).thenReturn(collection);
+        when(collection.withTimeout(anyLong(), any(TimeUnit.class))).thenReturn(collection);
         var failing = new AtomicBoolean(true);
-        when(template.find(any(Query.class), eq(Document.class), eq("snapshots"))).thenAnswer(invocation -> {
-            var snapshotId = invocation.getArgument(0, Query.class).getQueryObject().getString("snapshotId");
+        when(collection.find(any(Bson.class))).thenAnswer(invocation -> {
+            var snapshotId = invocation.getArgument(0, Bson.class).toBsonDocument().getString("snapshotId").getValue();
             if (snapshotId.equals("next") && failing.get()) {
                 throw new OutOfMemoryError("test");
             }
-            return List.of(snapshotEntry(snapshotId));
+            FindIterable<Document> result = mock(FindIterable.class);
+            when(result.into(any())).thenAnswer(into -> {
+                Collection<Document> target = into.getArgument(0);
+                target.add(snapshotEntry(snapshotId));
+                return target;
+            });
+            return result;
         });
         var realCache = new LocalSubscriptionCache(
             new MongoSubscriptionSnapshotLoader(template, "snapshots", Duration.ofSeconds(60)), Duration.ofSeconds(300));
@@ -327,6 +363,16 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         reconciler.reconcilePreparedAndActivatedHeads();
 
         verify(cache).clearExpectedHead();
+    }
+
+    @Test
+    void errorWhileReadingActivatedHeadMarksCacheUnconfirmedAndIsRethrown() {
+        when(reader.readActivatedHead()).thenThrow(new OutOfMemoryError("test"));
+
+        assertThrows(OutOfMemoryError.class, reconciler::reconcileActivatedHead);
+
+        verify(cache).clearExpectedHead();
+        assertEquals(1, reconciler.getActivatedHeadReadFailureCount());
     }
 
     @Test

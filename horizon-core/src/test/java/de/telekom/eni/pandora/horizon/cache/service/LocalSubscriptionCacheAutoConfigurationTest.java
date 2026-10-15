@@ -9,7 +9,9 @@ import de.telekom.eni.pandora.horizon.autoconfigure.cache.LocalSubscriptionCache
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,12 +37,21 @@ class LocalSubscriptionCacheAutoConfigurationTest {
     }
 
     @Test
-    void shouldUseApplicationProvidedSnapshotCache() {
+    void shouldUseApplicationProvidedSnapshotCacheWhenLocalCacheIsEnabled() {
         var customCache = mock(LocalSubscriptionCache.class);
 
         contextRunner
+                .withUserConfiguration(BoundCacheProperties.class)
                 .withBean(LocalSubscriptionCache.class, () -> customCache)
+                .withPropertyValues(
+                        "horizon.cache.local-subscription-cache.enabled=true",
+                        // Unreachable on purpose: the watcher waits for a connection that never comes.
+                        "horizon.cache.local-subscription-cache.zoo-keeper.connect-string=127.0.0.1:1",
+                        "horizon.cache.local-subscription-cache.zoo-keeper.prepared-path=/subscriptions/prepared",
+                        "horizon.cache.local-subscription-cache.zoo-keeper.activated-path=/subscriptions/activated")
                 .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(LocalSubscriptionCacheHealthIndicator.class);
                     assertEquals(1, context.getBeansOfType(LocalSubscriptionCache.class).size());
                     assertSame(customCache, context.getBean(LocalSubscriptionCache.class));
                 });
@@ -50,5 +61,10 @@ class LocalSubscriptionCacheAutoConfigurationTest {
     void shouldNotCreateInitializerWhenLocalCacheIsDisabled() {
         contextRunner.run(context -> assertEquals(
                 0, context.getBeansOfType(LocalSubscriptionCacheHealthIndicator.class).size()));
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableConfigurationProperties(CacheProperties.class)
+    static class BoundCacheProperties {
     }
 }

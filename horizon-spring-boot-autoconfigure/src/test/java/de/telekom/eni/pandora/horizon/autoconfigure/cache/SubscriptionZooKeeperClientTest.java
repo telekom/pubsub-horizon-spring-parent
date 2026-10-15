@@ -152,24 +152,6 @@ class SubscriptionZooKeeperClientTest {
     }
 
     @Test
-    @SuppressWarnings("deprecation")
-    void deprecatedPropertyNamesStillBind() {
-        contextRunner
-            .withPropertyValues(
-                "horizon.cache.local-subscription-cache.mongo-head-poll-jitter=4s",
-                "horizon.cache.local-subscription-cache.mongo-snapshot-sync-jitter=13s",
-                "horizon.cache.local-subscription-cache.zoo-keeper.activate-path=/legacy/activated")
-            .run(context -> {
-                var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();
-                assertThat(localCache.getHeadCheckJitter()).isEqualTo(Duration.ofSeconds(4));
-                assertThat(localCache.getSnapshotSyncJitter()).isEqualTo(Duration.ofSeconds(13));
-                assertThat(localCache.getZooKeeper().getActivatedPath()).isEqualTo("/legacy/activated");
-                assertThat(localCache.getMongoHeadPollJitter()).isEqualTo(Duration.ofSeconds(4));
-                assertThat(localCache.getZooKeeper().getActivatePath()).isEqualTo("/legacy/activated");
-            });
-    }
-
-    @Test
     void localCacheDefaults() {
         contextRunner.run(context -> {
             var localCache = context.getBean(CacheProperties.class).getLocalSubscriptionCache();

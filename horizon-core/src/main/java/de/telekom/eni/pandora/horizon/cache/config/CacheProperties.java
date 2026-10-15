@@ -7,7 +7,6 @@ package de.telekom.eni.pandora.horizon.cache.config;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.DeprecatedConfigurationProperty;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -42,7 +41,7 @@ public class CacheProperties {
 
         private String snapshotCollection = "subscriptions.subscriber.horizon.telekom.de.v1-snapshots";
 
-        // Server-side limit (maxTimeMS) for loading snapshot entries.
+        // Client-side limit for a complete snapshot load, including unresponsive connections.
         private Duration mongoLoadTimeout = Duration.ofSeconds(60);
 
         // Only applies to HAZELCAST_WITH_MONGO_FALLBACK.
@@ -64,32 +63,6 @@ public class CacheProperties {
         private Duration snapshotSyncJitter = Duration.ofSeconds(10);
 
         private ZooKeeperProperties zooKeeper = new ZooKeeperProperties();
-
-        /** @deprecated use {@code head-check-jitter}; set only one of both names */
-        @Deprecated
-        @DeprecatedConfigurationProperty(replacement = "horizon.cache.local-subscription-cache.head-check-jitter")
-        public Duration getMongoHeadPollJitter() {
-            return headCheckJitter;
-        }
-
-        /** @deprecated use {@code head-check-jitter}; set only one of both names */
-        @Deprecated
-        public void setMongoHeadPollJitter(Duration mongoHeadPollJitter) {
-            this.headCheckJitter = mongoHeadPollJitter;
-        }
-
-        /** @deprecated use {@code snapshot-sync-jitter}; set only one of both names */
-        @Deprecated
-        @DeprecatedConfigurationProperty(replacement = "horizon.cache.local-subscription-cache.snapshot-sync-jitter")
-        public Duration getMongoSnapshotSyncJitter() {
-            return snapshotSyncJitter;
-        }
-
-        /** @deprecated use {@code snapshot-sync-jitter}; set only one of both names */
-        @Deprecated
-        public void setMongoSnapshotSyncJitter(Duration mongoSnapshotSyncJitter) {
-            this.snapshotSyncJitter = mongoSnapshotSyncJitter;
-        }
     }
 
     /** ZooKeeper connection settings and ZNode paths for subscription snapshot heads. */
@@ -109,20 +82,6 @@ public class CacheProperties {
         private Duration connectionTimeout = Duration.ofSeconds(5);
 
         private Duration sessionTimeout = Duration.ofSeconds(30);
-
-        /** @deprecated use {@code activated-path}; set only one of both names */
-        @Deprecated
-        @DeprecatedConfigurationProperty(
-            replacement = "horizon.cache.local-subscription-cache.zoo-keeper.activated-path")
-        public String getActivatePath() {
-            return activatedPath;
-        }
-
-        /** @deprecated use {@code activated-path}; set only one of both names */
-        @Deprecated
-        public void setActivatePath(String activatePath) {
-            this.activatedPath = activatePath;
-        }
     }
 
     /** Selects the read source used when the local snapshot cannot serve requests. */

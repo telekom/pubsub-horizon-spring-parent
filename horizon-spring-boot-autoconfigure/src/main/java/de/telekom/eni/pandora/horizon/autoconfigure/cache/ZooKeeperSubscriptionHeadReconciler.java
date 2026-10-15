@@ -119,13 +119,20 @@ public class ZooKeeperSubscriptionHeadReconciler {
         Optional<SubscriptionSnapshotHead> active;
         try {
             active = reader.readActivatedHead();
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | Error exception) {
+            if (exception instanceof Error error) {
+                // Recorded so the cache does not stay FRESH unconfirmed; the watcher logs the error.
+                countHeadReadFailure();
+                gate.commitIfStillValid(cache::clearExpectedHead);
+                throw error;
+            }
             // Shutdown interrupts the watcher thread; that is not a ZooKeeper failure.
             if (isInterrupted(exception)) {
                 return;
             }
             // An unreadable ACTIVATED head cannot confirm the current cache state.
-            headReadFailed("Could not read ACTIVATED subscription head; local cache is no longer confirmed", exception);
+            headReadFailed("Could not read ACTIVATED subscription head; local cache is no longer confirmed",
+                (RuntimeException) exception);
             gate.commitIfStillValid(cache::clearExpectedHead);
             return;
         }
@@ -165,6 +172,11 @@ public class ZooKeeperSubscriptionHeadReconciler {
             }
             activationSucceeded(head);
         } catch (RuntimeException | Error exception) {
+            // Shutdown interrupts a running load; that neither counts as a failure nor makes the cache stale.
+            if (exception instanceof RuntimeException && isInterrupted(exception)) {
+                log.debug("Loading subscription snapshot {} was interrupted", head.getSnapshotId());
+                return;
+            }
             // Discard a failed preparation so a later reconciliation can retry from a clean state.
             cache.recordActivationFailure(head);
             cache.discardPreparedSnapshot(head);
@@ -209,14 +221,19 @@ public class ZooKeeperSubscriptionHeadReconciler {
 
     /** Counts and logs a missing or unreadable ACTIVATED head. */
     private void headReadFailed(String message, RuntimeException exception) {
-        activatedHeadReadFailures.incrementAndGet();
-        consecutiveHeadReadFailures++;
+        countHeadReadFailure();
         if (consecutiveHeadReadFailures == 1) {
             log.warn(message, exception);
         } else {
             log.warn("{} ({} consecutive failed reads): {}", message, consecutiveHeadReadFailures,
                 exception == null ? "missing" : describe(exception));
         }
+    }
+
+    /** Counts a missing or unreadable ACTIVATED head. */
+    private void countHeadReadFailure() {
+        activatedHeadReadFailures.incrementAndGet();
+        consecutiveHeadReadFailures++;
     }
 
     /** Returns the exception message, extended by the root cause when it differs. */
