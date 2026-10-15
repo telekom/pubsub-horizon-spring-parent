@@ -2,7 +2,7 @@
   "apiVersion": "dashboard.grafana.app/v2",
   "kind": "Dashboard",
   "metadata": {
-    "name": "horizon-local-subscription-cache-v9"
+    "name": "horizon-local-subscription-cache-v01"
   },
   "spec": {
     "annotations": [
@@ -10,6 +10,7 @@
         "kind": "AnnotationQuery",
         "spec": {
           "query": {
+            "kind": "DataQuery",
             "kind": "DataQuery",
             "group": "grafana",
             "version": "v0",
@@ -30,7 +31,7 @@
       }
     ],
     "cursorSync": "Crosshair",
-    "description": "Cache-telemetry-only view; no Kubernetes metrics are used. Selectors and pod counts include only pods exposing local cache state metrics. Missing metrics cannot distinguish disabled cache, unavailable application, or scrape failure. Configured enabled/fallback mode are not exported. Snapshot IDs require the parent version exposing horizon_local_subscription_cache_snapshot_identity. Counter rates are calculated before scrape deduplication. Local reads allowed is policy, not actual read traffic; fallback counters count attempts, including failures. No fixed grace-period alert threshold is assumed. Conditional pod counts sum boolean comparisons: zero means telemetry exists but no observed pods match; absent source telemetry remains No data.",
+    "description": "Cache-telemetry-only view; no Kubernetes metrics are used. Selectors and pod counts include only pods exposing local cache state metrics. Missing metrics cannot distinguish disabled cache, unavailable application, or scrape failure. Configured enabled/fallback mode and snapshot IDs are not exported by the current metrics. Counter rates are calculated before scrape deduplication. Local reads allowed is policy, not actual read traffic; fallback counters count attempts, including failures. No fixed grace-period alert threshold is assumed. Conditional pod counts sum boolean comparisons: zero means telemetry exists but no observed pods match; absent source telemetry remains No data.",
     "editable": true,
     "elements": {
       "panel-1": {
@@ -2094,7 +2095,7 @@
         "spec": {
           "id": 33,
           "title": "Reported cache state per pod",
-          "description": "Reported cache state and read policy only. No startup/readiness inference. Missing telemetry cannot distinguish disabled caches from unavailable applications or scraping failures. Snapshot ID is the active local snapshot, including while STALE. Requires the updated parent metric; absent before activation or when disabled. Duplicate targets use the most recent scrape timestamp, with arbitrary tie-breaking for conflicting samples; this is not an authoritative head or a cross-pod consistency guarantee.",
+          "description": "Reported cache state and read policy only. No startup/readiness inference. Missing telemetry cannot distinguish disabled caches from unavailable applications or scraping failures.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -2199,26 +2200,6 @@
                     "refId": "E",
                     "hidden": false
                   }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "${datasource}"
-                      },
-                      "spec": {
-                        "expr": "topk by (pod) (1, max by (pod, snapshot_id) (timestamp(horizon_local_subscription_cache_snapshot_identity{cluster=\"$cluster\", namespace=\"$namespace\", pod=~\"$pod\"})))",
-                        "format": "table",
-                        "instant": true
-                      }
-                    },
-                    "refId": "H",
-                    "hidden": false
-                  }
                 }
               ],
               "transformations": [
@@ -2235,17 +2216,15 @@
                   "spec": {
                     "options": {
                       "excludeByName": {
-                        "Time": true,
-                        "Value #H": true
+                        "Time": true
                       },
                       "indexByName": {
                         "Value #A": 1,
-                        "Value #B": 5,
-                        "Value #C": 6,
-                        "Value #D": 7,
-                        "Value #E": 8,
-                        "pod": 0,
-                        "snapshot_id": 2
+                        "Value #B": 4,
+                        "Value #C": 5,
+                        "Value #D": 6,
+                        "Value #E": 7,
+                        "pod": 0
                       },
                       "renameByName": {
                         "Value #A": "Status",
@@ -2253,8 +2232,7 @@
                         "Value #C": "Behind head",
                         "Value #D": "Stale for",
                         "Value #E": "Last activation",
-                        "pod": "Pod",
-                        "snapshot_id": "Snapshot ID"
+                        "pod": "Pod"
                       }
                     }
                   }
@@ -2487,22 +2465,6 @@
                         ]
                       }
                     ]
-                  },
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "Snapshot ID"
-                    },
-                    "properties": [
-                      {
-                        "id": "custom.width",
-                        "value": 320
-                      },
-                      {
-                        "id": "noValue",
-                        "value": "Not available"
-                      }
-                    ]
                   }
                 ]
               }
@@ -2515,7 +2477,7 @@
         "spec": {
           "id": 34,
           "title": "Problem caches: STALE / UNINITIALIZED",
-          "description": "Observed cache pods reporting STALE or UNINITIALIZED. FRESH rows are excluded; pods with missing telemetry cannot be listed. No rows does not prove all pods are healthy. Snapshot ID is the active local snapshot, including while STALE. Requires the updated parent metric; absent before activation or when disabled. Duplicate targets use the most recent scrape timestamp, with arbitrary tie-breaking for conflicting samples; this is not an authoritative head or a cross-pod consistency guarantee.",
+          "description": "Observed cache pods reporting STALE or UNINITIALIZED. FRESH rows are excluded; pods with missing telemetry cannot be listed. No rows does not prove all pods are healthy.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -2620,26 +2582,6 @@
                     "refId": "E",
                     "hidden": false
                   }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "${datasource}"
-                      },
-                      "spec": {
-                        "expr": "topk by (pod) (1, max by (pod, snapshot_id) (timestamp(horizon_local_subscription_cache_snapshot_identity{cluster=\"$cluster\", namespace=\"$namespace\", pod=~\"$pod\"})))",
-                        "format": "table",
-                        "instant": true
-                      }
-                    },
-                    "refId": "H",
-                    "hidden": false
-                  }
                 }
               ],
               "transformations": [
@@ -2656,17 +2598,15 @@
                   "spec": {
                     "options": {
                       "excludeByName": {
-                        "Time": true,
-                        "Value #H": true
+                        "Time": true
                       },
                       "indexByName": {
                         "Value #A": 1,
-                        "Value #B": 5,
-                        "Value #C": 6,
-                        "Value #D": 7,
-                        "Value #E": 8,
-                        "pod": 0,
-                        "snapshot_id": 2
+                        "Value #B": 4,
+                        "Value #C": 5,
+                        "Value #D": 6,
+                        "Value #E": 7,
+                        "pod": 0
                       },
                       "renameByName": {
                         "Value #A": "Status",
@@ -2674,8 +2614,7 @@
                         "Value #C": "Behind head",
                         "Value #D": "Stale for",
                         "Value #E": "Last activation",
-                        "pod": "Pod",
-                        "snapshot_id": "Snapshot ID"
+                        "pod": "Pod"
                       }
                     }
                   }
@@ -2927,22 +2866,6 @@
                             "type": "value"
                           }
                         ]
-                      }
-                    ]
-                  },
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "Snapshot ID"
-                    },
-                    "properties": [
-                      {
-                        "id": "custom.width",
-                        "value": 320
-                      },
-                      {
-                        "id": "noValue",
-                        "value": "Not available"
                       }
                     ]
                   }
@@ -3359,7 +3282,7 @@
         "spec": {
           "id": 9,
           "title": "Local cache per pod",
-          "description": "Latest available cache telemetry per pod, subject to scrape/lookback delays. Enabled and fallbackMode require additional metrics; snapshot details are available in /actuator/health when enabled and exposed. Snapshot ID is the active local snapshot, including while STALE. Requires the updated parent metric; absent before activation or when disabled. Duplicate targets use the most recent scrape timestamp, with arbitrary tie-breaking for conflicting samples; this is not an authoritative head or a cross-pod consistency guarantee.",
+          "description": "Latest available cache telemetry per pod, subject to scrape/lookback delays. Enabled, fallbackMode and snapshot IDs require additional metrics; snapshot details are available in /actuator/health when enabled and exposed.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -3504,26 +3427,6 @@
                     "refId": "G",
                     "hidden": false
                   }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "prometheus",
-                      "version": "v0",
-                      "datasource": {
-                        "name": "${datasource}"
-                      },
-                      "spec": {
-                        "expr": "topk by (pod) (1, max by (pod, snapshot_id) (timestamp(horizon_local_subscription_cache_snapshot_identity{cluster=\"$cluster\", namespace=\"$namespace\", pod=~\"$pod\"})))",
-                        "format": "table",
-                        "instant": true
-                      }
-                    },
-                    "refId": "H",
-                    "hidden": false
-                  }
                 }
               ],
               "transformations": [
@@ -3540,19 +3443,17 @@
                   "spec": {
                     "options": {
                       "excludeByName": {
-                        "Time": true,
-                        "Value #H": true
+                        "Time": true
                       },
                       "indexByName": {
                         "Value #A": 1,
-                        "Value #B": 3,
-                        "Value #C": 4,
-                        "Value #D": 5,
-                        "Value #E": 6,
-                        "Value #F": 7,
-                        "Value #G": 8,
-                        "pod": 0,
-                        "snapshot_id": 2
+                        "Value #B": 2,
+                        "Value #C": 3,
+                        "Value #D": 4,
+                        "Value #E": 5,
+                        "Value #F": 6,
+                        "Value #G": 7,
+                        "pod": 0
                       },
                       "renameByName": {
                         "Value #A": "Status",
@@ -3562,8 +3463,7 @@
                         "Value #E": "Stale for",
                         "Value #F": "Last activation",
                         "Value #G": "Fallback attempts/s",
-                        "pod": "Pod",
-                        "snapshot_id": "Snapshot ID"
+                        "pod": "Pod"
                       }
                     }
                   }
@@ -3814,22 +3714,6 @@
                       {
                         "id": "noValue",
                         "value": "-"
-                      }
-                    ]
-                  },
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "Snapshot ID"
-                    },
-                    "properties": [
-                      {
-                        "id": "custom.width",
-                        "value": 320
-                      },
-                      {
-                        "id": "noValue",
-                        "value": "Not available"
                       }
                     ]
                   }
@@ -4296,7 +4180,7 @@
       "hideTimepicker": false,
       "fiscalYearStartMonth": 0
     },
-    "title": "Horizon Local Subscription Cache v9",
+    "title": "Horizon Local Subscription Cache v01",
     "variables": [
       {
         "kind": "DatasourceVariable",
