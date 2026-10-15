@@ -21,6 +21,7 @@ class LocalSubscriptionCacheAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(LocalSubscriptionCacheAutoConfiguration.class))
+            .withPropertyValues("horizon.cache.enabled=true")
             .withBean("mongoConfigTemplate", MongoTemplate.class, () -> mock(MongoTemplate.class));
 
     @Test

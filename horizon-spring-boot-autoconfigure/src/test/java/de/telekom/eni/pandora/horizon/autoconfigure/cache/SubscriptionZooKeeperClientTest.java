@@ -13,6 +13,7 @@ import org.apache.curator.test.TestingServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -42,6 +43,7 @@ class SubscriptionZooKeeperClientTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
         .withUserConfiguration(TestProperties.class)
+        .withPropertyValues("horizon.cache.enabled=true")
         .withConfiguration(AutoConfigurations.of(LocalSubscriptionCacheAutoConfiguration.class));
 
     private final ApplicationContextRunner enabledRunner = contextRunner
@@ -57,6 +59,24 @@ class SubscriptionZooKeeperClientTest {
             assertFalse(context.containsBean("subscriptionZooKeeperClient"));
             assertFalse(context.containsBean("subscriptionHeadWatcher"));
         });
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void globallyDisabledCacheCreatesNoLocalInfrastructure(boolean localEnabled) {
+        contextRunner
+            .withPropertyValues(
+                "horizon.cache.enabled=false",
+                "horizon.cache.local-subscription-cache.enabled=" + localEnabled)
+            .run(context -> assertThat(context)
+                .hasNotFailed()
+                .doesNotHaveBean("subscriptionZooKeeperClient")
+                .doesNotHaveBean("subscriptionHeadWatcher")
+                .doesNotHaveBean("localSubscriptionCache")
+                .doesNotHaveBean("localSubscriptionCacheStartupBarrier")
+                .doesNotHaveBean("localSubscriptionCacheHealthIndicator")
+                .doesNotHaveBean("localSubscriptionCacheMetrics")
+                .doesNotHaveBean("localSubscriptionCacheZooKeeperMetrics"));
     }
 
     @Test

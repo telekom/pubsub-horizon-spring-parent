@@ -35,10 +35,12 @@ import java.util.concurrent.TimeoutException;
 /**
  * Configures the pod-local subscription cache, its head source, and related health, metrics, and startup beans.
  *
- * <p>The local cache is created only when {@code horizon.cache.local-subscription-cache.enabled=true}.</p>
+ * <p>The local cache is created only when both {@code horizon.cache.enabled=true} and
+ * {@code horizon.cache.local-subscription-cache.enabled=true}.</p>
  */
 @Slf4j
 @Configuration
+@ConditionalOnProperty(prefix = "horizon.cache", name = "enabled", havingValue = "true")
 public class LocalSubscriptionCacheAutoConfiguration {
 
     /** Creates the local subscription cache auto-configuration. */
