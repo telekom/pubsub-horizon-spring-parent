@@ -1,3 +1,9 @@
+<!--
+Copyright 2026 Deutsche Telekom AG
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Review: `CuratorCache` usage in the local subscription cache
 
 Branch: `feature/local-cache-with-backup` | Reference: commit `c2a1d1b` | Curator `5.7.1` | Analysis; measure 1 (`SINGLE_NODE_CACHE`) has since been implemented.

@@ -1,3 +1,9 @@
+<!--
+Copyright 2026 Deutsche Telekom AG
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Review: Should switching to Hazelcast be tied to Curator's LOST event?
 
 Branch: `feature/local-cache-with-backup` | Reference: commit `c2a1d1b` | Curator `5.7.1` | ZooKeeper server `3.9.5`

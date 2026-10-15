@@ -1,3 +1,7 @@
+// Copyright 2026 Deutsche Telekom AG
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package de.telekom.eni.pandora.horizon.cache.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
