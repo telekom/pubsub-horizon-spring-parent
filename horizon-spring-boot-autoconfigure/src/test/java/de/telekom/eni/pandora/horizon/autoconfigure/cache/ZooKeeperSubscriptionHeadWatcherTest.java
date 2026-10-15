@@ -286,6 +286,49 @@ class ZooKeeperSubscriptionHeadWatcherTest {
     }
 
     @Test
+    void errorsDoNotStopPeriodicOrEventReconciliation() throws Exception {
+        try (var server = new TestingServer();
+             var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {
+            client.start();
+            assertTrue(client.blockUntilConnected(10, TimeUnit.SECONDS));
+            var reconciler = mock(ZooKeeperSubscriptionHeadReconciler.class);
+            org.mockito.Mockito.doThrow(new OutOfMemoryError("test")).doNothing()
+                .when(reconciler).reconcileActivatedHead(anyGate());
+            org.mockito.Mockito.doNothing().doThrow(new OutOfMemoryError("test"))
+                .when(reconciler).reconcilePreparedAndActivatedHeads(anyGate());
+            var periodicTask = new AtomicReference<Runnable>();
+            var scheduler = manualScheduler(periodicTask);
+            var logger = (Logger) LoggerFactory.getLogger(ZooKeeperSubscriptionHeadWatcher.class);
+            var appender = new ListAppender<ILoggingEvent>();
+            appender.start();
+            logger.addAppender(appender);
+
+            try (var watcher = new ZooKeeperSubscriptionHeadWatcher(client,
+                "/subscriptions/prepared", "/subscriptions/activate", reconciler,
+                Duration.ofMinutes(7), Duration.ZERO, Duration.ZERO, scheduler)) {
+                watcher.start();
+                watcher.getInitialReconciliation().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+                // A throwing periodic run would cancel all further runs of scheduleWithFixedDelay.
+                assertDoesNotThrow(() -> periodicTask.get().run());
+                assertDoesNotThrow(() -> periodicTask.get().run());
+                assertDoesNotThrow(watcher::onActivatedHeadChanged);
+
+                verify(reconciler, times(2)).reconcileActivatedHead(anyGate());
+                verify(reconciler, times(2)).reconcilePreparedAndActivatedHeads(anyGate());
+                assertThat(appender.list)
+                    .filteredOn(event -> event.getLevel() == Level.ERROR)
+                    .extracting(ILoggingEvent::getFormattedMessage)
+                    .containsExactly("Unexpected failure in periodic subscription head reconciliation",
+                        "Unexpected failure in ACTIVATED event subscription head reconciliation");
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+        }
+    }
+
+    @Test
     void negativeReconcileIntervalIsRejected() throws Exception {
         try (var server = new TestingServer();
              var client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100))) {

@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -246,6 +247,52 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
+    void errorDuringActivationIsRecordedAndRethrown() {
+        var active = head("active");
+        when(reader.readActivatedHead()).thenReturn(Optional.of(active));
+        doThrow(new OutOfMemoryError("test")).when(cache).prepare(active);
+
+        assertThrows(OutOfMemoryError.class, reconciler::reconcileActivatedHead);
+
+        verify(cache).recordActivationFailure(active);
+        verify(cache).discardPreparedSnapshot(active);
+    }
+
+    @Test
+    void errorWhileLoadingNewerHeadRevokesFreshnessUntilRetrySucceeds() {
+        var template = mock(MongoTemplate.class);
+        var failing = new AtomicBoolean(true);
+        when(template.find(any(Query.class), eq(Document.class), eq("snapshots"))).thenAnswer(invocation -> {
+            var snapshotId = invocation.getArgument(0, Query.class).getQueryObject().getString("snapshotId");
+            if (snapshotId.equals("next") && failing.get()) {
+                throw new OutOfMemoryError("test");
+            }
+            return List.of(snapshotEntry(snapshotId));
+        });
+        var realCache = new LocalSubscriptionCache(
+            new MongoSubscriptionSnapshotLoader(template, "snapshots", Duration.ofSeconds(60)), Duration.ofSeconds(300));
+        var target = new ZooKeeperSubscriptionHeadReconciler(reader, realCache);
+        var gate = ZooKeeperSubscriptionHeadReconciler.CacheCommitGate.OPEN;
+        when(reader.readActivatedHead()).thenReturn(Optional.of(head("active")));
+        target.reconcileActivatedHead(gate);
+        assertEquals(LocalSubscriptionCache.Status.FRESH, realCache.getStatus());
+
+        when(reader.readActivatedHead()).thenReturn(Optional.of(head("next")));
+        assertThrows(OutOfMemoryError.class, () -> target.reconcileActivatedHead(gate));
+
+        assertEquals(LocalSubscriptionCache.Status.STALE, realCache.getStatus());
+        assertTrue(realCache.isBehindExpectedHead());
+        assertEquals(1, realCache.getActivationFailureCount());
+        assertEquals(Optional.of("active"), realCache.getLocalSnapshotId());
+
+        failing.set(false);
+        target.reconcileActivatedHead(gate);
+
+        assertEquals(LocalSubscriptionCache.Status.FRESH, realCache.getStatus());
+        assertEquals(Optional.of("next"), realCache.getLocalSnapshotId());
+    }
+
+    @Test
     void changedMetadataOrRollbackIsNotSkippedAsAnOldHead() {
         var original = head("active");
         original.setRevision(1L);
@@ -373,5 +420,13 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         head.setDocumentCount(1L);
         head.setCreatedAt(new Date(0));
         return head;
+    }
+
+    private static Document snapshotEntry(String snapshotId) {
+        var subscription = new Document("subscriptionId", "subscription-" + snapshotId).append("type", "event.v1");
+        var spec = new Document("environment", "default").append("subscription", subscription);
+        return new Document("snapshotId", snapshotId)
+            .append("subscriptionId", "subscription-" + snapshotId)
+            .append("resource", new Document("spec", spec));
     }
 }

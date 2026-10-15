@@ -164,11 +164,15 @@ public class ZooKeeperSubscriptionHeadReconciler {
                 return;
             }
             activationSucceeded(head);
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException | Error exception) {
             // Discard a failed preparation so a later reconciliation can retry from a clean state.
             cache.recordActivationFailure(head);
             cache.discardPreparedSnapshot(head);
             consecutiveActivationFailures++;
+            // Recorded above so the cache does not stay FRESH behind the head; the watcher logs the error.
+            if (exception instanceof Error error) {
+                throw error;
+            }
             if (consecutiveActivationFailures == 1) {
                 log.warn("Could not activate subscription snapshot {}", head.getSnapshotId(), exception);
             } else {

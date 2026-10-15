@@ -59,14 +59,16 @@ This library will provide an autoconfigured `HorizonTracer` bean that you can us
 
 ### Subscription snapshot cache
 
-When MongoDB is enabled, the parent provides a `LocalSubscriptionCache` in addition to the existing Hazelcast-backed
-`JsonCacheService<SubscriptionResource>`. The snapshot cache loads the complete subscription collection into a prepared,
-immutable snapshot and makes it visible to readers only after an explicit atomic activation.
+When `horizon.cache.enabled` and `horizon.cache.local-subscription-cache.enabled` are both `true`, the parent provides a
+pod-local `LocalSubscriptionCache` in addition to the existing Hazelcast-backed `JsonCacheService<SubscriptionResource>`.
+The local cache loads a complete subscription snapshot from MongoDB into immutable in-memory indexes and makes it visible
+to readers only after an atomic activation. Otherwise no local-cache or ZooKeeper beans are created.
 
 The two caches intentionally have separate APIs. `JsonCacheService` also supports Hazelcast writes and listeners, while the
-snapshot cache has an explicit prepare/activate lifecycle. When enabled, the auto-configured initializer reads the published
-snapshot head, prepares the corresponding snapshot, and activates it atomically. Applications access subscriptions through
-the auto-configured `SubscriptionCacheReader`.
+local cache has an explicit prepare/activate lifecycle. A ZooKeeper watcher follows the published snapshot heads: the
+`PREPARED` head only preloads a snapshot, the `ACTIVATED` head is the only activation authority. Depending on
+`fallback-mode`, reads fall back to Hazelcast/MongoDB when the local snapshot is not usable. Applications access
+subscriptions through the auto-configured `SubscriptionCacheReader` bean `subscriptionCacheReader`.
 
 ```java
 subscriptionCacheReader.getById(subscriptionId);

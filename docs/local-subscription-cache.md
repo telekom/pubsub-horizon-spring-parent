@@ -631,6 +631,7 @@ fail startup with `IllegalArgumentException`.
 | ZooKeeper `SUSPENDED`/`LOST` after activation | `STALE` | Local during grace, then fallback | Local (stale) | Already running |
 | ACTIVATED missing, invalid or unreadable | `STALE` | Local during grace, then fallback | Local (stale) | Already running |
 | ACTIVATED references an invalid or incomplete snapshot | `STALE`, previous snapshot kept | Local during grace, then fallback | Local (stale) | Already running |
+| `Error` (e.g. `OutOfMemoryError`) while loading or activating | `STALE`, previous snapshot kept; watcher tasks keep running and retry | Local during grace, then fallback | Local (stale) | Already running |
 | Reconnect with unchanged ACTIVATED | `FRESH` (no reload) | Local | Local | n/a |
 | Local read throws | unchanged | Fallback for that request | Error | n/a |
 | Local and fallback read fail | unchanged | `SubscriptionCacheReadException` | Error | n/a |
@@ -712,7 +713,7 @@ on the root level.
 | `Could not activate subscription snapshot` | Load or activation failed; repeats are logged without stack trace but with the root cause |
 | `ZooKeeper ACTIVATED subscription head is missing` / `Could not read ACTIVATED subscription head` | ACTIVATED unavailable; local cache is no longer confirmed and becomes `STALE` |
 | `ZooKeeper ACTIVATED subscription head ... readable again` / `Subscription snapshot activation recovered` | Recovery after failed reads or activations |
-| `Unexpected failure in {PREPARED event\|ACTIVATED event\|reconnect\|periodic} subscription head reconciliation` | Unexpected exception in a watcher task (`WARN` with stack trace) |
+| `Unexpected failure in {PREPARED event\|ACTIVATED event\|reconnect\|periodic} subscription head reconciliation` | Unexpected failure in a watcher task; `WARN` with stack trace for exceptions, `ERROR` for `Error`s. The task is not cancelled. |
 | `Primary subscription cache is not ready yet` / `... is ready` / `... is not ready` / `... is ready again` | Switch between local reads and fallback; `WARN` only when the primary was ready before |
 | `Failed to determine {primary\|fallback} subscription cache readiness` / `... readiness check recovered` | Readiness check failed; first failure `WARN` with stack trace, repeats `DEBUG` |
 | `Primary subscription cache ... failed, using fallback until the primary recovers` | Local reads failed; fallback active |

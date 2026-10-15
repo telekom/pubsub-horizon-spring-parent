@@ -195,8 +195,9 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         preparedReconcile.schedule(() -> {
             try {
                 tryRunInEpoch(epoch, gate -> reconciler.reconcilePreparedHead(eventData));
-            } catch (RuntimeException exception) {
-                log.warn("Unexpected failure in PREPARED event subscription head reconciliation", exception);
+            } catch (RuntimeException | Error exception) {
+                logUnexpectedFailure("Unexpected failure in PREPARED event subscription head reconciliation",
+                    exception);
             }
         }, randomDelayMillis(snapshotSyncJitterMillis));
     }
@@ -316,8 +317,8 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
             if (tryRunInEpoch(epoch, reconciler::reconcilePreparedAndActivatedHeads)) {
                 initialReconciliation.complete(null);
             }
-        } catch (RuntimeException exception) {
-            log.warn(failureMessage, exception);
+        } catch (RuntimeException | Error exception) {
+            logUnexpectedFailure(failureMessage, exception);
         }
     }
 
@@ -331,8 +332,18 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         }
         try {
             tryRunInEpoch(epoch, reconciler::reconcileActivatedHead);
-        } catch (RuntimeException exception) {
-            log.warn("Unexpected failure in periodic subscription head reconciliation", exception);
+        } catch (RuntimeException | Error exception) {
+            // A throwable escaping scheduleWithFixedDelay would silently cancel all further runs.
+            logUnexpectedFailure("Unexpected failure in periodic subscription head reconciliation", exception);
+        }
+    }
+
+    /** Logs a failure of a watcher task that keeps running; errors are logged at ERROR. */
+    private static void logUnexpectedFailure(String message, Throwable failure) {
+        if (failure instanceof Error) {
+            log.error(message, failure);
+        } else {
+            log.warn(message, failure);
         }
     }
 
