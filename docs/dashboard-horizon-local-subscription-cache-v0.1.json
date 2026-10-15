@@ -11,7 +11,6 @@
         "spec": {
           "query": {
             "kind": "DataQuery",
-            "kind": "DataQuery",
             "group": "grafana",
             "version": "v0",
             "datasource": {
