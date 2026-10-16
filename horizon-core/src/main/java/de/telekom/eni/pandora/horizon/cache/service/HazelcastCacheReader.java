@@ -1,0 +1,109 @@
+// Copyright 2026 Deutsche Telekom AG
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package de.telekom.eni.pandora.horizon.cache.service;
+
+import de.telekom.eni.pandora.horizon.cache.util.Query;
+import de.telekom.eni.pandora.horizon.exception.JsonCacheException;
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
+import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
+import lombok.extern.slf4j.Slf4j;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Subscription reader backed by the shared Hazelcast/JSON cache.
+ *
+ * <p>It translates the domain lookup by environment and event type into the
+ * underlying cache query.</p>
+ */
+@Slf4j
+public class HazelcastCacheReader implements SubscriptionCacheReader {
+
+    private final JsonCacheService<SubscriptionResource> subscriptionCache;
+
+    /**
+     * Creates a reader backed by the shared subscription cache service.
+     *
+     * @param subscriptionCache shared JSON cache service
+     */
+    public HazelcastCacheReader(JsonCacheService<SubscriptionResource> subscriptionCache) {
+        this.subscriptionCache = subscriptionCache;
+    }
+
+    /**
+     * Reads a subscription by ID from the shared cache.
+     *
+     * @param subscriptionId subscription ID
+     * @return the subscription if present
+     * @throws SubscriptionCacheReadException if the shared cache cannot be read
+     */
+    @Override
+    public Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException {
+        if (subscriptionId == null) {
+            return Optional.empty();
+        }
+        try {
+            var result = subscriptionCache.getByKey(subscriptionId);
+            if (result == null) {
+                throw new SubscriptionCacheReadException(
+                        "Subscription cache returned no result container for id: " + subscriptionId);
+            }
+            return result;
+        } catch (JsonCacheException | RuntimeException exception) {
+            throw new SubscriptionCacheReadException(
+                    "Failed to read subscription with id: " + subscriptionId, exception);
+        }
+    }
+
+    /**
+     * Reads subscriptions matching an environment and event type.
+     *
+     * @param environment subscription environment
+     * @param eventType subscription event type
+     * @return matching subscriptions
+     * @throws SubscriptionCacheReadException if the shared cache cannot be read
+     */
+    @Override
+    public List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
+            throws SubscriptionCacheReadException {
+        if (environment == null || eventType == null) {
+            return List.of();
+        }
+        var query = Query.builder(SubscriptionResource.class)
+                .addMatcher("spec.environment", environment)
+                .addMatcher("spec.subscription.type", eventType)
+                .build();
+        try {
+            var result = subscriptionCache.getQuery(query);
+            if (result == null) {
+                throw new SubscriptionCacheReadException(
+                        "Subscription cache returned no result for environment: " + environment
+                                + " and event type: " + eventType);
+            }
+            return result;
+        } catch (JsonCacheException | RuntimeException exception) {
+            throw new SubscriptionCacheReadException(
+                "Failed to read subscriptions for environment: " + environment
+                    + " and event type: " + eventType,
+                exception);
+        }
+    }
+
+    /**
+     * Delegates readiness to the shared cache service.
+     *
+     * @return {@code true} when the shared cache is available
+     */
+    @Override
+    public boolean isReady() {
+        try {
+            return subscriptionCache.isReady();
+        } catch (RuntimeException exception) {
+            log.warn("Failed to determine subscription cache readiness", exception);
+            return false;
+        }
+    }
+}

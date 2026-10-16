@@ -5,26 +5,33 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
+import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.JsonCacheService;
+import de.telekom.eni.pandora.horizon.cache.service.FallbackSubscriptionCacheReader;
+import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
+import de.telekom.eni.pandora.horizon.cache.service.HazelcastCacheReader;
+import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
+import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
-import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
-import de.telekom.jsonfilter.operator.Operator;
-import de.telekom.jsonfilter.serde.OperatorDeserializer;
-import de.telekom.jsonfilter.serde.OperatorSerializer;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.data.mongodb.core.MongoTemplate;
 
 @Slf4j
 @Configuration
@@ -35,16 +42,10 @@ public class JsonCacheAutoconfiguration {
 
     private static final String CIRCUITBREAKER_MAP = "circuit-breakers";
 
-    private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
-
     @Bean
-    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, SubscriptionsMongoRepo subscriptionsMongoRepo, MongoProperties mongoProperties) {
-        var module = new SimpleModule();
-        module.addSerializer(Operator.class, new OperatorSerializer());
-        module.addDeserializer(Operator.class, new OperatorDeserializer());
-
-        var mapper = new ObjectMapper();
-        mapper.registerModule(module);
+    public JsonCacheService<SubscriptionResource> subscriptionCache(HazelcastInstance hazelcastInstance, ApplicationEventPublisher applicationEventPublisher, @Qualifier("mongoConfigTemplate") MongoTemplate mongoConfigTemplate, MongoProperties mongoProperties) {
+        // The MongoDB fallback and the local snapshot use the same Jackson configuration as Hazelcast.
+        var mapper = SubscriptionResourceJsonMapper.createObjectMapper();
 
         IMap<String, HazelcastJsonValue> map = null;
 
@@ -57,9 +58,49 @@ public class JsonCacheAutoconfiguration {
         }
 
         var svc = new JsonCacheService<>(SubscriptionResource.class, map, mapper, hazelcastInstance,SUBSCRIPTION_RESOURCE_V1);
-        svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(subscriptionsMongoRepo, mongoProperties));
+        svc.setJsonCacheFallback(new SubscriptionCacheMongoFallback(mongoConfigTemplate, mongoProperties,
+            new SubscriptionResourceJsonMapper(mapper)));
         svc.setJsonEntryMapEventBroadcaster(new SubscriptionResourceEventBroadcaster(mapper, applicationEventPublisher));
         return svc;
+    }
+
+    @Bean(name = "subscriptionCacheReader")
+    @Primary
+    @ConditionalOnProperty(value = "horizon.cache.enabled")
+    public SubscriptionCacheReader subscriptionCacheWithLocalPrimary(
+            ObjectProvider<LocalSubscriptionCache> localSubscriptionCacheProvider,
+            @org.springframework.beans.factory.annotation.Qualifier("subscriptionCache") JsonCacheService<SubscriptionResource> subscriptionCache,
+            CacheProperties cacheProperties,
+            ObjectProvider<MeterRegistry> meterRegistryProvider) {
+        var localSubscriptionCache = localSubscriptionCacheProvider.getIfAvailable();
+        var localCacheProperties = cacheProperties.getLocalSubscriptionCache();
+        // If local subscription cache is not enabled, fall back to Hazelcast cache reader
+        if (!localCacheProperties.isEnabled()) {
+            log.info("Using Hazelcast subscription cache reader; local subscription cache is disabled");
+            return new HazelcastCacheReader(subscriptionCache);
+        }
+        // If local subscription cache is enabled and fallback mode is NONE, use the local cache exclusively
+        if (localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
+            if (localSubscriptionCache == null) {
+                throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.local-subscription-cache.enabled is true");
+            }
+            log.info("Using local subscription cache reader without fallback");
+            return localSubscriptionCache;
+        }
+        // Otherwise, use the local cache with Hazelcast as a fallback
+        var hazelcastCacheReader = new HazelcastCacheReader(subscriptionCache);
+        if (localSubscriptionCache == null) {
+            log.warn("Using Hazelcast subscription cache reader; local subscription cache is enabled but its bean is unavailable");
+            return hazelcastCacheReader;
+        }
+        log.info("Using local subscription cache reader with Hazelcast/MongoDB fallback");
+        var meterRegistry = meterRegistryProvider.getIfAvailable();
+        Runnable fallbackReadListener = meterRegistry == null
+            ? () -> { }
+            : Counter.builder(LocalSubscriptionCacheMetrics.FALLBACK_READS)
+                .description("Subscription reads served by the Hazelcast/MongoDB fallback instead of the local cache")
+                .register(meterRegistry)::increment;
+        return new FallbackSubscriptionCacheReader(localSubscriptionCache, hazelcastCacheReader, fallbackReadListener);
     }
 
     @Bean

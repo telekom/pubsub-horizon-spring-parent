@@ -1,0 +1,45 @@
+// Copyright 2026 Deutsche Telekom AG
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package de.telekom.eni.pandora.horizon.cache.service;
+
+import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheReadException;
+import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Read-only contract for accessing subscription resources from a cache source.
+ * Returned resources and their nested objects are shared data and must not be mutated.
+ */
+public interface SubscriptionCacheReader {
+
+    /**
+     * Looks up a subscription by its ID.
+     *
+     * @param subscriptionId subscription ID
+    * @return the subscription if present; treat it and its nested objects as read-only
+    * @throws SubscriptionCacheReadException if the underlying cache cannot be read
+     */
+    Optional<SubscriptionResource> getById(String subscriptionId) throws SubscriptionCacheReadException;
+
+    /**
+     * Looks up subscriptions for an environment and event type.
+     *
+     * @param environment subscription environment
+     * @param eventType subscription event type
+     * @return matching subscriptions; treat each resource and its nested objects as read-only
+     * @throws SubscriptionCacheReadException if the underlying cache cannot be read
+     */
+    List<SubscriptionResource> findByEnvironmentAndEventType(String environment, String eventType)
+            throws SubscriptionCacheReadException;
+
+    /**
+     * Indicates whether this reader can currently serve requests.
+     *
+     * @return {@code true} if the reader is ready
+     */
+    boolean isReady();
+}
