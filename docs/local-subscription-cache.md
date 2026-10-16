@@ -37,7 +37,7 @@ The local subscription cache keeps a complete, indexed copy of all subscriptions
 - If the local cache cannot serve reads, the existing Hazelcast/MongoDB path can be used as fallback.
 
 The feature is **disabled by default**. Without `horizon.cache.local-subscription-cache.enabled: true` no local-cache
-or ZooKeeper bean is created and reads use the shared Hazelcast reader, see
+or ZooKeeper bean is created and, with `horizon.cache.enabled: true`, reads use the shared Hazelcast reader, see
 [Legacy compatibility](#legacy-compatibility).
 
 ## Quick start
@@ -285,9 +285,10 @@ Head handling is split into two classes:
   thread-safe: the watcher calls it serially on its worker thread, except `onConnectionLost()`, which the Curator
   connection listener calls under the watcher monitor and which only touches the thread-safe cache.
 
-The watcher passes the PREPARED event payload to the reconciler to avoid another read; a node without data is treated
-like a deleted node. ACTIVATED events only trigger reconciliation: their payload is ignored and the reconciler always
-rereads the authoritative head.
+The watcher passes the PREPARED event payload to the reconciler to avoid another read. A deleted node is passed as
+`null` and discards the prepared candidate; a node without data is passed as an empty payload, rejected like any
+invalid head, and keeps the candidate. ACTIVATED events only trigger reconciliation: their payload is ignored and the
+reconciler always rereads the authoritative head.
 
 Their method-level interaction and the commit gate are described in
 [Watcher-reconciler interaction](#watcher-reconciler-interaction), after the flows that trigger them.
@@ -353,7 +354,7 @@ but it cannot repair a violated contract.
 | Rule | Checked by the cache |
 |---|---|
 | All entries of a snapshot are written to `snapshot-collection` before PREPARED or ACTIVATED references it. | Yes, via `documentCount` |
-| Each entry contains `snapshotId`, `subscriptionId` and the complete subscription custom resource in `resource`, in the same JSON structure as in Hazelcast. | Yes, the entry must be mappable |
+| Each entry contains `snapshotId`, `subscriptionId` and the complete subscription custom resource in `resource`, in the same JSON structure as in Hazelcast. | Partly: `resource` must be mappable; the entry-level `subscriptionId` is not checked against the resource |
 | Each `resource` has `spec.subscription.subscriptionId`, `spec.subscription.type` and `spec.environment`; subscription IDs are unique within a snapshot. | Yes |
 | `documentCount` is the exact number of entries with this `snapshotId` and is greater than `0`. | Yes |
 | A `snapshotId` is never reused for different content, and entries of a published snapshot are never modified. Entries are loaded by `snapshotId` only. | No |
@@ -366,7 +367,7 @@ Behavior when the contract is violated:
 
 | Violation | Running pods | New pods | Signals |
 |---|---|---|---|
-| Invalid or duplicate entry, count mismatch, deleted entries | Keep the previous snapshot and become `STALE`; local reads during grace, then fallback (`none`: stale local reads). Retried on every head event and `reconcile-interval`. | Stay `UNINITIALIZED`; startup fails after `initial-snapshot-timeout` if the local cache is required | `failures_total{reason="activation"}`, `snapshot_behind`, log `Could not activate subscription snapshot` |
+| Invalid or duplicate entry, count mismatch, deleted entries | When ACTIVATED references the snapshot: keep the previous snapshot and become `STALE`; local reads during grace, then fallback (`none`: stale local reads). Retried on every head event and `reconcile-interval`. A failed PREPARED preload is only logged; status and counters are unchanged. | Stay `UNINITIALIZED`; startup fails after `initial-snapshot-timeout` if the local cache is required | `failures_total{reason="activation"}`, `snapshot_behind`, log `Could not activate subscription snapshot`; for PREPARED only log `Could not preload PREPARED subscription snapshot` |
 | Invalid ACTIVATED head (e.g. missing `createdAt`, `documentCount` not positive) | Same as a missing ACTIVATED head: `STALE`, grace, then fallback | Startup fails if the local cache is required | `failures_total{reason="zookeeper_head_read"}`, log `Could not read ACTIVATED subscription head` |
 
 An empty subscription set cannot be published because `documentCount` must be positive. In such an environment the
@@ -472,9 +473,8 @@ The commit gate protects only mutations explicitly run through it, including `se
 `clearExpectedHead` after an ACTIVATED-head read failure. On connection loss, the watcher instead calls
 `onConnectionLost()` while holding its monitor. Snapshot preparation is not gated or cancelled: a load finishing after
 disconnect may remain as an invisible prepared candidate, but work from the old epoch cannot activate it. Reconnect
-reconciliation rereads the authoritative heads before activation. Locks are only taken in the order watcher monitor,
-then metrics monitor (snapshot listeners), then meter registry; no path acquires them in reverse order. The cache
-itself is lock-free.
+reconciliation rereads the authoritative heads before activation. The watcher monitor is the only lock: it serializes
+connection-state changes and commit-gate mutations. The cache itself is lock-free (`AtomicReference`).
 
 ### Cache operations
 
@@ -487,7 +487,7 @@ candidate through one atomic reference update.
 |---|---|---|---|
 | `prepare` | Valid head and complete entries | Stored as `preparedSnapshot` | Unchanged |
 | `prepare` | Head matches the active or prepared snapshot | Skipped | Unchanged |
-| `prepare` | Same `snapshotId`, changed metadata | Loaded and prepared again | Unchanged |
+| `prepare` | Same `snapshotId`, different identity (`documentCount`, or `revision`/`sourceHash` set on both heads) | Loaded and prepared again | Unchanged |
 | `prepare` | Invalid head or entry, duplicate ID, count mismatch, load timeout | Fails; existing cache state is unchanged | Unchanged |
 | `activate` | Prepared snapshot matches the head and is non-empty | Becomes active atomically | New snapshot |
 | `activate` | Head matches the already active snapshot | Idempotent; freshness re-evaluated | Unchanged |
@@ -596,7 +596,8 @@ API is intentionally limited; additional query shapes need an implementation for
 - `UNINITIALIZED`: fallback reader.
 
 If a local read throws, the request is retried on the fallback. If the fallback fails as well, a
-`SubscriptionCacheReadException` is thrown; no empty result is fabricated. Every fallback read increments
+`SubscriptionCacheReadException` is thrown; no empty result is fabricated. Every read routed to the fallback, including
+a failing one, increments
 `horizon_local_subscription_cache_fallback_reads_total`. With `fallback-mode: none` a `STALE` snapshot keeps serving
 reads indefinitely, because there is no other source.
 
@@ -677,7 +678,8 @@ fail startup with `IllegalArgumentException`.
 | Local read throws | unchanged | Fallback for that request | Error | n/a |
 | Local and fallback read fail | unchanged | `SubscriptionCacheReadException` | Error | n/a |
 
-Repeated stale causes do not restart the grace period. A successful activation returns the cache to `FRESH`. A pending
+Repeated stale causes do not restart the grace period. A successful activation of the expected head returns the cache
+to `FRESH`. A pending
 MongoDB load is not cancelled by a disconnect; its result is only prevented from being activated.
 
 ## Observability
@@ -710,9 +712,9 @@ MongoDB load is not cancelled by a disconnect; its result is only prevented from
 | `horizon_local_subscription_cache_subscriptions` | Gauge | Subscriptions in the active snapshot |
 | `horizon_local_subscription_cache_stale_seconds` | Gauge | Seconds since the cache became `STALE`, otherwise `0` |
 | `horizon_local_subscription_cache_last_activation_timestamp_seconds` | Gauge | Epoch seconds of the last activation, `0` if none |
-| `horizon_local_subscription_cache_snapshot_behind` | Gauge | `1` if the active snapshot does not match the expected head |
+| `horizon_local_subscription_cache_snapshot_behind` | Gauge | `1` if an expected head is known and the active snapshot does not match it; `0` otherwise, including while no expected head is known (check `state` for `STALE`) |
 | `horizon_local_subscription_cache_zookeeper_connected` | Gauge | `1` if the Curator client is connected |
-| `horizon_local_subscription_cache_fallback_reads_total` | Counter | Reads served by the fallback reader |
+| `horizon_local_subscription_cache_fallback_reads_total` | Counter | Reads routed to the fallback reader, including fallback reads that fail |
 | `horizon_local_subscription_cache_failures_total{reason}` | Counter | `activation`: failed activations including failed loads; `zookeeper_head_read`: ACTIVATED missing, invalid or unreadable. Counts attempts, not incidents. |
 | `horizon_local_subscription_cache_snapshot_load_seconds` | Timer | Count and total duration of successful snapshot loads |
 | `horizon_local_subscription_cache_snapshot_load_last_seconds` | Gauge | Duration of the last successful load |
@@ -804,10 +806,12 @@ The guarantees rely on these mechanisms; each has a deliberate boundary.
 | `SubscriptionSnapshotHeads` | core | Head validation and identity rules |
 | `ZooKeeperSubscriptionSnapshotHeadParser` | core | Parses and validates head JSON |
 | `SubscriptionResourceJsonMapper` | core | Shared Jackson mapping for all read paths |
+| `LocalSubscriptionCacheEvents` | core | Dedicated snapshot and connection event loggers |
 | `FallbackSubscriptionCacheReader` | core | Local-first reader with fallback |
 | `HazelcastCacheReader` | core | Adapter from `SubscriptionCacheReader` to `JsonCacheService` |
 | `JsonCacheService`, `SubscriptionCacheMongoFallback` | core | Shared Hazelcast cache and its MongoDB fallback |
 | `CacheProperties` | core | Configuration properties |
+| `HorizonAutoConfiguration` | autoconfigure | Imports the cache auto-configurations and binds `CacheProperties` |
 | `LocalSubscriptionCacheAutoConfiguration` | autoconfigure | Curator client, watcher, cache, startup barrier, health, metrics |
 | `JsonCacheAutoconfiguration` | autoconfigure | `JsonCacheService` and `subscriptionCacheReader` selection |
 | `ZooKeeperSubscriptionHeadWatcher` | autoconfigure | Watches, scheduling, connection handling, commit gate |
