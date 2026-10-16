@@ -7,6 +7,7 @@ package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCacheEvents;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.cache.CuratorCache;
+import org.apache.curator.framework.recipes.cache.CuratorCacheListener;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.framework.state.ConnectionStateListener;
 import lombok.extern.slf4j.Slf4j;
@@ -126,8 +127,10 @@ public class ZooKeeperSubscriptionHeadWatcher implements AutoCloseable {
         this.activatedCache = CuratorCache.build(client, activatedPath, CuratorCache.Options.SINGLE_NODE_CACHE);
         this.reconciler = Objects.requireNonNull(reconciler, "reconciler must not be null");
         this.connectionStateListener = this::onConnectionStateChanged;
-        preparedCache.listenable().addListener((type, oldData, data) ->
-            onPreparedHeadChanged(data == null ? null : data.getData()));
+        preparedCache.listenable().addListener((type, oldData, data) -> onPreparedHeadChanged(
+            type == CuratorCacheListener.Type.NODE_DELETED
+                ? null
+                : Objects.requireNonNullElse(data.getData(), new byte[0])));
         activatedCache.listenable().addListener((type, oldData, data) -> onActivatedHeadChanged());
     }
 
