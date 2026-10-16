@@ -25,8 +25,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.mongodb.core.CollectionCallback;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -138,14 +140,14 @@ class JsonCacheServiceTest {
         // Prepare test data and simulate Hazelcast map unavailability
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
         when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
-        stubMongoFind(mockDocument);
+        stubMongoFindById(mockDocument);
 
         // Call method to test
         Optional<SubscriptionResource> result = jsonCacheService.getByKey(TEST_SUBSCRIPTION_ID);
 
         // Verify result
         verify(hazelcastInstance, times(1)).getMap(TEST_MAP_NAME);
-        verify(mongoTemplate, times(1)).find(anyMongoQuery(), eq(Document.class), anyString());
+        verify(mongoTemplate, times(1)).execute(anyString(), any(CollectionCallback.class));
         assertTrue(result.isPresent(), "Result should be present");
         assertEquals(TEST_SUBSCRIPTION_ID, result.get().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
@@ -244,7 +246,7 @@ class JsonCacheServiceTest {
         // Prepare test data and simulate Hazelcast
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
         when(hazelcastInstance.getMap(TEST_MAP_NAME)).thenThrow(new HazelcastClientOfflineException());
-        stubMongoFind(mockDocument);
+        stubMongoFindById(mockDocument);
 
         // Call method to test indirectly, because its private
         Optional<SubscriptionResource> result = jsonCacheService.getByKey(TEST_SUBSCRIPTION_ID);
@@ -354,6 +356,12 @@ class JsonCacheServiceTest {
     private void stubMongoFind(SubscriptionMongoDocument document) {
         when(mongoTemplate.find(anyMongoQuery(), eq(Document.class), anyString()))
                 .thenReturn(List.of(toDocument(document)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void stubMongoFindById(SubscriptionMongoDocument document) {
+        when(mongoTemplate.execute(anyString(), any(CollectionCallback.class)))
+                .thenReturn(new ArrayList<>(List.of(toDocument(document))));
     }
 
     private static org.springframework.data.mongodb.core.query.Query anyMongoQuery() {

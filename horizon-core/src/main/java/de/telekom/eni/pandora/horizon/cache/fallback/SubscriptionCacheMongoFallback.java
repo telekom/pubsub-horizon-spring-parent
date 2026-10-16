@@ -6,6 +6,7 @@ package de.telekom.eni.pandora.horizon.cache.fallback;
 
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoTimeoutException;
+import com.mongodb.client.model.Filters;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
@@ -16,6 +17,7 @@ import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -58,7 +60,8 @@ public class SubscriptionCacheMongoFallback implements JsonCacheFallback<Subscri
         List<Document> docs = List.of();
 
         try {
-            docs = mongoTemplate.find(byId(key), Document.class, COLLECTION_NAME);
+            docs = mongoTemplate.execute(COLLECTION_NAME,
+                collection -> collection.find(Filters.eq("_id", key)).into(new ArrayList<>()));
         } catch (MongoCommandException | MongoTimeoutException e) {
             log.error("MongoDB fallback error occurred executing query: ", e.getCause());
             if (mongoProperties.isRethrowExceptions()) {

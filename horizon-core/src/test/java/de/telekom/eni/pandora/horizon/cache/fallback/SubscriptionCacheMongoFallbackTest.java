@@ -5,6 +5,8 @@
 package de.telekom.eni.pandora.horizon.cache.fallback;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
 import de.telekom.eni.pandora.horizon.cache.util.Query;
 import de.telekom.eni.pandora.horizon.cache.util.SubscriptionResourceJsonMapper;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
@@ -13,11 +15,15 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSp
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionTrigger;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionMongoDocument;
+import org.bson.BsonDocument;
+import org.bson.BsonString;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.mongodb.core.CollectionCallback;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.List;
@@ -88,17 +94,28 @@ class SubscriptionCacheMongoFallbackTest {
     }
 
     @Test
+    void shouldLookUpObjectIdLikeSubscriptionIdAsString() {
+        var objectIdLikeId = "507f1f77bcf86cd799439011";
+        var collection = stubFindById(createMockSubscriptionDocument(objectIdLikeId, TEST_SUBSCRIPTION_TYPE));
+
+        var result = subscriptionCacheMongoFallback.getByKey(objectIdLikeId);
+
+        assertTrue(result.isPresent());
+        assertEquals(new BsonString(objectIdLikeId), capturedIdFilter(collection).get("_id"));
+    }
+
+    @Test
     void testGetByKey() {
 
         // Prepare test data and simulate mongo db
         SubscriptionMongoDocument mockDocument = createMockSubscriptionDocument(TEST_SUBSCRIPTION_ID, TEST_SUBSCRIPTION_TYPE);
-        stubFind(mockDocument);
+        var collection = stubFindById(mockDocument);
 
         // Call method to test
         Optional<SubscriptionResource> cacheResult = subscriptionCacheMongoFallback.getByKey(TEST_SUBSCRIPTION_ID);
 
         // Verify result
-        assertEquals(TEST_SUBSCRIPTION_ID, capturedFindFilter().get("_id"));
+        assertEquals(new BsonString(TEST_SUBSCRIPTION_ID), capturedIdFilter(collection).get("_id"));
         assertFalse(cacheResult. isEmpty(), "Result should be filled");
         assertEquals(TEST_SUBSCRIPTION_ID, cacheResult.get().getSpec().getSubscription().getSubscriptionId(), "SubscriptionId should match");
     }
@@ -163,7 +180,7 @@ class SubscriptionCacheMongoFallbackTest {
         document.getSpec().getSubscription().setTrigger(trigger);
         document.getSpec().getSubscription().setPublisherTrigger(publisherTrigger);
         document.getSpec().setEnvironment("integration");
-        stubFind(document);
+        stubFindById(document);
 
         var result = subscriptionCacheMongoFallback.getByKey(TEST_SUBSCRIPTION_ID).orElseThrow();
 
@@ -177,6 +194,27 @@ class SubscriptionCacheMongoFallbackTest {
     private void stubFind(SubscriptionMongoDocument document) {
         when(mongoTemplate.find(anyMongoQuery(), eq(Document.class), eq(SubscriptionCacheMongoFallback.COLLECTION_NAME)))
                 .thenReturn(List.of(toDocument(document)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private MongoCollection<Document> stubFindById(SubscriptionMongoDocument document) {
+        MongoCollection<Document> collection = mock(MongoCollection.class);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(collection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.into(any())).thenAnswer(invocation -> {
+            List<Document> target = invocation.getArgument(0);
+            target.add(toDocument(document));
+            return target;
+        });
+        when(mongoTemplate.execute(eq(SubscriptionCacheMongoFallback.COLLECTION_NAME), any(CollectionCallback.class)))
+                .thenAnswer(invocation -> invocation.<CollectionCallback<?>>getArgument(1).doInCollection(collection));
+        return collection;
+    }
+
+    private static BsonDocument capturedIdFilter(MongoCollection<Document> collection) {
+        var captor = ArgumentCaptor.forClass(Bson.class);
+        verify(collection).find(captor.capture());
+        return captor.getValue().toBsonDocument();
     }
 
     private Document capturedFindFilter() {
