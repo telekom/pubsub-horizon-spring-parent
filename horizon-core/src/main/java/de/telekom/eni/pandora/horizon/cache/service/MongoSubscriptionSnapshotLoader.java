@@ -35,7 +35,7 @@ public class MongoSubscriptionSnapshotLoader {
      *
      * @param mongoTemplate MongoDB template for the configuration database
      * @param snapshotCollectionName collection containing snapshot entries
-     * @param loadTimeout client-side time limit for each complete snapshot load, including unresponsive connections
+     * @param loadTimeout server-side time limit ({@code maxTimeMS}) for each snapshot load
      */
     public MongoSubscriptionSnapshotLoader(MongoTemplate mongoTemplate,
                                            String snapshotCollectionName,
@@ -63,10 +63,10 @@ public class MongoSubscriptionSnapshotLoader {
         }
         SubscriptionSnapshotHeads.requireValid(snapshotHead);
 
-        // Client-side operation timeout (driver CSOT, @Alpha in 5.2) also ends loads on connections that never answer.
+        // Server-side limit only; the client-side withTimeout requires driver 5.2, but services run Spring Boot 3.2.
         var documents = mongoTemplate.getCollection(snapshotCollectionName)
-            .withTimeout(loadTimeout.toMillis(), TimeUnit.MILLISECONDS)
             .find(Filters.eq("snapshotId", snapshotHead.getSnapshotId()))
+            .maxTime(loadTimeout.toMillis(), TimeUnit.MILLISECONDS)
             .into(new ArrayList<>());
         if (documents.size() != snapshotHead.getDocumentCount()) {
             throw new SubscriptionCacheSnapshotException("Subscription snapshot document count mismatch: expected "

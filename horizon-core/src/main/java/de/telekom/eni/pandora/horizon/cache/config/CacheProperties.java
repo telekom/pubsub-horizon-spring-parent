@@ -41,7 +41,7 @@ public class CacheProperties {
 
         private String snapshotCollection = "subscriptions.subscriber.horizon.telekom.de.v1-snapshots";
 
-        // Client-side limit for a complete snapshot load, including unresponsive connections.
+        // Server-side limit (maxTimeMS) for a snapshot load; unresponsive connections need socketTimeoutMS in the URL.
         private Duration mongoLoadTimeout = Duration.ofSeconds(60);
 
         // Only applies to HAZELCAST_WITH_MONGO_FALLBACK.

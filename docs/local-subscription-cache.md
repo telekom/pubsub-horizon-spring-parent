@@ -644,7 +644,7 @@ with the prefix `<SERVICE>_CACHE_LOCAL_SUBSCRIPTION_CACHE_` (`STARLIGHT`, `COMET
 | `enabled` | `false` | all | Enables the local cache. When `false`, no local-cache or ZooKeeper bean is created. |
 | `fallback-mode` | `hazelcast-with-mongo-fallback` | all | Read source when the local cache cannot serve reads. `none` never reads Hazelcast. |
 | `snapshot-collection` | `subscriptions.subscriber.horizon.telekom.de.v1-snapshots` | all | MongoDB collection with snapshot entries. |
-| `mongo-load-timeout` | `60s` | all | Client-side limit for a complete snapshot load (driver operation timeout `timeoutMS`), including connections that never answer. Not mapped in the service YAMLs; override via `HORIZON_CACHE_LOCALSUBSCRIPTIONCACHE_MONGOLOADTIMEOUT`. |
+| `mongo-load-timeout` | `60s` | all | Server-side limit (`maxTimeMS`) for a snapshot load query. Does not cover connections that never answer; bound those with `socketTimeoutMS` in the MongoDB URL. Not mapped in the service YAMLs; override via `HORIZON_CACHE_LOCALSUBSCRIPTIONCACHE_MONGOLOADTIMEOUT`. |
 | `stale-local-cache-read-grace-period` | `300s` | `hazelcast-with-mongo-fallback` | How long a `STALE` snapshot may serve reads. `0s` switches immediately. |
 | `require-local-cache-at-startup` | `true` | `hazelcast-with-mongo-fallback` | Startup waits for the first `FRESH` snapshot. `none` always waits. With `false`, startup does not check Hazelcast either. |
 | `initial-snapshot-timeout` | `15s` | when startup waits | Maximum wait for the first `FRESH` snapshot; expiry fails startup. `0s` waits indefinitely. |
@@ -672,7 +672,7 @@ fail startup with `IllegalArgumentException`.
 | ACTIVATED missing, invalid or unreadable | `STALE` | Local during grace, then fallback | Local (stale) | Already running |
 | ACTIVATED references an invalid or incomplete snapshot | `STALE`, previous snapshot kept | Local during grace, then fallback | Local (stale) | Already running |
 | `Error` (e.g. `OutOfMemoryError`) while reading the ACTIVATED head, loading or activating | `STALE`, previous snapshot kept; watcher tasks keep running and retry | Local during grace, then fallback | Local (stale) | Already running |
-| MongoDB does not answer during a load | `STALE` after `mongo-load-timeout`, previous snapshot kept; retried | Local during grace, then fallback | Local (stale) | Fails after `initial-snapshot-timeout` if required |
+| MongoDB does not answer during a load | Server-side query time: `STALE` after `mongo-load-timeout`, previous snapshot kept; retried. Unresponsive connection: the watcher thread waits until the driver socket timeout (`socketTimeoutMS` in the MongoDB URL; default unlimited) | Local during grace, then fallback | Local (stale) | Fails after `initial-snapshot-timeout` if required |
 | Shutdown during a running load | unchanged; the interrupted load is not counted as a failure | unchanged | unchanged | n/a |
 | Reconnect with unchanged ACTIVATED | `FRESH` (no reload) | Local | Local | n/a |
 | Local read throws | unchanged | Fallback for that request | Error | n/a |

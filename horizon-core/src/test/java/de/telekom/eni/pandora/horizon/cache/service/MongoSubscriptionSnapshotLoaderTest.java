@@ -52,15 +52,15 @@ class MongoSubscriptionSnapshotLoaderTest {
             mongoTemplate, SNAPSHOT_COLLECTION, LOAD_TIMEOUT);
 
     @Test
-    void shouldLoadEntriesBySnapshotIdWithClientSideTimeout() {
+    void shouldLoadEntriesBySnapshotIdWithServerSideTimeout() {
         var head = snapshotHead("snapshot-1", 1L);
         returnEntries(snapshotEntry("snapshot-1", "subscription-1"));
 
         var snapshot = loader.load(head);
 
         var filterCaptor = ArgumentCaptor.forClass(Bson.class);
-        verify(collection).withTimeout(LOAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         verify(collection).find(filterCaptor.capture());
+        verify(findIterable).maxTime(LOAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         assertEquals(Filters.eq("snapshotId", "snapshot-1").toBsonDocument(), filterCaptor.getValue().toBsonDocument());
         assertEquals("snapshot-1", snapshot.snapshotId());
         assertEquals("subscription-1", snapshot.getById("subscription-1").orElseThrow()
@@ -68,7 +68,7 @@ class MongoSubscriptionSnapshotLoaderTest {
     }
 
     @Test
-    void shouldPropagateTimeoutOfUnresponsiveLoad() {
+    void shouldPropagateLoadTimeout() {
         var head = snapshotHead("snapshot-1", 1L);
         returnEntries();
         var timeout = new IllegalStateException("operation timed out");
@@ -105,8 +105,8 @@ class MongoSubscriptionSnapshotLoaderTest {
 
     private void returnEntries(Document... entries) {
         when(mongoTemplate.getCollection(SNAPSHOT_COLLECTION)).thenReturn(collection);
-        when(collection.withTimeout(anyLong(), any(TimeUnit.class))).thenReturn(collection);
         when(collection.find(any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.maxTime(anyLong(), any(TimeUnit.class))).thenReturn(findIterable);
         when(findIterable.into(any())).thenAnswer(invocation -> {
             Collection<Document> target = invocation.getArgument(0);
             target.addAll(List.of(entries));

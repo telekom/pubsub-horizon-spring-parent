@@ -294,7 +294,6 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         var template = mock(MongoTemplate.class);
         MongoCollection<Document> collection = mock(MongoCollection.class);
         when(template.getCollection("snapshots")).thenReturn(collection);
-        when(collection.withTimeout(anyLong(), any(TimeUnit.class))).thenReturn(collection);
         var failing = new AtomicBoolean(true);
         when(collection.find(any(Bson.class))).thenAnswer(invocation -> {
             var snapshotId = invocation.getArgument(0, Bson.class).toBsonDocument().getString("snapshotId").getValue();
@@ -302,6 +301,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
                 throw new OutOfMemoryError("test");
             }
             FindIterable<Document> result = mock(FindIterable.class);
+            when(result.maxTime(anyLong(), any(TimeUnit.class))).thenReturn(result);
             when(result.into(any())).thenAnswer(into -> {
                 Collection<Document> target = into.getArgument(0);
                 target.add(snapshotEntry(snapshotId));
