@@ -25,6 +25,7 @@ public final class LocalSubscriptionCacheEvents {
     /** ZooKeeper connection suspended, lost, or reconnected. */
     public static final Logger CONNECTION = LoggerFactory.getLogger(EVENTS_LOGGER + ".connection");
 
+    /** Prevents instantiation of this logger holder. */
     private LocalSubscriptionCacheEvents() {
     }
 }

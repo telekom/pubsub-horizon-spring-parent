@@ -55,6 +55,7 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
         return fromSubscriptionResources(SnapshotVersion.from(snapshotHead), resources);
     }
 
+    /** Returns the snapshot ID of this snapshot, or {@code null} for the empty snapshot. */
     String snapshotId() {
         return version == null ? null : version.snapshotId();
     }
@@ -102,8 +103,8 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
         return subscriptionsById.isEmpty();
     }
 
-        /** Builds an indexed snapshot from subscription resources. */
-        private static IndexedSubscriptionSnapshot fromSubscriptionResources(
+    /** Builds an indexed snapshot from subscription resources. */
+    private static IndexedSubscriptionSnapshot fromSubscriptionResources(
             SnapshotVersion version,
             List<? extends SubscriptionResource> resources) {
         var subscriptionsById = new HashMap<String, SubscriptionResource>();
@@ -161,6 +162,7 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
                 snapshotHead.getCreatedAt() == null ? null : snapshotHead.getCreatedAt().toInstant());
         }
 
+        /** Returns whether {@code other} references the same snapshot (see {@link SubscriptionSnapshotHeads}). */
         boolean matches(SnapshotVersion other) {
             return other != null
                 && SubscriptionSnapshotHeads.isSameSnapshot(snapshotId, documentCount, revision, sourceHash,

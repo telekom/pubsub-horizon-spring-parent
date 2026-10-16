@@ -128,6 +128,11 @@ public class JsonCacheService<T> {
         }
     }
 
+    /**
+     * Indicates whether this cache can serve reads from Hazelcast or its fallback.
+     *
+     * @return {@code true} if the Hazelcast map is available or the fallback is ready
+     */
     public boolean isReady() {
         return getCacheMap() != null
                 || jsonCacheFallback != null && jsonCacheFallback.isReady();

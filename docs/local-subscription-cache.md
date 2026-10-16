@@ -74,13 +74,24 @@ are listed in the [configuration reference](#configuration-reference).
 | Term | Meaning |
 |---|---|
 | Snapshot | Complete set of subscription entries of one version in the MongoDB `snapshot-collection`. Each entry holds `snapshotId`, `subscriptionId` and the subscription custom resource in `resource`. |
-| Head | Small JSON document that identifies a snapshot version: `snapshotId`, `documentCount`, optional `revision` and `sourceHash`, `createdAt`. |
+| Head | Small JSON document that identifies a snapshot version: `snapshotId`, `documentCount`, optional `revision` and `sourceHash`, `createdAt`. See [Snapshot identity](#snapshot-identity). |
 | PREPARED head | ZNode `prepared-path`. Announces the next version; pods may **preload** it. Never authorizes activation. |
 | ACTIVATED head | ZNode `activated-path`. The **only activation authority**. Pods activate the snapshot it references. |
-| `prepare` | Loads, validates and indexes a snapshot as an invisible candidate. The active snapshot is not touched. |
-| `activate` | Atomically publishes the matching prepared candidate to readers. |
-| Freshness status | `UNINITIALIZED` (no active snapshot), `FRESH` (active snapshot is confirmed; it may temporarily lag a newer head while that snapshot is being prepared), `STALE` (an active snapshot has been marked unconfirmed). |
-| Stale-read grace | Period during which a `STALE` snapshot may still serve reads before the fallback reader is used. |
+| Expected head | The last valid ACTIVATED head read by this pod. Cleared when ACTIVATED is missing, invalid or unreadable, or when the ZooKeeper connection is lost. |
+| Confirmed | The active snapshot matches the expected head. A confirmed snapshot is `FRESH`, an unconfirmed one `STALE`. |
+| Prepared (pending) snapshot | Loaded and validated candidate that is not yet visible to readers. At most one exists; preparing a different version replaces it. |
+| `prepare` | Loads a snapshot by `snapshotId`, checks that the entry count equals `documentCount`, validates every entry and builds the indexes. The result becomes the prepared snapshot; the active snapshot is not touched. Skipped if the head matches the active or prepared snapshot. |
+| `activate` | Atomically publishes the matching prepared snapshot to readers. If the head matches the already active snapshot, re-confirms it without reloading (e.g. `STALE` to `FRESH`). |
+| Freshness status | `UNINITIALIZED`: no active snapshot. `FRESH`: the active snapshot is confirmed; it may temporarily lag a newer expected head while that snapshot is being prepared (`snapshot_behind = 1`). `STALE`: the active snapshot is no longer confirmed because the ZooKeeper connection is `SUSPENDED`/`LOST`, ACTIVATED is missing, invalid or unreadable, or activating the expected head failed. The previous snapshot stays active in all cases. |
+| Fallback mode | `hazelcast-with-mongo-fallback` (default): reads switch to Hazelcast/MongoDB when the local cache cannot serve them. `none`: reads are always local. See [Fallback behavior](#fallback-behavior). |
+| Stale-read grace | With `hazelcast-with-mongo-fallback` only: period (`stale-local-cache-read-grace-period`, default `300s`) during which a `STALE` snapshot still serves reads before the fallback is used. Measured from `staleSince`; repeated stale causes do not restart it. With `none`, a `STALE` snapshot serves reads indefinitely. |
+| First FRESH | One-time milestone when the cache becomes `FRESH` for the first time. Drives the [startup barrier](#startup-barrier); later `STALE` transitions do not reset it. |
+| Connection epoch / commit gate | Counter advanced on every ZooKeeper connection change. Cache changes are committed only while the epoch of the running reconciliation is still current, so work from a lost connection can never activate a snapshot. See [Watcher-reconciler interaction](#watcher-reconciler-interaction). |
+| Watcher / reconciler | Per-pod split of head handling: the watcher decides *when* (watches, connection state, jitter, coalescing, single worker thread, commit gate); the reconciler decides *what* (read heads, preload, activate, mark unconfirmed). See [Watcher and reconciler](#watcher-and-reconciler). |
+| Reconciliation | One run that reads the ZooKeeper head(s), compares them with the cache and preloads, activates or marks the cache unconfirmed. Triggered by startup, head events, reconnects and periodically. See [Watcher triggers](#watcher-triggers). |
+| Jitter | Random delay (`snapshot-sync-jitter`, `head-check-jitter`) that spreads MongoDB loads and head reads across pods. It is not a coordination mechanism. |
+| Local reads allowed | Whether the local cache may serve reads: `FRESH`, or `STALE` within the stale-read grace (always with `none`). Exposed as `local_reads`; otherwise the fallback reader is used. |
+| Primary / fallback reader | The `subscriptionCacheReader` bean reads from the local cache (primary) and, with `hazelcast-with-mongo-fallback`, switches to Hazelcast/MongoDB (fallback) while local reads are not allowed or fail. Reported as health detail `source`. |
 
 ### Snapshot identity
 
@@ -90,14 +101,15 @@ Two heads reference the "same snapshot" according to these rules (`SubscriptionS
 | Field | Validation | Identity |
 |---|---|---|
 | `snapshotId` | required, not blank | always compared |
-| `documentCount` | required, `> 0` | always compared |
-| `revision` | optional | compared only when set on both heads |
-| `sourceHash` | optional | compared only when set on both heads |
-| `createdAt` | required; any ISO-8601 offset (`Z`, `+02:00`) | not compared |
+| `documentCount` | required, `> 0`; must equal the number of loaded entries | always compared |
+| `revision` | optional, integer | compared only when set on both heads |
+| `sourceHash` | optional, string; not verified against the entries | compared only when set on both heads |
+| `createdAt` | required; ISO-8601 with offset (`Z`, `+02:00`); a timestamp without offset is rejected | not compared |
 | `id` and unknown fields | ignored | not compared |
 
-A changed `revision` or `sourceHash` with an unchanged `snapshotId` therefore triggers a reload. Invalid heads raise
-`SubscriptionCacheSnapshotException`.
+A changed `revision` or `sourceHash` with an unchanged `snapshotId` triggers a reload only when the field is set on
+both heads; if either head omits it, the field is ignored. Publishers should therefore set `revision` and
+`sourceHash` consistently or not at all. Invalid heads raise `SubscriptionCacheSnapshotException`.
 
 Example head payload in ZooKeeper:
 
@@ -270,7 +282,12 @@ Head handling is split into two classes:
   jitter and event coalescing. It runs all reconciliation work serially on one daemon thread.
 - **Reconciler, decides what:** `ZooKeeperSubscriptionHeadReconciler` reads the heads, treats ACTIVATED as
   authoritative, reuses or loads snapshots, and marks the cache unconfirmed when ACTIVATED is unavailable. It is not
-  thread-safe and is only called from the watcher thread.
+  thread-safe: the watcher calls it serially on its worker thread, except `onConnectionLost()`, which the Curator
+  connection listener calls under the watcher monitor and which only touches the thread-safe cache.
+
+The watcher passes the PREPARED event payload to the reconciler to avoid another read; a node without data is treated
+like a deleted node. ACTIVATED events only trigger reconciliation: their payload is ignored and the reconciler always
+rereads the authoritative head.
 
 Their method-level interaction and the commit gate are described in
 [Watcher-reconciler interaction](#watcher-reconciler-interaction), after the flows that trigger them.
@@ -456,7 +473,8 @@ The commit gate protects only mutations explicitly run through it, including `se
 `onConnectionLost()` while holding its monitor. Snapshot preparation is not gated or cancelled: a load finishing after
 disconnect may remain as an invisible prepared candidate, but work from the old epoch cannot activate it. Reconnect
 reconciliation rereads the authoritative heads before activation. Locks are only taken in the order watcher monitor,
-then cache.
+then metrics monitor (snapshot listeners), then meter registry; no path acquires them in reverse order. The cache
+itself is lock-free.
 
 ### Cache operations
 

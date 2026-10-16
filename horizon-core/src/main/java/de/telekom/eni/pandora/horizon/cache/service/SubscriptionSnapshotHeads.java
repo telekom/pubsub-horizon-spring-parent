@@ -9,9 +9,10 @@ import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 
 import java.util.Objects;
 
-/** Validation and identity rules shared by all subscription snapshot head sources (ZooKeeper and MongoDB). */
+/** Validation and identity rules shared by all subscription snapshot heads. */
 public final class SubscriptionSnapshotHeads {
 
+    /** Prevents instantiation of this utility class. */
     private SubscriptionSnapshotHeads() {
     }
 
@@ -55,6 +56,7 @@ public final class SubscriptionSnapshotHeads {
             second.getSourceHash());
     }
 
+    /** Compares snapshot identity fields directly; used by {@code SnapshotVersion} without creating heads. */
     static boolean isSameSnapshot(String snapshotId, Long documentCount, Long revision, String sourceHash,
                                   String otherSnapshotId, Long otherDocumentCount, Long otherRevision,
                                   String otherSourceHash) {
@@ -64,7 +66,7 @@ public final class SubscriptionSnapshotHeads {
             && equalIfBothSet(sourceHash, otherSourceHash);
     }
 
-            /** Compares optional metadata only when both values are present. */
+    /** Compares optional metadata only when both values are present. */
     private static boolean equalIfBothSet(Object value, Object otherValue) {
         return value == null || otherValue == null || value.equals(otherValue);
     }
