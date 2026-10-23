@@ -368,4 +368,60 @@ public class PandoraTracerTest {
         assertEquals(1, ex.getSuppressed().length);
         assertEquals("close error", ex.getSuppressed()[0].getMessage());
     }
+
+    @Test
+    void testWithSpanInScopeAddsSpanToCurrentTraceContextDuringExecution() {
+        try (var realTracing = Tracing.newBuilder().build()) {
+            var realTracer = realTracing.tracer();
+            var activeSpan = realTracer.newTrace();
+            var pandoraTracer = new PandoraTracer(environment, realTracing, realTracer, tracingProperties);
+
+            assertNull(realTracing.currentTraceContext().get());
+
+            var contextDuringExecution = pandoraTracer
+                    .withSpanInScope((String in) -> realTracing.currentTraceContext().get(), activeSpan)
+                    .apply("input");
+
+            assertEquals(activeSpan.context(), contextDuringExecution);
+            assertNull(realTracing.currentTraceContext().get());
+        }
+    }
+
+    @Test
+    void testWithSpanInScopeRemovesSpanFromCurrentTraceContextWhenFunctionThrows() {
+        try (var realTracing = Tracing.newBuilder().build()) {
+            var realTracer = realTracing.tracer();
+            var activeSpan = realTracer.newTrace();
+            var pandoraTracer = new PandoraTracer(environment, realTracing, realTracer, tracingProperties);
+
+            Function<String, String> failingFn = in -> {
+                assertEquals(activeSpan.context(), realTracing.currentTraceContext().get());
+                throw new IllegalStateException("failure");
+            };
+
+            var wrapped = pandoraTracer.withSpanInScope(failingFn, activeSpan);
+
+            assertThrows(IllegalStateException.class, () -> wrapped.apply("input"));
+            assertNull(realTracing.currentTraceContext().get());
+        }
+    }
+
+    @Test
+    void testWithSpanInScopeRestoresPreviousTraceContextAfterExecution() {
+        try (var realTracing = Tracing.newBuilder().build()) {
+            var realTracer = realTracing.tracer();
+            var outerSpan = realTracer.newTrace();
+            var innerSpan = realTracer.newChild(outerSpan.context());
+            var pandoraTracer = new PandoraTracer(environment, realTracing, realTracer, tracingProperties);
+
+            try (var ignored = realTracer.withSpanInScope(outerSpan)) {
+                var innerContext = pandoraTracer
+                        .withSpanInScope((String in) -> realTracing.currentTraceContext().get(), innerSpan)
+                        .apply("input");
+
+                assertEquals(innerSpan.context(), innerContext);
+                assertEquals(outerSpan.context(), realTracing.currentTraceContext().get());
+            }
+        }
+    }
 }
