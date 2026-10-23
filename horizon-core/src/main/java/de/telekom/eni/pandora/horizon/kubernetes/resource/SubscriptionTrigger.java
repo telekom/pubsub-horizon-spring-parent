@@ -23,6 +23,8 @@ public class SubscriptionTrigger {
 
     private ResponseFilterMode responseFilterMode;
 
+    private boolean responseFilterJsonPath = false;
+
     private List<String> responseFilter;
 
     private Map<String, String> selectionFilter;
