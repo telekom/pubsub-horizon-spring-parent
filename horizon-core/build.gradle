@@ -44,6 +44,8 @@ dependencies {
     annotationProcessor "org.projectlombok:lombok"
     testAnnotationProcessor "org.projectlombok:lombok"
 
+    compileOnly "org.jspecify:jspecify:${jspecifyVersion}"
+
     // ENI
     api "de.telekom:json-filter:${jsonFilterVersion}"
 
