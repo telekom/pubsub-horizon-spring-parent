@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 
 @Slf4j
 public class PandoraTracer {
@@ -128,6 +129,14 @@ public class PandoraTracer {
 
     public <T> Callable<T> withCurrentContext(Callable<T> callable) {
         return tracing.currentTraceContext().wrap(callable);
+    }
+
+    public <T,R> Function<T,R> withSpanInScope(Function<T,R> function, Span span) {
+        return input -> {
+            try (var ignored = tracer.withSpanInScope(span)) {
+                return function.apply(input);
+            }
+        };
     }
 
     public void addTagsToSpan(SpanCustomizer span, List<Pair<String, String>> pairs) {
