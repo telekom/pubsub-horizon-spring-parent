@@ -22,7 +22,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -61,6 +63,9 @@ public class PandoraTracerTest {
 
     @Captor
     ArgumentCaptor<TraceContextOrSamplingFlags> traceContextCaptor;
+
+    @Mock
+    Tracer.SpanInScope spanInScope;
 
     private static final String traceId = "c81c0251fbdb13d6ac9625822f0a931f";
     private static final String spanId = "ed0ef246062c027c";
@@ -265,5 +270,102 @@ public class PandoraTracerTest {
         var actualStringCallableResult = actualStringCallable.call();
         assertInstanceOf(String.class, actualStringCallableResult);
         assertEquals(expectedStringCallableResult, actualStringCallableResult);
+    }
+
+    @Test
+    void testWithSpanInScopeDoesNotInvokeTracerOnCreation() {
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+
+        var wrapped = pandoraTracer.withSpanInScope((String s) -> s.toUpperCase(), span);
+
+        assertNotNull(wrapped);
+        verifyNoInteractions(tracer);
+    }
+
+    @Test
+    void testWithSpanInScopeExecutesFunctionAndClosesScope() {
+        Function<String, Integer> fn = mock(Function.class);
+        when(tracer.withSpanInScope(span)).thenReturn(spanInScope);
+        when(fn.apply("abc")).thenReturn(3);
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        var result = pandoraTracer.withSpanInScope(fn, span).apply("abc");
+
+        assertEquals(3, result);
+        var inOrder = inOrder(tracer, fn, spanInScope);
+        inOrder.verify(tracer).withSpanInScope(span);
+        inOrder.verify(fn).apply("abc");
+        inOrder.verify(spanInScope).close();
+    }
+
+    @Test
+    void testWithSpanInScopeHandlesNullInputAndNullSpan() {
+        when(tracer.withSpanInScope(null)).thenReturn(spanInScope);
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        var result = pandoraTracer.withSpanInScope((String s) -> Objects.isNull(s), null).apply(null);
+
+        assertTrue(result);
+        verify(spanInScope).close();
+    }
+
+    @Test
+    void testWithSpanInScopeWhenTracerReturnsNullScope() {
+        when(tracer.withSpanInScope(span)).thenReturn(null);
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        var result = pandoraTracer.withSpanInScope(s -> "ok", span).apply("in");
+
+        assertEquals("ok", result);
+    }
+
+    @Test
+    void testWithSpanInScopeWhenScopeActivationThrows() {
+        Function<String, String> fn = mock(Function.class);
+        when(tracer.withSpanInScope(span)).thenThrow(new IllegalStateException("scope failure"));
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        var wrapped = pandoraTracer.withSpanInScope(fn, span);
+
+        assertThrows(IllegalStateException.class, () -> wrapped.apply("in"));
+        verifyNoInteractions(fn);
+    }
+
+    @Test
+    void testWithSpanInScopeWhenFunctionIsNull() {
+        when(tracer.withSpanInScope(span)).thenReturn(spanInScope);
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        var wrapped = pandoraTracer.<String, String>withSpanInScope(null, span);
+
+        assertThrows(NullPointerException.class, () -> wrapped.apply("in"));
+        verify(spanInScope).close();
+    }
+
+    @Test
+    void testWithSpanInScopeClosesScopeWhenFunctionThrows() {
+        when(tracer.withSpanInScope(span)).thenReturn(spanInScope);
+        Function<String, String> fn = s -> { throw new IllegalArgumentException("bad input"); };
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        var wrapped = pandoraTracer.withSpanInScope(fn, span);
+
+        assertThrows(IllegalArgumentException.class, () -> wrapped.apply("in"));
+        verify(spanInScope).close();
+    }
+
+    @Test
+    void testWithSpanInScopeSuppressesCloseExceptionWhenBothThrow() {
+        when(tracer.withSpanInScope(span)).thenReturn(spanInScope);
+        doThrow(new RuntimeException("close error")).when(spanInScope).close();
+        Function<String, String> fn = s -> { throw new RuntimeException("primary error"); };
+
+        var pandoraTracer = new PandoraTracer(environment, tracing, tracer, tracingProperties);
+        var wrapped = pandoraTracer.withSpanInScope(fn, span);
+
+        var ex = assertThrows(RuntimeException.class, () -> wrapped.apply("in"));
+        assertEquals("primary error", ex.getMessage());
+        assertEquals(1, ex.getSuppressed().length);
+        assertEquals("close error", ex.getSuppressed()[0].getMessage());
     }
 }
