@@ -159,7 +159,7 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
                 snapshotHead.getDocumentCount(),
                 snapshotHead.getRevision(),
                 snapshotHead.getSourceHash(),
-                snapshotHead.getCreatedAt() == null ? null : snapshotHead.getCreatedAt().toInstant());
+                snapshotHead.getCreated() == null ? null : snapshotHead.getCreated().toInstant());
         }
 
         /** Returns whether {@code other} references the same snapshot (see {@link SubscriptionSnapshotHeads}). */

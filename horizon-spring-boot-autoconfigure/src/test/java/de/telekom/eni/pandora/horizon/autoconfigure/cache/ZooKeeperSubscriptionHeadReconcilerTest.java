@@ -20,14 +20,12 @@ import org.bson.conversions.Bson;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Date;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -468,7 +466,7 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         var head = new SubscriptionSnapshotHead();
         head.setSnapshotId(snapshotId);
         head.setDocumentCount(1L);
-        head.setCreatedAt(new Date(0));
+        head.setCreated(new Date(0));
         return head;
     }
 

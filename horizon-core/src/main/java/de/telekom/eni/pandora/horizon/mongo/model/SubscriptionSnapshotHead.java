@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.mongo.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -17,6 +18,7 @@ import java.util.Date;
 @Setter
 @NoArgsConstructor
 @Document
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class SubscriptionSnapshotHead {
 
     @Id
@@ -30,5 +32,5 @@ public class SubscriptionSnapshotHead {
 
     private String sourceHash;
 
-    private Date createdAt;
+    private Date created;
 }

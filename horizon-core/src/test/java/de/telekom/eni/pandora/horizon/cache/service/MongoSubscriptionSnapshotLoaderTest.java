@@ -118,7 +118,7 @@ class MongoSubscriptionSnapshotLoaderTest {
         var head = new SubscriptionSnapshotHead();
         head.setSnapshotId(snapshotId);
         head.setDocumentCount(documentCount);
-        head.setCreatedAt(new Date(0));
+        head.setCreated(new Date(0));
         return head;
     }
 

@@ -916,7 +916,7 @@ class LocalSubscriptionCacheTest {
         snapshotHead.setDocumentCount(1L);
         snapshotHead.setRevision(1L);
         snapshotHead.setSourceHash("hash");
-        snapshotHead.setCreatedAt(new Date(0));
+        snapshotHead.setCreated(new Date(0));
         return snapshotHead;
     }
 

@@ -36,10 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -383,7 +381,7 @@ class SubscriptionZooKeeperClientTest {
             var activated = reader.readActivatedHead().orElseThrow();
             assertThat(activated.getSnapshotId()).isEqualTo("second");
             assertThat(activated.getDocumentCount()).isEqualTo(1L);
-            assertThat(activated.getCreatedAt().toInstant()).isEqualTo(Instant.parse("2026-09-30T12:30:00Z"));
+            assertThat(activated.getCreated().toInstant()).isEqualTo(Instant.parse("2026-09-30T12:30:00Z"));
 
             client.setData().forPath("/subscriptions/activate", head("third"));
             assertThat(reader.readActivatedHead().orElseThrow().getSnapshotId()).isEqualTo("third");

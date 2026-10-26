@@ -86,7 +86,7 @@ class SubscriptionSnapshotHeadsTest {
         assertThrows(SubscriptionCacheSnapshotException.class,
             () -> SubscriptionSnapshotHeads.requireValid(head("snapshot", null, null, null, 0L)));
         var withoutCreatedAt = head("snapshot", 1L, null, null, 0L);
-        withoutCreatedAt.setCreatedAt(null);
+        withoutCreatedAt.setCreated(null);
         assertThrows(SubscriptionCacheSnapshotException.class,
             () -> SubscriptionSnapshotHeads.requireValid(withoutCreatedAt));
     }
@@ -98,7 +98,7 @@ class SubscriptionSnapshotHeadsTest {
         head.setDocumentCount(documentCount);
         head.setRevision(revision);
         head.setSourceHash(sourceHash);
-        head.setCreatedAt(new Date(createdAtMillis));
+        head.setCreated(new Date(createdAtMillis));
         return head;
     }
 }

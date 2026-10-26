@@ -32,7 +32,7 @@ public final class SubscriptionSnapshotHeads {
             throw new SubscriptionCacheSnapshotException("Invalid subscription snapshot head " + head.getSnapshotId()
                 + ": documentCount must be positive");
         }
-        if (head.getCreatedAt() == null) {
+        if (head.getCreated() == null) {
             throw new SubscriptionCacheSnapshotException("Invalid subscription snapshot head " + head.getSnapshotId()
                 + ": missing createdAt");
         }

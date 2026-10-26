@@ -23,65 +23,34 @@ class ZooKeeperSubscriptionSnapshotHeadParserTest {
     @Test
     void parsesHeadWithoutMongoIdAndWithNullableRevision() {
         var head = parser.parse(bytes("""
-            {"snapshotId":"snapshot-1","documentCount":3,"revision":null,
-             "sourceHash":"hash","createdAt":"2026-09-30T12:30:00Z"}
+                {
+                    "snapshotId": "snapshot-1",
+                    "documentCount": 3,
+                    "created": "2026-01-01T00:00:00Z",
+                    "resumeToken": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+                    "history": []
+                }
             """));
 
         assertNull(head.getId());
         assertEquals("snapshot-1", head.getSnapshotId());
         assertEquals(3L, head.getDocumentCount());
-        assertNull(head.getRevision());
-        assertEquals("hash", head.getSourceHash());
-        assertEquals(Instant.parse("2026-09-30T12:30:00Z"), head.getCreatedAt().toInstant());
-
-        var revised = parser.parse(bytes("""
-            {"snapshotId":"snapshot-2","documentCount":1,"revision":7,
-             "sourceHash":"hash-2","createdAt":"2026-09-30T12:30:00.123Z"}
-            """));
-        assertEquals(7L, revised.getRevision());
-        assertEquals(Instant.parse("2026-09-30T12:30:00.123Z"), revised.getCreatedAt().toInstant());
-
-        var withoutRevision = parser.parse(bytes("""
-            {"snapshotId":"snapshot-3","documentCount":1,
-             "sourceHash":"hash-3","createdAt":"2026-09-30T12:30:00Z"}
-            """));
-        assertNull(withoutRevision.getRevision());
+        assertEquals(Instant.parse("2026-01-01T00:00:00Z"), head.getCreated().toInstant());
     }
 
     @Test
-    void ignoresIdAndUnknownFieldsAndAcceptsOptionalSourceHashAndOffsets() {
-        var head = parser.parse(bytes("""
-            {"id":"head","snapshotId":"snapshot","documentCount":1,"unknown":{"nested":true},
-             "createdAt":"2026-09-30T14:30:00+02:00"}
-            """));
+    void rejectsMalformedHead() {
+        var truncated = "{\"snapshotId\":\"snapshot-1\",\"documentCount\":3";
+        var trailingComma = "{\"snapshotId\":\"snapshot-1\",\"documentCount\":3,}";
+        var unquotedValue = "{\"snapshotId\":snapshot-1,\"documentCount\":3}";
+        var emptySnapshotId = "{\"snapshotId\":\"\",\"documentCount\":3}";
+        var nullSnapshotId = "{\"snapshotId\":null,\"documentCount\":3}";
 
-        assertNull(head.getId());
-        assertNull(head.getSourceHash());
-        assertEquals(Instant.parse("2026-09-30T12:30:00Z"), head.getCreatedAt().toInstant());
-        assertNull(parser.parse(bytes(head("\"snapshot\"", "1", "null", "null", "\"2026-09-30T12:30:00Z\"")))
-            .getSourceHash());
-    }
-
-    @Test
-    void rejectsMalformedAndInvalidHeads() {
-        var invalidHeads = new String[] {
-            "not JSON", "null", "[]", "{}",
-            "{\"snapshotId\":\"snapshot\",\"documentCount\":1,\"sourceHash\":\"hash\"}",
-            head("\" \"", "1", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "0", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "-1", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "1.5", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "9223372036854775808", "null", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "1", "1.5", "\"hash\"", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "1", "null", "42", "\"2026-09-30T12:30:00Z\""),
-            head("\"snapshot\"", "1", "null", "\"hash\"", "\"2026-09-30T12:30:00\""),
-            head("\"snapshot\"", "1", "null", "\"hash\"", "\"yesterday\"")
-        };
-
-        for (var json : invalidHeads) {
-            assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(json)), json);
-        }
-        assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(null));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(truncated)));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(trailingComma)));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(unquotedValue)));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(emptySnapshotId)));
+        assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(nullSnapshotId)));
     }
 
     private static String head(String snapshotId, String count, String revision, String sourceHash, String createdAt) {

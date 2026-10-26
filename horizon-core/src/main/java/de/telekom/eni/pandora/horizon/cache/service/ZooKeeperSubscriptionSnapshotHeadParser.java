@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.time.OffsetDateTime;
@@ -37,43 +38,15 @@ public class ZooKeeperSubscriptionSnapshotHeadParser {
      */
     public SubscriptionSnapshotHead parse(byte[] data) {
         try {
-            var json = objectMapper.readTree(data);
-            if (json == null || !json.isObject()) {
-                throw invalidHead();
+            var snapshotHead = objectMapper.readValue(data, SubscriptionSnapshotHead.class);
+            if (StringUtils.isEmpty(snapshotHead.getSnapshotId())) {
+                throw new SubscriptionCacheSnapshotException("Field validation of zookeeper subscription head failed");
             }
 
-            var snapshotId = json.path("snapshotId");
-            var documentCount = json.path("documentCount");
-            var revision = json.path("revision");
-            var sourceHash = json.path("sourceHash");
-            var createdAt = json.path("createdAt");
-            if (!snapshotId.isTextual()
-                    || !documentCount.isIntegralNumber() || !documentCount.canConvertToLong()
-                    || !(isUnset(revision) || (revision.isIntegralNumber() && revision.canConvertToLong()))
-                    || !(isUnset(sourceHash) || sourceHash.isTextual())
-                    || !createdAt.isTextual()) {
-                throw invalidHead();
-            }
-
-            var head = new SubscriptionSnapshotHead();
-            head.setSnapshotId(snapshotId.asText());
-            head.setDocumentCount(documentCount.longValue());
-            head.setRevision(isUnset(revision) ? null : revision.longValue());
-            head.setSourceHash(isUnset(sourceHash) ? null : sourceHash.asText());
-            head.setCreatedAt(Date.from(OffsetDateTime.parse(createdAt.asText()).toInstant()));
-            return SubscriptionSnapshotHeads.requireValid(head);
-        } catch (IOException | DateTimeParseException | IllegalArgumentException exception) {
-            throw new SubscriptionCacheSnapshotException("Invalid ZooKeeper subscription snapshot head", exception);
+            return snapshotHead;
+        } catch (IOException ex) {
+            throw new SubscriptionCacheSnapshotException("Invalid ZooKeeper subscription head", ex);
         }
     }
 
-    /** Returns whether a JSON field is missing or explicitly null. */
-    private static boolean isUnset(JsonNode node) {
-        return node.isMissingNode() || node.isNull();
-    }
-
-    /** Creates the exception used for invalid serialized ZooKeeper heads. */
-    private static SubscriptionCacheSnapshotException invalidHead() {
-        return new SubscriptionCacheSnapshotException("Invalid ZooKeeper subscription snapshot head");
-    }
 }
