@@ -21,16 +21,9 @@ import java.util.Date;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SubscriptionSnapshotHead {
 
-    @Id
-    private String id;
-
     private String snapshotId;
 
     private Long documentCount;
-
-    private Long revision;
-
-    private String sourceHash;
 
     private Date created;
 }

@@ -257,11 +257,10 @@ public class LocalSubscriptionCache implements SubscriptionCacheReader {
     }
 
     /**
-     * Atomically publishes a prepared snapshot when its identity matches the supplied head. Identity always compares
-     * {@code snapshotId} and {@code documentCount}; {@code revision} and {@code sourceHash} are compared only when set
-     * on both versions, and {@code createdAt} is not part of identity. An already active matching snapshot is reused
-     * without touching a pending prepared snapshot. The cache becomes FRESH only if the activated snapshot matches the
-     * expected head set via {@link #setExpectedHead(SubscriptionSnapshotHead)}.
+     * Atomically publishes a prepared snapshot when its identity matches the supplied head. Identity is the
+     * {@code snapshotId} only; {@code documentCount} and {@code created} are ignored. An already active matching
+     * snapshot is reused without touching a pending prepared snapshot. The cache becomes FRESH only if the activated
+     * snapshot matches the expected head set via {@link #setExpectedHead(SubscriptionSnapshotHead)}.
      *
      * @param snapshotHead validated head authorizing the snapshot to activate; it must have a non-blank snapshot ID
      * @throws IllegalArgumentException if the snapshot head is {@code null} or has no non-blank snapshot ID

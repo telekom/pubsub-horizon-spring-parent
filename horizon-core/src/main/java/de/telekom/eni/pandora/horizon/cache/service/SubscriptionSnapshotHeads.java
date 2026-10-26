@@ -7,8 +7,6 @@ package de.telekom.eni.pandora.horizon.cache.service;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 
-import java.util.Objects;
-
 /** Validation and identity rules shared by all subscription snapshot heads. */
 public final class SubscriptionSnapshotHeads {
 
@@ -22,7 +20,7 @@ public final class SubscriptionSnapshotHeads {
      * @param head head to validate
      * @return the same head
      * @throws SubscriptionCacheSnapshotException if snapshotId is blank, documentCount is not positive,
-     *                                            or createdAt is missing
+     *                                            or created is missing
      */
     public static SubscriptionSnapshotHead requireValid(SubscriptionSnapshotHead head) {
         if (head == null || head.getSnapshotId() == null || head.getSnapshotId().isBlank()) {
@@ -34,14 +32,14 @@ public final class SubscriptionSnapshotHeads {
         }
         if (head.getCreated() == null) {
             throw new SubscriptionCacheSnapshotException("Invalid subscription snapshot head " + head.getSnapshotId()
-                + ": missing createdAt");
+                + ": missing created");
         }
         return head;
     }
 
     /**
-     * Indicates whether both heads reference the same snapshot: snapshotId and documentCount must match,
-     * revision and sourceHash only when set on both heads; createdAt is ignored.
+     * Indicates whether both heads reference the same snapshot, i.e. have the same snapshotId;
+     * documentCount and created are ignored.
      *
      * @param first first head, may be {@code null}
      * @param second second head, may be {@code null}
@@ -51,23 +49,6 @@ public final class SubscriptionSnapshotHeads {
         if (first == null || second == null) {
             return first == second;
         }
-        return isSameSnapshot(first.getSnapshotId(), first.getDocumentCount(), first.getRevision(),
-            first.getSourceHash(), second.getSnapshotId(), second.getDocumentCount(), second.getRevision(),
-            second.getSourceHash());
-    }
-
-    /** Compares snapshot identity fields directly; used by {@code SnapshotVersion} without creating heads. */
-    static boolean isSameSnapshot(String snapshotId, Long documentCount, Long revision, String sourceHash,
-                                  String otherSnapshotId, Long otherDocumentCount, Long otherRevision,
-                                  String otherSourceHash) {
-        return Objects.equals(snapshotId, otherSnapshotId)
-            && Objects.equals(documentCount, otherDocumentCount)
-            && equalIfBothSet(revision, otherRevision)
-            && equalIfBothSet(sourceHash, otherSourceHash);
-    }
-
-    /** Compares optional metadata only when both values are present. */
-    private static boolean equalIfBothSet(Object value, Object otherValue) {
-        return value == null || otherValue == null || value.equals(otherValue);
+        return first.getSnapshotId().equals(second.getSnapshotId());
     }
 }

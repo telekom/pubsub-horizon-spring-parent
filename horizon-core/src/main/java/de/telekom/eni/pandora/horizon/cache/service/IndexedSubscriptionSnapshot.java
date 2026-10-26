@@ -145,28 +145,22 @@ record IndexedSubscriptionSnapshot(SnapshotVersion version,
     private record EnvironmentEventTypeKey(String environment, String eventType) {
     }
 
-    /** Identifies snapshot content independently of the MongoDB document ID of its head. */
+    /** Identifies snapshot content by its snapshot ID; the remaining fields are informational metadata. */
     record SnapshotVersion(String snapshotId,
                            Long documentCount,
-                           Long revision,
-                           String sourceHash,
-                           Instant createdAt) {
+                           Instant created) {
 
         /** Creates a snapshot version from snapshot head metadata. */
         static SnapshotVersion from(SubscriptionSnapshotHead snapshotHead) {
             return new SnapshotVersion(
                 snapshotHead.getSnapshotId(),
                 snapshotHead.getDocumentCount(),
-                snapshotHead.getRevision(),
-                snapshotHead.getSourceHash(),
                 snapshotHead.getCreated() == null ? null : snapshotHead.getCreated().toInstant());
         }
 
         /** Returns whether {@code other} references the same snapshot (see {@link SubscriptionSnapshotHeads}). */
         boolean matches(SnapshotVersion other) {
-            return other != null
-                && SubscriptionSnapshotHeads.isSameSnapshot(snapshotId, documentCount, revision, sourceHash,
-                    other.snapshotId, other.documentCount, other.revision, other.sourceHash);
+            return other != null && snapshotId.equals(other.snapshotId);
         }
     }
 }

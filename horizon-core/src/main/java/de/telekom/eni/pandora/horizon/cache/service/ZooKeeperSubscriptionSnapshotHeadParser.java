@@ -30,7 +30,7 @@ public class ZooKeeperSubscriptionSnapshotHeadParser {
     }
 
     /**
-     * Parses a ZooKeeper head; {@code id} and unknown fields are ignored, {@code createdAt} accepts any ISO-8601 offset.
+     * Parses a ZooKeeper head; {@code id} and unknown fields are ignored, {@code created} accepts any ISO-8601 offset.
      *
      * @param data serialized JSON head
      * @return the validated head
