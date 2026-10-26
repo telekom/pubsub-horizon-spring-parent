@@ -17,7 +17,6 @@ import java.util.Date;
 @Getter
 @Setter
 @NoArgsConstructor
-@Document
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SubscriptionSnapshotHead {
 
