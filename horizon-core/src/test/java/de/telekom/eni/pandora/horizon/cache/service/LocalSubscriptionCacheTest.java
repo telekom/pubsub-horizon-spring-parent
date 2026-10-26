@@ -263,38 +263,20 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
-    void shouldReloadAndActivateWhenSnapshotMetadataChangesForSameId() {
+    void shouldReuseActiveSnapshotWhenMetadataChangesForSameId() {
         var initialHead = snapshotHead("snapshot-1");
-        initialHead.setRevision(1L);
-        initialHead.setSourceHash("hash-1");
-        var revisedHead = snapshotHead("snapshot-1");
-        revisedHead.setRevision(2L);
-        revisedHead.setSourceHash("hash-1");
-        var rehashedHead = snapshotHead("snapshot-1");
-        rehashedHead.setRevision(2L);
-        rehashedHead.setSourceHash("hash-2");
-        var initialSubscription = subscription("initial-id", "production", "event");
-        var revisedSubscription = subscription("revised-id", "production", "event");
-        var rehashedSubscription = subscription("rehashed-id", "production", "event");
-        when(snapshotLoader.load(initialHead)).thenReturn(snapshot(initialHead, List.of(initialSubscription)));
-        when(snapshotLoader.load(revisedHead)).thenReturn(snapshot(revisedHead, List.of(revisedSubscription)));
-        when(snapshotLoader.load(rehashedHead)).thenReturn(snapshot(rehashedHead, List.of(rehashedSubscription)));
+        var changedHead = snapshotHead("snapshot-1");
+        changedHead.setDocumentCount(2L);
+        when(snapshotLoader.load(initialHead)).thenReturn(snapshot(initialHead,
+            List.of(subscription("initial-id", "production", "event"))));
 
         cache.prepare(initialHead);
         cache.activate(initialHead);
-        cache.prepare(revisedHead);
+        cache.prepare(changedHead);
 
-        assertTrue(cache.hasPendingSnapshot());
-        cache.activate(revisedHead);
-        assertTrue(cache.getById("initial-id").isEmpty());
-        assertTrue(cache.getById("revised-id").isPresent());
-
-        cache.prepare(rehashedHead);
-
-        assertTrue(cache.hasPendingSnapshot());
-        cache.activate(rehashedHead);
-        assertTrue(cache.getById("revised-id").isEmpty());
-        assertTrue(cache.getById("rehashed-id").isPresent());
+        assertFalse(cache.hasPendingSnapshot());
+        verify(snapshotLoader).load(initialHead);
+        assertTrue(cache.getById("initial-id").isPresent());
     }
 
     @Test
@@ -499,31 +481,19 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
-    void ignoresMongoIdButComparesCompleteExpectedHead() {
-        var mongoHead = snapshotHead("same");
-        var zooKeeperHead = snapshotHead("same");
-        zooKeeperHead.setId(null);
+    void expectedHeadMatchesActiveSnapshotBySnapshotIdOnly() {
+        var activeHead = snapshotHead("same");
         var changedHead = snapshotHead("same");
-        changedHead.setId(null);
-        changedHead.setRevision(2L);
-        when(snapshotLoader.load(mongoHead)).thenReturn(snapshot(mongoHead,
+        changedHead.setDocumentCount(2L);
+        when(snapshotLoader.load(activeHead)).thenReturn(snapshot(activeHead,
             List.of(subscription("first-id", "production", "event"))));
-        when(snapshotLoader.load(changedHead)).thenReturn(snapshot(changedHead,
-            List.of(subscription("second-id", "production", "event"))));
 
-        cache.prepare(mongoHead);
-        cache.activate(mongoHead);
-        cache.setExpectedHead(zooKeeperHead);
-        cache.activate(mongoHead);
-        assertTrue(cache.isFresh());
-
+        cache.prepare(activeHead);
+        cache.activate(activeHead);
         cache.setExpectedHead(changedHead);
-        cache.activate(mongoHead);
+        cache.activate(activeHead);
+
         assertTrue(cache.isFresh());
-        cache.prepare(changedHead);
-        cache.activate(changedHead);
-        assertTrue(cache.isFresh());
-        assertTrue(cache.getById("second-id").isPresent());
     }
 
     @Test
@@ -828,7 +798,7 @@ class LocalSubscriptionCacheTest {
     }
 
     @Test
-    void behindExpectedHeadComparesFullSnapshotIdentity() {
+    void behindExpectedHeadComparesSnapshotId() {
         var active = snapshotHead("snapshot");
         when(snapshotLoader.load(active)).thenReturn(snapshot(active,
             List.of(subscription("id", "production", "event"))));
@@ -839,16 +809,13 @@ class LocalSubscriptionCacheTest {
         cache.activate(active);
         assertFalse(cache.isBehindExpectedHead());
 
-        var revised = snapshotHead("snapshot");
-        revised.setRevision(2L);
-        cache.setExpectedHead(revised);
-        assertTrue(cache.isBehindExpectedHead());
-
-        var withoutOptionalFields = snapshotHead("snapshot");
-        withoutOptionalFields.setRevision(null);
-        withoutOptionalFields.setSourceHash(null);
-        cache.setExpectedHead(withoutOptionalFields);
+        var changedCount = snapshotHead("snapshot");
+        changedCount.setDocumentCount(2L);
+        cache.setExpectedHead(changedCount);
         assertFalse(cache.isBehindExpectedHead());
+
+        cache.setExpectedHead(snapshotHead("other"));
+        assertTrue(cache.isBehindExpectedHead());
     }
 
     private void blockSnapshotLoad(SubscriptionSnapshotHead head, CountDownLatch loading, CountDownLatch release) {
@@ -911,11 +878,8 @@ class LocalSubscriptionCacheTest {
 
     private SubscriptionSnapshotHead snapshotHead(String snapshotId) {
         var snapshotHead = new SubscriptionSnapshotHead();
-        snapshotHead.setId("head");
         snapshotHead.setSnapshotId(snapshotId);
         snapshotHead.setDocumentCount(1L);
-        snapshotHead.setRevision(1L);
-        snapshotHead.setSourceHash("hash");
         snapshotHead.setCreated(new Date(0));
         return snapshotHead;
     }

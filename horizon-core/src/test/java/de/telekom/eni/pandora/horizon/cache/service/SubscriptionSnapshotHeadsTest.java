@@ -22,82 +22,55 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SubscriptionSnapshotHeadsTest {
 
     @Test
-    void sameSnapshotRequiresIdAndCountAndComparesOptionalFieldsOnlyWhenBothSet() {
-        var base = head("snapshot", 3L, 1L, "hash", 0L);
+    void sameSnapshotComparesOnlySnapshotId() {
+        var base = head("snapshot", 3L, 0L);
 
-        assertTrue(SubscriptionSnapshotHeads.isSameSnapshot(base, head("snapshot", 3L, 1L, "hash", 999L)));
-        assertTrue(SubscriptionSnapshotHeads.isSameSnapshot(base, head("snapshot", 3L, null, null, 0L)));
-        assertFalse(SubscriptionSnapshotHeads.isSameSnapshot(base, head("other", 3L, 1L, "hash", 0L)));
-        assertFalse(SubscriptionSnapshotHeads.isSameSnapshot(base, head("snapshot", 4L, 1L, "hash", 0L)));
-        assertFalse(SubscriptionSnapshotHeads.isSameSnapshot(base, head("snapshot", 3L, 2L, "hash", 0L)));
-        assertFalse(SubscriptionSnapshotHeads.isSameSnapshot(base, head("snapshot", 3L, 1L, "other", 0L)));
+        assertTrue(SubscriptionSnapshotHeads.isSameSnapshot(base, head("snapshot", 4L, 999L)));
+        assertFalse(SubscriptionSnapshotHeads.isSameSnapshot(base, head("other", 3L, 0L)));
         assertFalse(SubscriptionSnapshotHeads.isSameSnapshot(base, null));
         assertTrue(SubscriptionSnapshotHeads.isSameSnapshot(null, null));
     }
 
     @Test
-    void snapshotVersionMatchingRemainsPairwiseWithoutWeakeningRecordEquality() {
-        var first = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 1L, "first", 0L));
-        var unspecified = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, null, null, 999L));
-        var second = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 2L, "second", 0L));
-
-        assertTrue(first.matches(unspecified));
-        assertTrue(unspecified.matches(first));
-        assertTrue(unspecified.matches(second));
-        assertTrue(second.matches(unspecified));
-        assertFalse(first.matches(second));
-        assertFalse(first.matches(null));
-        assertNotEquals(first, unspecified);
-        assertNotEquals(unspecified, second);
-        assertNotEquals(first, second);
-        assertEquals(3, new HashSet<>(List.of(first, unspecified, second)).size());
-    }
-
-    @Test
-    void snapshotVersionRecordEqualityIsTransitiveAndMatchingIgnoresCreatedAt() {
-        var first = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 1L, "hash", 0L));
-        var second = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 1L, "hash", 0L));
-        var third = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 1L, "hash", 0L));
-        var laterTimestamp = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 1L, "hash", 999L));
+    void snapshotVersionRecordEqualityIsTransitiveAndMatchingComparesOnlySnapshotId() {
+        var first = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 0L));
+        var second = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 0L));
+        var third = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 0L));
+        var changedMetadata = IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 4L, 999L));
 
         assertEquals(first, second);
         assertEquals(second, third);
         assertEquals(first, third);
         assertEquals(first.hashCode(), second.hashCode());
         assertEquals(1, new HashSet<>(List.of(first, second, third)).size());
-        assertNotEquals(first, laterTimestamp);
-        assertTrue(first.matches(laterTimestamp));
-        assertFalse(first.matches(IndexedSubscriptionSnapshot.SnapshotVersion.from(head("other", 3L, 1L, "hash", 0L))));
-        assertFalse(first.matches(IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 4L, 1L, "hash", 0L))));
-        assertFalse(first.matches(IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 2L, "hash", 0L))));
-        assertFalse(first.matches(IndexedSubscriptionSnapshot.SnapshotVersion.from(head("snapshot", 3L, 1L, "other", 0L))));
+        assertNotEquals(first, changedMetadata);
+        assertTrue(first.matches(changedMetadata));
+        assertFalse(first.matches(IndexedSubscriptionSnapshot.SnapshotVersion.from(head("other", 3L, 0L))));
+        assertFalse(first.matches(null));
     }
 
     @Test
-    void requireValidRejectsMissingIdNonPositiveCountAndMissingCreatedAt() {
-        var valid = head("snapshot", 1L, null, null, 0L);
+    void requireValidRejectsMissingIdNonPositiveCountAndMissingCreated() {
+        var valid = head("snapshot", 1L, 0L);
         assertSame(valid, SubscriptionSnapshotHeads.requireValid(valid));
 
         assertThrows(SubscriptionCacheSnapshotException.class, () -> SubscriptionSnapshotHeads.requireValid(null));
         assertThrows(SubscriptionCacheSnapshotException.class,
-            () -> SubscriptionSnapshotHeads.requireValid(head(" ", 1L, null, null, 0L)));
+            () -> SubscriptionSnapshotHeads.requireValid(head(" ", 1L, 0L)));
         assertThrows(SubscriptionCacheSnapshotException.class,
-            () -> SubscriptionSnapshotHeads.requireValid(head("snapshot", 0L, null, null, 0L)));
+            () -> SubscriptionSnapshotHeads.requireValid(head("snapshot", 0L, 0L)));
         assertThrows(SubscriptionCacheSnapshotException.class,
-            () -> SubscriptionSnapshotHeads.requireValid(head("snapshot", null, null, null, 0L)));
-        var withoutCreatedAt = head("snapshot", 1L, null, null, 0L);
+            () -> SubscriptionSnapshotHeads.requireValid(head("snapshot", null, 0L)));
+        var withoutCreatedAt = head("snapshot", 1L, 0L);
         withoutCreatedAt.setCreated(null);
         assertThrows(SubscriptionCacheSnapshotException.class,
             () -> SubscriptionSnapshotHeads.requireValid(withoutCreatedAt));
     }
 
-    private static SubscriptionSnapshotHead head(String snapshotId, Long documentCount, Long revision,
-                                                 String sourceHash, long createdAtMillis) {
+    private static SubscriptionSnapshotHead head(String snapshotId, Long documentCount, long createdAtMillis) {
         var head = new SubscriptionSnapshotHead();
         head.setSnapshotId(snapshotId);
         head.setDocumentCount(documentCount);
-        head.setRevision(revision);
-        head.setSourceHash(sourceHash);
         head.setCreated(new Date(createdAtMillis));
         return head;
     }

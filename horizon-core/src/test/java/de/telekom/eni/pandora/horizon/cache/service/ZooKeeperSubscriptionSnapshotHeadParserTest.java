@@ -12,7 +12,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ZooKeeperSubscriptionSnapshotHeadParserTest {
@@ -21,7 +20,7 @@ class ZooKeeperSubscriptionSnapshotHeadParserTest {
         new ZooKeeperSubscriptionSnapshotHeadParser(new ObjectMapper());
 
     @Test
-    void parsesHeadWithoutMongoIdAndWithNullableRevision() {
+    void parsesHeadIgnoringUnknownFields() {
         var head = parser.parse(bytes("""
                 {
                     "snapshotId": "snapshot-1",
@@ -32,7 +31,6 @@ class ZooKeeperSubscriptionSnapshotHeadParserTest {
                 }
             """));
 
-        assertNull(head.getId());
         assertEquals("snapshot-1", head.getSnapshotId());
         assertEquals(3L, head.getDocumentCount());
         assertEquals(Instant.parse("2026-01-01T00:00:00Z"), head.getCreated().toInstant());
@@ -51,12 +49,6 @@ class ZooKeeperSubscriptionSnapshotHeadParserTest {
         assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(unquotedValue)));
         assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(emptySnapshotId)));
         assertThrows(SubscriptionCacheSnapshotException.class, () -> parser.parse(bytes(nullSnapshotId)));
-    }
-
-    private static String head(String snapshotId, String count, String revision, String sourceHash, String createdAt) {
-        return "{\"snapshotId\":" + snapshotId + ",\"documentCount\":" + count
-            + ",\"revision\":" + revision + ",\"sourceHash\":" + sourceHash
-            + ",\"createdAt\":" + createdAt + "}";
     }
 
     private static byte[] bytes(String json) {

@@ -331,11 +331,10 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
     }
 
     @Test
-    void changedMetadataOrRollbackIsNotSkippedAsAnOldHead() {
+    void changedMetadataForSameIdIsSkippedButRollbackIsNot() {
         var original = head("active");
-        original.setRevision(1L);
         var revised = head("active");
-        revised.setRevision(2L);
+        revised.setDocumentCount(2L);
         var rollback = head("previous");
         when(reader.readActivatedHead()).thenReturn(Optional.of(original), Optional.of(revised), Optional.of(rollback));
         when(cache.isFresh()).thenReturn(true);
@@ -352,9 +351,9 @@ class ZooKeeperSubscriptionHeadReconcilerTest {
         reconciler.reconcilePreparedAndActivatedHeads();
 
         verify(cache).prepare(original);
-        verify(cache).prepare(revised);
+        verify(cache, never()).prepare(revised);
         verify(cache).prepare(rollback);
-        verify(cache).activate(revised);
+        verify(cache, never()).activate(revised);
         verify(cache).activate(rollback);
     }
 

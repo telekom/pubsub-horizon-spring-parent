@@ -837,8 +837,8 @@ class ZooKeeperSubscriptionHeadWatcherTest {
     }
 
     private static byte[] head(String snapshotId) {
-        return ("{\"snapshotId\":\"" + snapshotId + "\",\"documentCount\":1,\"revision\":null,"
-            + "\"sourceHash\":\"hash\",\"createdAt\":\"2026-09-30T12:30:00Z\"}")
+        return ("{\"snapshotId\":\"" + snapshotId + "\",\"documentCount\":1,"
+            + "\"created\":\"2026-09-30T12:30:00Z\"}")
             .getBytes(StandardCharsets.UTF_8);
     }
 }
