@@ -5,6 +5,7 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import de.telekom.eni.pandora.horizon.cache.config.LocalSubscriptionCacheProperties;
 import lombok.extern.slf4j.Slf4j;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
@@ -147,7 +148,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
                     + "zoo-keeper.prepared-path={}, zoo-keeper.activated-path={}, reconcile-interval={}, "
                     + "snapshot-sync-jitter={}, head-check-jitter={}",
                 fallbackMode.name().toLowerCase(Locale.ROOT).replace('_', '-'),
-                fallbackMode == CacheProperties.LocalSubscriptionCacheFallback.NONE
+                fallbackMode == LocalSubscriptionCacheProperties.Fallback.NONE
                     ? "unlimited" : formatDuration(localCacheProperties.getStaleLocalCacheReadGracePeriod()),
                 preparedPath, activatedPath, formatDuration(localCacheProperties.getReconcileInterval()),
                 formatDuration(localCacheProperties.getSnapshotSyncJitter()),
@@ -201,7 +202,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
             throw new IllegalArgumentException(
                 "Initial subscription snapshot timeout must be zero or at least 1ms");
         }
-        var localCacheRequired = localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE
+        var localCacheRequired = localCacheProperties.getFallbackMode() == LocalSubscriptionCacheProperties.Fallback.NONE
             || localCacheProperties.isRequireLocalCacheAtStartup();
         return args -> {
             if (!localCacheRequired) {
@@ -255,7 +256,7 @@ public class LocalSubscriptionCacheAutoConfiguration {
             throw new IllegalStateException("MongoTemplate is required for local subscription cache");
         }
         // Without a shared fallback, a stale local snapshot remains the only source and must stay readable.
-        var staleLocalCacheReadGracePeriod = localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE
+        var staleLocalCacheReadGracePeriod = localCacheProperties.getFallbackMode() == LocalSubscriptionCacheProperties.Fallback.NONE
             ? ChronoUnit.FOREVER.getDuration()
             : localCacheProperties.getStaleLocalCacheReadGracePeriod();
         return new LocalSubscriptionCache(new MongoSubscriptionSnapshotLoader(

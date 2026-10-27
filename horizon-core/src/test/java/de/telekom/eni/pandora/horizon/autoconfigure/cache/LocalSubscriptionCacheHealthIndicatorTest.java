@@ -5,6 +5,7 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
+import de.telekom.eni.pandora.horizon.cache.config.LocalSubscriptionCacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import org.junit.jupiter.api.Test;
@@ -29,8 +30,8 @@ class LocalSubscriptionCacheHealthIndicatorTest {
     private final SubscriptionCacheReader subscriptionCacheReader = mock(SubscriptionCacheReader.class);
     @SuppressWarnings("unchecked")
     private final ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider = mock(ObjectProvider.class);
-    private final CacheProperties.LocalSubscriptionCacheProperties properties =
-            new CacheProperties.LocalSubscriptionCacheProperties();
+    private final LocalSubscriptionCacheProperties properties =
+            new LocalSubscriptionCacheProperties();
     private final LocalSubscriptionCacheHealthIndicator indicator = new LocalSubscriptionCacheHealthIndicator(
             cache, subscriptionCacheReaderProvider, properties, Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -81,7 +82,7 @@ class LocalSubscriptionCacheHealthIndicatorTest {
 
     @Test
         void staleReadGraceIsOmittedWithoutHazelcastFallbackAndHeadSourceIsZooKeeper() {
-        properties.setFallbackMode(CacheProperties.LocalSubscriptionCacheFallback.NONE);
+        properties.setFallbackMode(LocalSubscriptionCacheProperties.Fallback.NONE);
         when(cache.getDiagnostics()).thenReturn(new LocalSubscriptionCache.Diagnostics(
                 LocalSubscriptionCache.Status.STALE, true, "snapshot-local", 3, NOW, null, null, NOW));
         when(subscriptionCacheReaderProvider.getIfAvailable()).thenReturn(subscriptionCacheReader);

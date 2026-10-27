@@ -9,6 +9,7 @@ import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
 import de.telekom.eni.pandora.horizon.autoconfigure.cache.JsonCacheAutoconfiguration;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
+import de.telekom.eni.pandora.horizon.cache.config.LocalSubscriptionCacheProperties;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -49,7 +50,7 @@ class JsonCacheAutoconfigurationTest {
         var cacheProperties = new CacheProperties();
         cacheProperties.getLocalSubscriptionCache().setEnabled(true);
         cacheProperties.getLocalSubscriptionCache().setFallbackMode(
-                CacheProperties.LocalSubscriptionCacheFallback.NONE);
+                LocalSubscriptionCacheProperties.Fallback.NONE);
         var localCache = mock(LocalSubscriptionCache.class);
 
         contextRunner(cacheProperties)
@@ -81,7 +82,7 @@ class JsonCacheAutoconfigurationTest {
                 var cacheProperties = new CacheProperties();
                 cacheProperties.getLocalSubscriptionCache().setEnabled(true);
                 cacheProperties.getLocalSubscriptionCache().setFallbackMode(
-                                CacheProperties.LocalSubscriptionCacheFallback.NONE);
+                                LocalSubscriptionCacheProperties.Fallback.NONE);
                 var localCache = mock(LocalSubscriptionCache.class);
 
                 contextRunner(cacheProperties)

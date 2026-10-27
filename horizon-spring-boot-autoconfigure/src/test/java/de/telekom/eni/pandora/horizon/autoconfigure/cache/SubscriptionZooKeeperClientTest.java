@@ -6,6 +6,7 @@ package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
+import de.telekom.eni.pandora.horizon.cache.config.LocalSubscriptionCacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.exception.SubscriptionCacheSnapshotException;
 import org.apache.curator.framework.CuratorFramework;
@@ -171,8 +172,8 @@ class SubscriptionZooKeeperClientTest {
     }
 
     @ParameterizedTest
-    @EnumSource(CacheProperties.LocalSubscriptionCacheFallback.class)
-    void missingActivatedHeadIsUnconfirmedIndependentlyOfDataFallback(CacheProperties.LocalSubscriptionCacheFallback fallback)
+    @EnumSource(LocalSubscriptionCacheProperties.Fallback.class)
+    void missingActivatedHeadIsUnconfirmedIndependentlyOfDataFallback(LocalSubscriptionCacheProperties.Fallback fallback)
             throws Exception {
         try (var server = new TestingServer()) {
             var cache = mock(LocalSubscriptionCache.class);
@@ -269,7 +270,7 @@ class SubscriptionZooKeeperClientTest {
         when(cache.getFirstFreshSnapshot()).thenReturn(new CompletableFuture<>());
         var properties = new CacheProperties();
         properties.getLocalSubscriptionCache().setRequireLocalCacheAtStartup(false);
-        properties.getLocalSubscriptionCache().setFallbackMode(CacheProperties.LocalSubscriptionCacheFallback.NONE);
+        properties.getLocalSubscriptionCache().setFallbackMode(LocalSubscriptionCacheProperties.Fallback.NONE);
         properties.getLocalSubscriptionCache().setInitialSnapshotTimeout(Duration.ofMillis(1));
         var barrier = new LocalSubscriptionCacheAutoConfiguration()
             .localSubscriptionCacheStartupBarrier(cache, properties);

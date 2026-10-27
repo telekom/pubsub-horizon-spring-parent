@@ -5,6 +5,7 @@
 package de.telekom.eni.pandora.horizon.autoconfigure.cache;
 
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
+import de.telekom.eni.pandora.horizon.cache.config.LocalSubscriptionCacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.LocalSubscriptionCache;
 import de.telekom.eni.pandora.horizon.cache.service.SubscriptionCacheReader;
 import org.springframework.beans.factory.ObjectProvider;
@@ -26,7 +27,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
 
     private final LocalSubscriptionCache localSubscriptionCache;
     private final ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider;
-    private final CacheProperties.LocalSubscriptionCacheProperties properties;
+    private final LocalSubscriptionCacheProperties properties;
     private final Clock clock;
 
     /**
@@ -38,13 +39,13 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
      */
     public LocalSubscriptionCacheHealthIndicator(LocalSubscriptionCache localSubscriptionCache,
                                                  ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider,
-                                                 CacheProperties.LocalSubscriptionCacheProperties properties) {
+                                                 LocalSubscriptionCacheProperties properties) {
         this(localSubscriptionCache, subscriptionCacheReaderProvider, properties, Clock.systemUTC());
     }
 
     LocalSubscriptionCacheHealthIndicator(LocalSubscriptionCache localSubscriptionCache,
                                           ObjectProvider<SubscriptionCacheReader> subscriptionCacheReaderProvider,
-                                          CacheProperties.LocalSubscriptionCacheProperties properties, Clock clock) {
+                                          LocalSubscriptionCacheProperties properties, Clock clock) {
         this.localSubscriptionCache = localSubscriptionCache;
         this.subscriptionCacheReaderProvider = subscriptionCacheReaderProvider;
         this.properties = properties;
@@ -86,7 +87,7 @@ public class LocalSubscriptionCacheHealthIndicator implements HealthIndicator {
         var staleSince = diagnostics.staleSince();
         if (staleSince != null) {
             builder.withDetail("staleSince", staleSince.toString());
-            if (fallbackMode == CacheProperties.LocalSubscriptionCacheFallback.HAZELCAST_WITH_MONGO_FALLBACK) {
+            if (fallbackMode == LocalSubscriptionCacheProperties.Fallback.HAZELCAST_WITH_MONGO_FALLBACK) {
                 var remaining = properties.getStaleLocalCacheReadGracePeriod()
                     .minus(Duration.between(staleSince, clock.instant()));
                 builder.withDetail("staleLocalReadsRemaining", LocalSubscriptionCacheAutoConfiguration.formatDuration(

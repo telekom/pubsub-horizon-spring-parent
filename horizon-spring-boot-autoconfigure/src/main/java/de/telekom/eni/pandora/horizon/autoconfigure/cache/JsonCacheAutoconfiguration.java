@@ -9,6 +9,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.map.IMap;
+import de.telekom.eni.pandora.horizon.cache.config.LocalSubscriptionCacheProperties;
 import de.telekom.eni.pandora.horizon.cache.fallback.SubscriptionCacheMongoFallback;
 import de.telekom.eni.pandora.horizon.cache.listener.SubscriptionResourceEventBroadcaster;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
@@ -80,7 +81,7 @@ public class JsonCacheAutoconfiguration {
             return new HazelcastCacheReader(subscriptionCache);
         }
         // If local subscription cache is enabled and fallback mode is NONE, use the local cache exclusively
-        if (localCacheProperties.getFallbackMode() == CacheProperties.LocalSubscriptionCacheFallback.NONE) {
+        if (localCacheProperties.getFallbackMode() == LocalSubscriptionCacheProperties.Fallback.NONE) {
             if (localSubscriptionCache == null) {
                 throw new IllegalStateException("LocalSubscriptionCache is required when horizon.cache.local-subscription-cache.enabled is true");
             }
