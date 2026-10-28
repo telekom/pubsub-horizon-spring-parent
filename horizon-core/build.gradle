@@ -76,6 +76,7 @@ dependencies {
 
     // Curator
     api "org.apache.curator:curator-framework:${curatorVersion}"
+    testImplementation "org.apache.curator:curator-test:${curatorVersion}"
 
     // Observability
     api 'io.micrometer:micrometer-tracing-bridge-brave'
