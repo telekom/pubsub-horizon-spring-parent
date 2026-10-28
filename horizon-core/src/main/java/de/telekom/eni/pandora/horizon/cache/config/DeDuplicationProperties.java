@@ -6,7 +6,6 @@ import org.springframework.context.annotation.Configuration;
 
 @Getter
 @Setter
-@Configuration
 public class DeDuplicationProperties {
 
     private boolean enabled = false;

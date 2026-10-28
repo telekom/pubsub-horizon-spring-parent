@@ -8,7 +8,6 @@ import java.time.Duration;
 
 @Getter
 @Setter
-@Configuration
 public class ZooKeeperProperties {
 
     // Can be disabled locally when the ZooKeeper-published addresses are not reachable.

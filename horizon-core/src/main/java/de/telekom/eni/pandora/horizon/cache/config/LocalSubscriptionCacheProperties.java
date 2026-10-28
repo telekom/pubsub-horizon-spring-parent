@@ -8,7 +8,6 @@ import java.time.Duration;
 
 @Getter
 @Setter
-@Configuration
 public class LocalSubscriptionCacheProperties {
 
     private boolean enabled = false;
