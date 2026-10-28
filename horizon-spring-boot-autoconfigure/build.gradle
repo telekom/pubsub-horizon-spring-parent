@@ -46,6 +46,9 @@ dependencies {
     compileOnly "org.projectlombok:lombok"
     annotationProcessor "org.projectlombok:lombok"
 
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation "org.apache.curator:curator-test:${curatorVersion}"
+
     // ENI
     implementation project(':horizon-core')
 }
@@ -105,6 +108,7 @@ publishing {
 }
 
 test {
+    useJUnitPlatform()
     finalizedBy jacocoTestReport
 }
 
