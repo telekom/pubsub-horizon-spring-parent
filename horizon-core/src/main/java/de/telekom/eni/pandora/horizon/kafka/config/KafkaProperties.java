@@ -56,4 +56,6 @@ public class KafkaProperties {
 
     private Compression compression = new Compression();
 
+    @Value("${maxPollIntervalMs:300000}")
+    private int maxPollIntervalMs;
 }
