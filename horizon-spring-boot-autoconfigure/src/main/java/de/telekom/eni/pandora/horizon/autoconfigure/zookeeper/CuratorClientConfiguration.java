@@ -20,7 +20,7 @@ import org.springframework.context.annotation.Configuration;
 public class CuratorClientConfiguration {
 
     @Bean(destroyMethod = "close")
-    public CuratorFramework curatorFramework(ZooKeeperProperties properties) {
+    public CuratorFramework curatorFramework(ZooKeeperProperties properties) throws InterruptedException {
         var backoffProps = properties.getBackOff();
         var exponentialBackoff = new ExponentialBackoffRetry(backoffProps.getBaseSleepMs(), backoffProps.getMaxRetries());
         var client = CuratorFrameworkFactory.builder()
@@ -29,8 +29,11 @@ public class CuratorClientConfiguration {
                 .sessionTimeoutMs(properties.getSessionTimeoutMs())
                 .connectionTimeoutMs(properties.getConnectionTimeoutMs())
                 .build();
-
         client.start();
+
+        // TODO: Also provide curator with an initial timeout here!
+        client.blockUntilConnected();
+
         return client;
     }
 

@@ -30,7 +30,7 @@ public class ReplicaMaps {
     }
 
     public void activate(IndexedMap indexedMap) {
-        if (active.get().getVersion() >= prepared.get().getVersion()) {
+        if (active.get().getVersion() >= indexedMap.getVersion()) {
             return;
         }
 

@@ -4,5 +4,29 @@
 
 package de.telekom.eni.pandora.horizon.subscription;
 
-public class Replica {
+import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
+import org.jspecify.annotations.Nullable;
+
+import java.util.List;
+
+public class Replica implements SubscriptionProxy {
+
+    private ReplicaMaps replicaMaps;
+
+    // TODO: Must clarify if we should fallback to Hazelcast
+    // TODO: How should we handle cases in the running component? Switch to Hazelcast?
+    public Replica(ReplicaService replicaService) throws Exception {
+        this.replicaMaps = replicaService.initMaps();
+    }
+
+    @Override
+    public @Nullable SubscriptionResource get(String subscriptionId) {
+        return replicaMaps.getActive().get().get(subscriptionId);
+    }
+
+    @Override
+    public List<SubscriptionResource> get(String environment, String eventType) {
+        return replicaMaps.getActive().get().get(environment, eventType);
+    }
+
 }

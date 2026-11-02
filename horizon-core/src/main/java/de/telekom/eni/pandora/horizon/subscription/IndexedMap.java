@@ -10,6 +10,7 @@ import lombok.Getter;
 import org.bson.types.ObjectId;
 import org.jspecify.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +19,7 @@ public class IndexedMap {
 
     private final Map<String, SubscriptionResource> subscriptionsById;
 
-    private final Map<String, SubscriptionResource> subscriptionsByEnvironmentAndEventType;
+    private final Map<String, List<SubscriptionResource>> subscriptionsByEnvironmentAndEventType;
 
     @Getter
     private final long version;
@@ -29,13 +30,16 @@ public class IndexedMap {
 
     public IndexedMap(List<SnapshotMongoDocument> documents, long version, @Nullable ObjectId snapshotId) {
         this.subscriptionsById = new HashMap<>(documents.size());
-        this.subscriptionsByEnvironmentAndEventType = new HashMap<>(documents.size());
+        this.subscriptionsByEnvironmentAndEventType = new HashMap<>();
         this.version = version;
         this.snapshotId = snapshotId;
 
         documents.forEach(document -> {
            subscriptionsById.put(document.getSnapshotId(), document.getResource());
-           subscriptionsByEnvironmentAndEventType.put(createEnvironmentAndEventTypeKey(document), document.getResource());
+
+           var environmentAndEventTypeKey = createEnvironmentAndEventTypeKey(document);
+           subscriptionsByEnvironmentAndEventType.putIfAbsent(environmentAndEventTypeKey, new ArrayList<>());
+           subscriptionsByEnvironmentAndEventType.get(environmentAndEventTypeKey).add(document.getResource());
         });
     }
 
@@ -43,7 +47,7 @@ public class IndexedMap {
         return subscriptionsById.get(subscriptionId);
     }
 
-    public SubscriptionResource get(String environment, String eventType) {
+    public List<SubscriptionResource> get(String environment, String eventType) {
         return subscriptionsByEnvironmentAndEventType.get(createEnvironmentAndEventTypeKey(environment, eventType));
     }
 
