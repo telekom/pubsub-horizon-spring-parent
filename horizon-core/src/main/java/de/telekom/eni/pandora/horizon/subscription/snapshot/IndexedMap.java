@@ -65,4 +65,8 @@ public class IndexedMap {
         return new IndexedMap(List.of(), -1L, null);
     }
 
+    public int getSize() {
+        return subscriptionsById.size();
+    }
+
 }

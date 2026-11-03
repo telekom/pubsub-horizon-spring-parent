@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.Head;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.api.CuratorWatcher;
 import org.apache.zookeeper.WatchedEvent;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 
 @Service
+@Slf4j
 public class ReplicaService {
 
     private final CuratorFramework curatorFramework;
@@ -54,6 +56,7 @@ public class ReplicaService {
         var activeBytes = getAndWatch(activeStat, Head.ZNODE_ACTIVATED, this::watchActive);
         actOnActive(activeBytes, activeStat.getMzxid());
 
+        log.info("initialized subscription replica-maps");
         return replicaMaps;
     }
 
@@ -77,6 +80,7 @@ public class ReplicaService {
             var docs = snapshotMongoRepo.findBySnapshotId(head.getSnapshotId());
 
             var indexedMap = new IndexedMap(docs, mzxid, head.getSnapshotObjectId());
+            log.info("preparing mzxid {}", mzxid);
             replicaMaps.prepare(indexedMap);
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -86,6 +90,7 @@ public class ReplicaService {
     private void actOnActive(byte[] bytes, long mzxid) {
         try {
             var head = objectMapper.readValue(bytes, Head.class);
+            log.info("activating mzxid {}", mzxid);
             if (head.getSnapshotObjectId().equals(replicaMaps.getPrepared().get().getSnapshotId())) {
                 replicaMaps.activate();
             } else {

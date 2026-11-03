@@ -7,9 +7,11 @@ package de.telekom.eni.pandora.horizon.subscription.replica;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
 import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.atomic.AtomicReference;
 
+@Slf4j
 @Getter(AccessLevel.PACKAGE)
 public class ReplicaMaps {
 
@@ -36,6 +38,7 @@ public class ReplicaMaps {
         }
 
         active.set(indexedMap);
+        log.info("new index map with {} entries has been activated", indexedMap.getSize());
     }
 
     public void activate() {
