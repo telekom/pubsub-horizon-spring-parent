@@ -28,12 +28,22 @@ class IndexedMapTest {
 
         assertSame(first.getResource(), map.get("id-1"));
         assertSame(second.getResource(), map.get("id-2"));
-        assertSame(first.getResource(), map.get("playground", "event.v1"));
-        assertSame(second.getResource(), map.get("prod", "event.v1"));
+        assertEquals(List.of(first.getResource()), map.get("playground", "event.v1"));
+        assertEquals(List.of(second.getResource()), map.get("prod", "event.v1"));
         assertNull(map.get("unknown"));
         assertNull(map.get("playground", "other.v1"));
         assertEquals(42L, map.getVersion());
         assertEquals(snapshotId, map.getSnapshotId());
+    }
+
+    @Test
+    void groupsSubscriptionsWithSameEnvironmentAndEventType() {
+        var first = document("id-1", "playground", "event.v1");
+        var second = document("id-2", "playground", "event.v1");
+
+        var map = new IndexedMap(List.of(first, second), 1L, new ObjectId());
+
+        assertEquals(List.of(first.getResource(), second.getResource()), map.get("playground", "event.v1"));
     }
 
     @Test

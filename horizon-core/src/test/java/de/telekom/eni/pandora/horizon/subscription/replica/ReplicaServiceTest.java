@@ -2,16 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package de.telekom.eni.pandora.horizon.subscription;
+package de.telekom.eni.pandora.horizon.subscription.replica;
 
 import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
-import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaMaps;
-import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaService;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.Head;
+import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.RetryOneTime;
@@ -39,6 +38,7 @@ class ReplicaServiceTest {
     private TestingServer server;
     private CuratorFramework client;
     private SnapshotMongoRepo repo;
+    private ReplicaConnectionListener listener;
     private ReplicaService service;
 
     @BeforeEach
@@ -51,14 +51,23 @@ class ReplicaServiceTest {
         when(repo.findBySnapshotId(snapshotA)).thenReturn(List.of(docA));
         when(repo.findBySnapshotId(snapshotB)).thenReturn(List.of(docB));
 
-        service = new ReplicaService(client, new ReplicaMaps(), repo);
+        listener = mock(ReplicaConnectionListener.class);
+        service = new ReplicaService(client, new ReplicaMaps(), repo, listener);
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        service.tearDown();
         client.close();
         server.close();
+    }
+
+    @Test
+    void registersConnectionListener() {
+        var curator = mock(CuratorFramework.class, RETURNS_DEEP_STUBS);
+
+        new ReplicaService(curator, new ReplicaMaps(), repo, listener);
+
+        verify(curator.getConnectionStateListenable()).addListener(listener);
     }
 
     @Test
@@ -66,36 +75,55 @@ class ReplicaServiceTest {
         write(Head.ZNODE_PREPARED, snapshotA);
         write(Head.ZNODE_ACTIVATED, snapshotA);
 
-        service.initMaps();
+        var maps = service.initMaps();
 
-        assertSame(docA.getResource(), service.getActiveMap().get("sub-a"));
+        assertTrue(maps.isFullyInitialized());
+        assertSame(docA.getResource(), active(maps).get("sub-a"));
+        assertSame(maps.getPrepared().get(), maps.getActive().get());
         verify(repo, times(1)).findBySnapshotId(snapshotA);
+    }
+
+    @Test
+    void initFailsWhenZnodesAreMissing() {
+        assertThrows(Exception.class, service::initMaps);
+    }
+
+    @Test
+    void initFailsOnUnreadableHead() throws Exception {
+        client.create().creatingParentsIfNeeded().forPath(Head.ZNODE_PREPARED, "not-json".getBytes(StandardCharsets.UTF_8));
+
+        assertThrows(RuntimeException.class, service::initMaps);
     }
 
     @Test
     void switchesToNewSnapshotWhenZnodesChange() throws Exception {
         write(Head.ZNODE_PREPARED, snapshotA);
         write(Head.ZNODE_ACTIVATED, snapshotA);
-        service.initMaps();
+        var maps = service.initMaps();
 
         write(Head.ZNODE_PREPARED, snapshotB);
         write(Head.ZNODE_ACTIVATED, snapshotB);
 
         await().atMost(Duration.ofSeconds(5))
-                .untilAsserted(() -> assertSame(docB.getResource(), service.getActiveMap().get("sub-b")));
-        assertNull(service.getActiveMap().get("sub-a"));
+                .untilAsserted(() -> assertSame(docB.getResource(), active(maps).get("sub-b")));
+        assertNull(active(maps).get("sub-a"));
     }
 
     @Test
     void loadsActivatedSnapshotDirectlyWhenItWasNotPrepared() throws Exception {
         write(Head.ZNODE_PREPARED, snapshotA);
         write(Head.ZNODE_ACTIVATED, snapshotA);
-        service.initMaps();
+        var maps = service.initMaps();
 
         write(Head.ZNODE_ACTIVATED, snapshotB);
 
         await().atMost(Duration.ofSeconds(5))
-                .untilAsserted(() -> assertSame(docB.getResource(), service.getActiveMap().get("sub-b")));
+                .untilAsserted(() -> assertSame(docB.getResource(), active(maps).get("sub-b")));
+        assertSame(docA.getResource(), maps.getPrepared().get().get("sub-a"));
+    }
+
+    private static IndexedMap active(ReplicaMaps maps) {
+        return maps.getActive().get();
     }
 
     private void write(String path, String snapshotId) throws Exception {
@@ -107,7 +135,7 @@ class ReplicaServiceTest {
         }
     }
 
-    private static SnapshotMongoDocument document(String id) {
+    static SnapshotMongoDocument document(String id) {
         var subscription = new Subscription();
         subscription.setType("event.v1");
 
