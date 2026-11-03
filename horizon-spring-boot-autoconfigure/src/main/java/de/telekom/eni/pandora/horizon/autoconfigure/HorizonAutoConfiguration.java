@@ -9,7 +9,10 @@ import de.telekom.eni.pandora.horizon.autoconfigure.cache.JsonCacheAutoconfigura
 import de.telekom.eni.pandora.horizon.autoconfigure.kafka.KafkaAutoConfiguration;
 import de.telekom.eni.pandora.horizon.autoconfigure.metrics.HorizonMetricsHelperAutoConfiguration;
 import de.telekom.eni.pandora.horizon.autoconfigure.mongo.MongoAutoConfiguration;
+import de.telekom.eni.pandora.horizon.autoconfigure.subscription.ReplicaConfiguration;
+import de.telekom.eni.pandora.horizon.autoconfigure.subscription.SubscriptionConfiguration;
 import de.telekom.eni.pandora.horizon.autoconfigure.tracing.HorizonTracerAutoConfiguration;
+import de.telekom.eni.pandora.horizon.autoconfigure.zookeeper.CuratorClientConfiguration;
 import de.telekom.eni.pandora.horizon.cache.config.CacheProperties;
 import de.telekom.eni.pandora.horizon.cache.service.DeDuplicationService;
 import org.springframework.boot.actuate.autoconfigure.tracing.TracingProperties;
@@ -27,7 +30,10 @@ import org.springframework.context.annotation.Import;
         CacheAutoConfiguration.class,
         MongoAutoConfiguration.class,
         KafkaAutoConfiguration.class,
-        JsonCacheAutoconfiguration.class
+        JsonCacheAutoconfiguration.class,
+        CuratorClientConfiguration.class,
+        ReplicaConfiguration.class,
+        SubscriptionConfiguration.class
 })
 public class HorizonAutoConfiguration {
 
