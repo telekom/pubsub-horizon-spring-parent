@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package de.telekom.eni.pandora.horizon.subscription;
+package de.telekom.eni.pandora.horizon.subscription.snapshot;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Getter;

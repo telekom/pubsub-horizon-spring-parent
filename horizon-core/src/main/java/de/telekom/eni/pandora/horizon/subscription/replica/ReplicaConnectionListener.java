@@ -1,5 +1,7 @@
-package de.telekom.eni.pandora.horizon.subscription;
+package de.telekom.eni.pandora.horizon.subscription.replica;
 
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionProxy;
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepository;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.framework.state.ConnectionStateListener;

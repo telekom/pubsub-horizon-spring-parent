@@ -8,6 +8,7 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.Subscription;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
+import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
 

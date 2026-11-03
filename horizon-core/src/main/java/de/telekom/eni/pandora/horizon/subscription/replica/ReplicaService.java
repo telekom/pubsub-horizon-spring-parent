@@ -2,10 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package de.telekom.eni.pandora.horizon.subscription;
+package de.telekom.eni.pandora.horizon.subscription.replica;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
+import de.telekom.eni.pandora.horizon.subscription.snapshot.Head;
+import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.api.CuratorWatcher;
 import org.apache.zookeeper.WatchedEvent;
@@ -28,12 +30,15 @@ public class ReplicaService {
     public ReplicaService(
             CuratorFramework curatorFramework,
             ReplicaMaps replicaMaps,
-            SnapshotMongoRepo snapshotMongoRepo
+            SnapshotMongoRepo snapshotMongoRepo,
+            ReplicaConnectionListener connectionListener
     ) {
         this.curatorFramework = curatorFramework;
         this.replicaMaps = replicaMaps;
         this.snapshotMongoRepo = snapshotMongoRepo;
         this.objectMapper = new ObjectMapper();
+
+        curatorFramework.getConnectionStateListenable().addListener(connectionListener);
     }
 
     private byte[] getAndWatch(Stat stat, String zNode, CuratorWatcher watcher) throws Exception {

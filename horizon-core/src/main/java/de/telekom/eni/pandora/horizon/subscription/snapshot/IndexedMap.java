@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package de.telekom.eni.pandora.horizon.subscription;
+package de.telekom.eni.pandora.horizon.subscription.snapshot;
 
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;

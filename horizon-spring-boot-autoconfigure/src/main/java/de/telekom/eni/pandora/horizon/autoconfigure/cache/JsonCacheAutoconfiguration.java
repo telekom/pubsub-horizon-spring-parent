@@ -17,6 +17,7 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.model.meta.CircuitBreakerMessage;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
+import de.telekom.eni.pandora.horizon.subscription.hazelcast.HazelcastProxy;
 import de.telekom.jsonfilter.operator.Operator;
 import de.telekom.jsonfilter.serde.OperatorDeserializer;
 import de.telekom.jsonfilter.serde.OperatorSerializer;
@@ -77,6 +78,11 @@ public class JsonCacheAutoconfiguration {
         mapper.registerModule(new JavaTimeModule());
 
         return new JsonCacheService<>(CircuitBreakerMessage.class, map, mapper, hazelcastInstance, CIRCUITBREAKER_MAP);
+    }
+
+    @Bean
+    public HazelcastProxy hazelcastCache(JsonCacheService<SubscriptionResource> subscriptionCache) {
+        return new HazelcastProxy(subscriptionCache);
     }
 
 }
