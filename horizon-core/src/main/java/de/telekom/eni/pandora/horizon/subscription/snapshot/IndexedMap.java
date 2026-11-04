@@ -7,31 +7,24 @@ package de.telekom.eni.pandora.horizon.subscription.snapshot;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
 import lombok.Getter;
-import org.bson.types.ObjectId;
-import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class IndexedMap {
+    private static final IndexedMap EMPTY_INDEXED_MAP = new IndexedMap(List.of(), SnapshotId.EMPTY_SNAPSHOT_ID);
 
     private final Map<String, SubscriptionResource> subscriptionsById;
-
     private final Map<String, List<SubscriptionResource>> subscriptionsByEnvironmentAndEventType;
-
     @Getter
-    private final long version;
+    private final SnapshotId snapshotId;
 
-    @Getter
-    @Nullable
-    private final ObjectId snapshotId;
-
-    public IndexedMap(List<SnapshotMongoDocument> documents, long version, @Nullable ObjectId snapshotId) {
-        this.subscriptionsById = new HashMap<>(documents.size());
-        this.subscriptionsByEnvironmentAndEventType = new HashMap<>();
-        this.version = version;
+    public IndexedMap(List<SnapshotMongoDocument> documents, SnapshotId snapshotId) {
+        var subscriptionsById = new HashMap<String, SubscriptionResource>(documents.size());
+        var subscriptionsByEnvironmentAndEventType = new HashMap<String, List<SubscriptionResource>>();
         this.snapshotId = snapshotId;
 
         documents.forEach(document -> {
@@ -41,6 +34,9 @@ public class IndexedMap {
            subscriptionsByEnvironmentAndEventType.putIfAbsent(environmentAndEventTypeKey, new ArrayList<>());
            subscriptionsByEnvironmentAndEventType.get(environmentAndEventTypeKey).add(document.getResource());
         });
+
+        this.subscriptionsById = Collections.unmodifiableMap(subscriptionsById);
+        this.subscriptionsByEnvironmentAndEventType = Collections.unmodifiableMap(subscriptionsByEnvironmentAndEventType);
     }
 
     public SubscriptionResource get(String subscriptionId) {
@@ -62,11 +58,10 @@ public class IndexedMap {
     }
 
     public static IndexedMap empty() {
-        return new IndexedMap(List.of(), -1L, null);
+        return EMPTY_INDEXED_MAP;
     }
 
     public int getSize() {
         return subscriptionsById.size();
     }
-
 }
