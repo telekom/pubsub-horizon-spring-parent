@@ -10,8 +10,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Duration;
-
 @Getter
 @Setter
 @Configuration
@@ -30,6 +28,6 @@ public class ZooKeeperProperties {
     @Value("${connectionTimeoutMs:5000}")
     int connectionTimeoutMs;
 
-    ZooKeeperBackOffProperties backOff;
+    ZooKeeperBackOffProperties backOff = new ZooKeeperBackOffProperties();
 
 }
