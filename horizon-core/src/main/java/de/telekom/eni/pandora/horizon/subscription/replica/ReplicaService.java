@@ -5,7 +5,10 @@
 package de.telekom.eni.pandora.horizon.subscription.replica;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
+import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepositoryManager;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.SnapshotId;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
 import lombok.extern.slf4j.Slf4j;
@@ -13,8 +16,11 @@ import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.api.CuratorWatcher;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.data.Stat;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessResourceException;
 
 import java.io.IOException;
+import java.util.List;
 
 @Slf4j
 public class ReplicaService {
@@ -27,14 +33,17 @@ public class ReplicaService {
 
     private final ObjectMapper objectMapper;
 
+    private final SubscriptionRepositoryManager subscriptionRepositoryManager;
+
     public ReplicaService(
             CuratorFramework curatorFramework,
             ReplicaMaps replicaMaps,
-            SnapshotMongoRepo snapshotMongoRepo
+            SnapshotMongoRepo snapshotMongoRepo, SubscriptionRepositoryManager subscriptionRepositoryManager
     ) {
         this.curatorFramework = curatorFramework;
         this.replicaMaps = replicaMaps;
         this.snapshotMongoRepo = snapshotMongoRepo;
+        this.subscriptionRepositoryManager = subscriptionRepositoryManager;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -72,8 +81,14 @@ public class ReplicaService {
     private void actOnPrepare(byte[] bytes, long mzxid) {
         try {
             var snapshotId = objectMapper.readValue(bytes, SnapshotId.class);
-            // TODO: handle MongoDB exception
-            var docs = snapshotMongoRepo.findBySnapshotId(snapshotId.getValue().toHexString());
+            final List<SnapshotMongoDocument> docs;
+            try {
+                docs = snapshotMongoRepo.findBySnapshotId(snapshotId.getValue().toHexString());
+            } catch (DataAccessResourceFailureException | TransientDataAccessResourceException ex) { //TODO: prove the exact exceptions
+                // TODO: handle MongoDB exception
+                subscriptionRepositoryManager.switchToHazelcast();
+                return;
+            }
 
             var indexedMap = new IndexedMap(docs, snapshotId);
             log.info("preparing mzxid {}", mzxid);
@@ -90,7 +105,14 @@ public class ReplicaService {
             if (snapshotId.compareTo(replicaMaps.getPrepared().get().getSnapshotId()) == 0) {
                 replicaMaps.activate();
             } else {
-                var docs = snapshotMongoRepo.findBySnapshotId(snapshotId.getValue().toHexString());
+                final List<SnapshotMongoDocument> docs;
+                try {
+                    docs = snapshotMongoRepo.findBySnapshotId(snapshotId.getValue().toHexString());
+                } catch (DataAccessResourceFailureException | TransientDataAccessResourceException ex) { //TODO: prove the exact exceptions
+                    // TODO: handle MongoDB exception
+                    subscriptionRepositoryManager.switchToHazelcast();
+                    return;
+                }
 
                 var indexedMap = new IndexedMap(docs, snapshotId);
                 replicaMaps.activate(indexedMap);
@@ -99,5 +121,4 @@ public class ReplicaService {
             throw new RuntimeException(e);
         }
     }
-
 }
