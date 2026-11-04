@@ -21,8 +21,8 @@ class ReplicaTest {
         var activeDoc = ReplicaServiceTest.document("sub-a");
         var preparedDoc = ReplicaServiceTest.document("sub-b");
         var maps = new ReplicaMaps();
-        maps.prepare(new IndexedMap(List.of(preparedDoc), 2, new ObjectId()));
-        maps.activate(new IndexedMap(List.of(activeDoc), 1, new ObjectId()));
+        maps.prepare(new IndexedMap(List.of(preparedDoc), new ObjectId()));
+        maps.activate(new IndexedMap(List.of(activeDoc), new ObjectId()));
 
         var service = mock(ReplicaService.class);
         when(service.initMaps()).thenReturn(maps);
@@ -45,7 +45,7 @@ class ReplicaTest {
         var replica = new Replica(service);
         assertNull(replica.get("sub-a"));
 
-        maps.activate(new IndexedMap(List.of(doc), 1, new ObjectId()));
+        maps.activate(new IndexedMap(List.of(doc), new ObjectId()));
 
         assertSame(doc.getResource(), replica.get("sub-a"));
     }

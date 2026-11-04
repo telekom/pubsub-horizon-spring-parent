@@ -7,7 +7,8 @@ package de.telekom.eni.pandora.horizon.autoconfigure.subscription;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
 import de.telekom.eni.pandora.horizon.subscription.SubscriptionProxy;
 import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepository;
-import de.telekom.eni.pandora.horizon.subscription.replica.Replica;
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepositoryManager;
+import de.telekom.eni.pandora.horizon.subscription.replica.MongoReplica;
 import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaConnectionListener;
 import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaMaps;
 import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaService;
@@ -27,24 +28,25 @@ public class ReplicaConfiguration {
     }
 
     @Bean
-    public ReplicaService replicaService(CuratorFramework curatorFramework, ReplicaMaps replicaMaps, SnapshotMongoRepo snapshotMongoRepo) {
-        return new ReplicaService(curatorFramework, replicaMaps, snapshotMongoRepo);
+    public ReplicaService replicaService(
+            CuratorFramework curatorFramework,
+            ReplicaMaps replicaMaps,
+            SnapshotMongoRepo snapshotMongoRepo,
+            SubscriptionRepositoryManager subscriptionRepositoryManager
+    ) {
+        return new ReplicaService(curatorFramework, replicaMaps, snapshotMongoRepo, subscriptionRepositoryManager);
     }
 
     @Bean
-    public Replica replica(ReplicaService replicaService) throws Exception {
-        return new Replica(replicaService);
+    public MongoReplica replica(ReplicaService replicaService) throws Exception {
+        return new MongoReplica(replicaService);
     }
 
     @Bean
     public ReplicaConnectionListener replicaConnectionListener(
             CuratorFramework curator,
-            SubscriptionRepository repository,
-            @Qualifier("mongoReplica")
-            SubscriptionProxy mongoReplica,
-            @Qualifier("hazelcastCache")
-            SubscriptionProxy hazelcastCache) {
-        var listener = new ReplicaConnectionListener(repository, mongoReplica, hazelcastCache);
+            SubscriptionRepositoryManager subscriptionRepositoryManager) {
+        var listener = new ReplicaConnectionListener(subscriptionRepositoryManager);
         curator.getConnectionStateListenable().addListener(listener);
         return listener;
     }

@@ -25,11 +25,11 @@ class ReplicaMapsTest {
 
     @Test
     void prepareKeepsOnlyNewerVersions() {
-        var v2 = map(2);
+        var v2 = map();
 
         maps.prepare(v2);
-        maps.prepare(map(1));
-        maps.prepare(map(2));
+        maps.prepare(map());
+        maps.prepare(map());
 
         assertSame(v2, maps.getPrepared().get());
         assertFalse(maps.isFullyInitialized());
@@ -37,11 +37,11 @@ class ReplicaMapsTest {
 
     @Test
     void activateKeepsOnlyNewerVersions() {
-        var v2 = map(2);
+        var v2 = map();
 
         maps.activate(v2);
-        maps.activate(map(1));
-        maps.activate(map(2));
+        maps.activate(map());
+        maps.activate(map());
 
         assertSame(v2, maps.getActive().get());
         assertFalse(maps.isFullyInitialized());
@@ -49,7 +49,7 @@ class ReplicaMapsTest {
 
     @Test
     void activateWithoutArgumentPromotesPrepared() {
-        var prepared = map(3);
+        var prepared = map();
         maps.prepare(prepared);
 
         maps.activate();
@@ -60,16 +60,16 @@ class ReplicaMapsTest {
 
     @Test
     void activateWithoutArgumentDoesNotDowngradeActive() {
-        var active = map(5);
+        var active = map();
         maps.activate(active);
-        maps.prepare(map(3));
+        maps.prepare(map());
 
         maps.activate();
 
         assertSame(active, maps.getActive().get());
     }
 
-    private static IndexedMap map(long version) {
-        return new IndexedMap(List.of(), version, new ObjectId());
+    private static IndexedMap map() {
+        return new IndexedMap(List.of(), new ObjectId());
     }
 }

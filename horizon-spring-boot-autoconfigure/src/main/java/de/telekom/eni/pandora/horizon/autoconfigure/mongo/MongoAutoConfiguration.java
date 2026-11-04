@@ -8,11 +8,17 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.connection.ServerConnectionState;
+import com.mongodb.event.ServerDescriptionChangedEvent;
+import com.mongodb.event.ServerListener;
+import de.telekom.eni.pandora.horizon.mongo.client.ReconnectServerListener;
 import de.telekom.eni.pandora.horizon.mongo.config.MongoProperties;
 import de.telekom.eni.pandora.horizon.mongo.repository.MessageStateMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
 import de.telekom.eni.pandora.horizon.mongo.repository.SubscriptionsMongoRepo;
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepositoryManager;
 import lombok.extern.slf4j.Slf4j;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,12 +41,13 @@ public class MongoAutoConfiguration {
     private String applicationName;
 
     @Bean
-    public MongoClient mongoClient(MongoProperties properties) {
+    public MongoClient mongoClient(MongoProperties properties, SubscriptionRepositoryManager subscriptionRepositoryManager) {
         log.debug("Using status database: " + properties.getDatabases().getRunTimeDatabase());
         log.debug("Using config database: " + properties.getDatabases().getConfigTimeDatabase());
 
         var connectionString = new ConnectionString(properties.getUrl());
         var clientSettings = MongoClientSettings.builder()
+                .applyToServerSettings(serverSettings -> serverSettings.addServerListener(new ReconnectServerListener(subscriptionRepositoryManager)))
                 .applyConnectionString(connectionString)
                 .writeConcern(properties.getWriteConcern())
                 .applicationName(applicationName)

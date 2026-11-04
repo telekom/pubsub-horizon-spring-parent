@@ -10,8 +10,8 @@ public class SubscriptionRepository {
 
     private final AtomicReference<SubscriptionProxy> proxy;
 
-    public SubscriptionRepository(AtomicReference<SubscriptionProxy> proxy) {
-        this.proxy = proxy;
+    public SubscriptionRepository(SubscriptionProxy proxy) {
+        this.proxy = new AtomicReference<>(proxy);
     }
 
     public void changeProxy(SubscriptionProxy subscriptionProxy) {

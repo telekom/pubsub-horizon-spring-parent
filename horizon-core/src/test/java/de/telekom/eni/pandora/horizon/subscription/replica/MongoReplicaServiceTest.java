@@ -9,7 +9,7 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
-import de.telekom.eni.pandora.horizon.subscription.snapshot.Head;
+import de.telekom.eni.pandora.horizon.subscription.snapshot.SnapshotId;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -61,8 +61,8 @@ class ReplicaServiceTest {
 
     @Test
     void setupLoadsExistingSnapshotAndReusesPreparedMap() throws Exception {
-        write(Head.ZNODE_PREPARED, snapshotA);
-        write(Head.ZNODE_ACTIVATED, snapshotA);
+        write(SnapshotId.ZNODE_PREPARED, snapshotA);
+        write(SnapshotId.ZNODE_ACTIVATED, snapshotA);
 
         var maps = service.initMaps();
 
@@ -79,19 +79,19 @@ class ReplicaServiceTest {
 
     @Test
     void initFailsOnUnreadableHead() throws Exception {
-        client.create().creatingParentsIfNeeded().forPath(Head.ZNODE_PREPARED, "not-json".getBytes(StandardCharsets.UTF_8));
+        client.create().creatingParentsIfNeeded().forPath(SnapshotId.ZNODE_PREPARED, "not-json".getBytes(StandardCharsets.UTF_8));
 
         assertThrows(RuntimeException.class, service::initMaps);
     }
 
     @Test
     void switchesToNewSnapshotWhenZnodesChange() throws Exception {
-        write(Head.ZNODE_PREPARED, snapshotA);
-        write(Head.ZNODE_ACTIVATED, snapshotA);
+        write(SnapshotId.ZNODE_PREPARED, snapshotA);
+        write(SnapshotId.ZNODE_ACTIVATED, snapshotA);
         var maps = service.initMaps();
 
-        write(Head.ZNODE_PREPARED, snapshotB);
-        write(Head.ZNODE_ACTIVATED, snapshotB);
+        write(SnapshotId.ZNODE_PREPARED, snapshotB);
+        write(SnapshotId.ZNODE_ACTIVATED, snapshotB);
 
         await().atMost(Duration.ofSeconds(5))
                 .untilAsserted(() -> assertSame(docB.getResource(), active(maps).get("sub-b")));
@@ -100,11 +100,11 @@ class ReplicaServiceTest {
 
     @Test
     void loadsActivatedSnapshotDirectlyWhenItWasNotPrepared() throws Exception {
-        write(Head.ZNODE_PREPARED, snapshotA);
-        write(Head.ZNODE_ACTIVATED, snapshotA);
+        write(SnapshotId.ZNODE_PREPARED, snapshotA);
+        write(SnapshotId.ZNODE_ACTIVATED, snapshotA);
         var maps = service.initMaps();
 
-        write(Head.ZNODE_ACTIVATED, snapshotB);
+        write(SnapshotId.ZNODE_ACTIVATED, snapshotB);
 
         await().atMost(Duration.ofSeconds(5))
                 .untilAsserted(() -> assertSame(docB.getResource(), active(maps).get("sub-b")));
