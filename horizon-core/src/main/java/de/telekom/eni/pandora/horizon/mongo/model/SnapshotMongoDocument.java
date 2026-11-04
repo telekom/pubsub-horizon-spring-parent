@@ -15,7 +15,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Getter
 @Setter
 @NoArgsConstructor
-@Document(collation = "subscriptions.subscriber.horizon.telekom.de.v1-snapshots")
+@Document(collection = "subscriptions.subscriber.horizon.telekom.de.v1-snapshots")
 public class SnapshotMongoDocument {
 
     private String snapshotId;
