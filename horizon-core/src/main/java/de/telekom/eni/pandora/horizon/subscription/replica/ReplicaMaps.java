@@ -14,14 +14,13 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 @Getter(AccessLevel.PACKAGE)
 public class ReplicaMaps {
-
+    // NB! make sure to guarantee the happens-before behavior: https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.5
     private final AtomicReference<IndexedMap> prepared;
-
     private final AtomicReference<IndexedMap> active;
 
     public ReplicaMaps() {
-        prepared = new AtomicReference<>(IndexedMap.empty());
-        active = new AtomicReference<>(IndexedMap.empty());
+        this.prepared = new AtomicReference<>(IndexedMap.empty());
+        this.active = new AtomicReference<>(IndexedMap.empty());
     }
 
     public void prepare(IndexedMap indexedMap) {
