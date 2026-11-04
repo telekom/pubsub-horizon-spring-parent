@@ -10,13 +10,13 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
-public class Replica implements SubscriptionProxy {
+public class MongoReplica implements SubscriptionProxy {
 
     private final ReplicaMaps replicaMaps;
 
     // TODO: Must clarify if we should fallback to Hazelcast
     // TODO: How should we handle cases in the running component? Switch to Hazelcast?
-    public Replica(ReplicaService replicaService) throws Exception {
+    public MongoReplica(ReplicaService replicaService) throws Exception {
         this.replicaMaps = replicaService.initMaps();
     }
 
