@@ -12,7 +12,7 @@ import java.util.List;
 
 public class Replica implements SubscriptionProxy {
 
-    private ReplicaMaps replicaMaps;
+    private final ReplicaMaps replicaMaps;
 
     // TODO: Must clarify if we should fallback to Hazelcast
     // TODO: How should we handle cases in the running component? Switch to Hazelcast?
