@@ -32,15 +32,12 @@ public class ReplicaService {
     public ReplicaService(
             CuratorFramework curatorFramework,
             ReplicaMaps replicaMaps,
-            SnapshotMongoRepo snapshotMongoRepo,
-            ReplicaConnectionListener connectionListener
+            SnapshotMongoRepo snapshotMongoRepo
     ) {
         this.curatorFramework = curatorFramework;
         this.replicaMaps = replicaMaps;
         this.snapshotMongoRepo = snapshotMongoRepo;
         this.objectMapper = new ObjectMapper();
-
-        curatorFramework.getConnectionStateListenable().addListener(connectionListener);
     }
 
     private byte[] getAndWatch(Stat stat, String zNode, CuratorWatcher watcher) throws Exception {

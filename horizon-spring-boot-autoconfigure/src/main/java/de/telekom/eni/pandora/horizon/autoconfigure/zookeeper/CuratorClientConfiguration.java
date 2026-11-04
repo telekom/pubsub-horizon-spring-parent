@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.autoconfigure.zookeeper;
 
+import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaConnectionListener;
 import de.telekom.eni.pandora.horizon.zookeeper.ZooKeeperProperties;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;

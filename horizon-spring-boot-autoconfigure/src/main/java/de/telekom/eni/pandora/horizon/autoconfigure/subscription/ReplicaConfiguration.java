@@ -12,10 +12,13 @@ import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaConnectionList
 import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaMaps;
 import de.telekom.eni.pandora.horizon.subscription.replica.ReplicaService;
 import org.apache.curator.framework.CuratorFramework;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@ConditionalOnProperty({"zookeeper.enabled", "horizon.cache.enabled"})
 public class ReplicaConfiguration {
 
     @Bean
@@ -24,8 +27,8 @@ public class ReplicaConfiguration {
     }
 
     @Bean
-    public ReplicaService replicaService(CuratorFramework curatorFramework, ReplicaMaps replicaMaps, SnapshotMongoRepo snapshotMongoRepo, ReplicaConnectionListener replicaConnectionListener) {
-        return new ReplicaService(curatorFramework, replicaMaps, snapshotMongoRepo, replicaConnectionListener);
+    public ReplicaService replicaService(CuratorFramework curatorFramework, ReplicaMaps replicaMaps, SnapshotMongoRepo snapshotMongoRepo) {
+        return new ReplicaService(curatorFramework, replicaMaps, snapshotMongoRepo);
     }
 
     @Bean
@@ -34,8 +37,16 @@ public class ReplicaConfiguration {
     }
 
     @Bean
-    public ReplicaConnectionListener replicaConnectionListener(SubscriptionRepository repository, SubscriptionProxy mongoReplica, SubscriptionProxy hazelcastCache) {
-        return new ReplicaConnectionListener(repository, mongoReplica, hazelcastCache);
+    public ReplicaConnectionListener replicaConnectionListener(
+            CuratorFramework curator,
+            SubscriptionRepository repository,
+            @Qualifier("mongoReplica")
+            SubscriptionProxy mongoReplica,
+            @Qualifier("hazelcastCache")
+            SubscriptionProxy hazelcastCache) {
+        var listener = new ReplicaConnectionListener(repository, mongoReplica, hazelcastCache);
+        curator.getConnectionStateListenable().addListener(listener);
+        return listener;
     }
 
 }

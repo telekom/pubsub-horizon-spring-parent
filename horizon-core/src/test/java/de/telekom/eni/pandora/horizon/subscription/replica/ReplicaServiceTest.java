@@ -38,7 +38,6 @@ class ReplicaServiceTest {
     private TestingServer server;
     private CuratorFramework client;
     private SnapshotMongoRepo repo;
-    private ReplicaConnectionListener listener;
     private ReplicaService service;
 
     @BeforeEach
@@ -51,23 +50,13 @@ class ReplicaServiceTest {
         when(repo.findBySnapshotId(snapshotA)).thenReturn(List.of(docA));
         when(repo.findBySnapshotId(snapshotB)).thenReturn(List.of(docB));
 
-        listener = mock(ReplicaConnectionListener.class);
-        service = new ReplicaService(client, new ReplicaMaps(), repo, listener);
+        service = new ReplicaService(client, new ReplicaMaps(), repo);
     }
 
     @AfterEach
     void tearDown() throws Exception {
         client.close();
         server.close();
-    }
-
-    @Test
-    void registersConnectionListener() {
-        var curator = mock(CuratorFramework.class, RETURNS_DEEP_STUBS);
-
-        new ReplicaService(curator, new ReplicaMaps(), repo, listener);
-
-        verify(curator.getConnectionStateListenable()).addListener(listener);
     }
 
     @Test
