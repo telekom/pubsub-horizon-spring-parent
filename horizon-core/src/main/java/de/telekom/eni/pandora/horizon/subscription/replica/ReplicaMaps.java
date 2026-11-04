@@ -24,29 +24,29 @@ public class ReplicaMaps {
     }
 
     public void prepare(IndexedMap indexedMap) {
-        if (prepared.get().getVersion() >= indexedMap.getVersion()) {
-            return;
-        }
+        prepared.accumulateAndGet(indexedMap, (current, given) ->  {
+            if (given.getSnapshotId().compareTo(current.getSnapshotId()) > 0) {
+                return given;
+            } else  {
+                return current;
+            }
+        });
 
-        prepared.set(indexedMap);
     }
 
     public void activate(IndexedMap indexedMap) {
-        if (active.get().getVersion() >= indexedMap.getVersion()) {
-            return;
-        }
+        active.accumulateAndGet(indexedMap, (current, given) -> {
+            if (given.getSnapshotId().compareTo(current.getSnapshotId()) > 0) {
+                return given;
+            } else {
+                return current;
+            }
+        });
 
-        active.set(indexedMap);
         log.info("new index map with {} entries has been activated", indexedMap.getSize());
     }
 
     public void activate() {
         activate(prepared.get());
     }
-
-    public boolean isFullyInitialized() {
-        return prepared.get().getVersion() > -1 &&
-               active.get().getVersion() > -1;
-    }
-
 }
