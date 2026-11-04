@@ -2,22 +2,15 @@ package de.telekom.eni.pandora.horizon.subscription.replica;
 
 import de.telekom.eni.pandora.horizon.subscription.SubscriptionProxy;
 import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepository;
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepositoryManager;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.framework.state.ConnectionStateListener;
 
 public class ReplicaConnectionListener implements ConnectionStateListener {
-
-    private final SubscriptionProxy mongoReplica;
-
-    private final SubscriptionProxy hazelcastCache;
-
-    private final SubscriptionRepository repository;
-
-    public ReplicaConnectionListener(SubscriptionRepository repository, SubscriptionProxy mongoReplica, SubscriptionProxy hazelcastCache) {
-        this.mongoReplica = mongoReplica;
-        this.hazelcastCache = hazelcastCache;
-        this.repository = repository;
+    private final SubscriptionRepositoryManager subscriptionRepositoryManager;
+    public ReplicaConnectionListener(SubscriptionRepositoryManager subscriptionRepositoryManager) {
+        this.subscriptionRepositoryManager = subscriptionRepositoryManager;
     }
 
     @Override
@@ -25,11 +18,11 @@ public class ReplicaConnectionListener implements ConnectionStateListener {
         switch (newState) {
 
             case LOST -> {
-                repository.changeProxy(hazelcastCache);
+                subscriptionRepositoryManager.switchToHazelcast();
             }
 
             case CONNECTED -> {
-                repository.changeProxy(mongoReplica);
+                subscriptionRepositoryManager.switchToMongo();
             }
 
         }
