@@ -5,7 +5,6 @@
 package de.telekom.eni.pandora.horizon.subscription.replica;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
 import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepositoryManager;
@@ -15,12 +14,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.api.CuratorWatcher;
 import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.data.Stat;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.TransientDataAccessResourceException;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 
 @Slf4j
 public class ReplicaService {
@@ -54,71 +55,70 @@ public class ReplicaService {
     public ReplicaMaps initMaps() throws Exception {
         var prepareStat = new Stat();
         var prepareBytes = getAndWatch(prepareStat, SnapshotId.ZNODE_PREPARED, this::watchPrepared);
-        actOnPrepare(prepareBytes, prepareStat.getMzxid());
+        var prepareSnapshotId = objectMapper.readValue(prepareBytes, SnapshotId.class);
+        prepare(prepareSnapshotId, prepareStat.getMzxid());
 
         var activeStat = new Stat();
-        var activeBytes = getAndWatch(activeStat, SnapshotId.ZNODE_ACTIVATED, this::watchActive);
-        actOnActive(activeBytes, activeStat.getMzxid());
+        var activeBytes = getAndWatch(activeStat, SnapshotId.ZNODE_ACTIVATED, this::watchActivated);
+        var activeSnapshotId = objectMapper.readValue(activeBytes, SnapshotId.class);
+        activate(activeSnapshotId, activeStat.getMzxid());
 
         log.info("initialized subscription replica-maps");
         return replicaMaps;
     }
 
     private void watchPrepared(WatchedEvent event) throws Exception {
-        var prepareStat = new Stat();
-        var prepareBytes = getAndWatch(prepareStat, SnapshotId.ZNODE_PREPARED, this::watchPrepared);
-
-        actOnPrepare(prepareBytes, prepareStat.getMzxid());
-    }
-
-    private void watchActive(WatchedEvent event) throws Exception {
-        var activeStat = new Stat();
-        var activeBytes = getAndWatch(activeStat, SnapshotId.ZNODE_ACTIVATED, this::watchActive);
-
-        actOnActive(activeBytes, activeStat.getMzxid());
-    }
-
-    private void actOnPrepare(byte[] bytes, long mzxid) {
-        try {
-            var snapshotId = objectMapper.readValue(bytes, SnapshotId.class);
-            final List<SnapshotMongoDocument> docs;
+        if (event.getType() == Watcher.Event.EventType.NodeDataChanged) {
+            var prepareStat = new Stat();
+            var prepareBytes = getAndWatch(prepareStat, SnapshotId.ZNODE_PREPARED, this::watchPrepared);
+            final SnapshotId snapshotId;
             try {
-                docs = snapshotMongoRepo.findBySnapshotId(snapshotId.getValue().toHexString());
-            } catch (DataAccessResourceFailureException | TransientDataAccessResourceException ex) { //TODO: prove the exact exceptions
-                // TODO: handle MongoDB exception
-                subscriptionRepositoryManager.switchToHazelcast();
-                return;
+                snapshotId = objectMapper.readValue(prepareBytes, SnapshotId.class);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
 
-            var indexedMap = new IndexedMap(docs, snapshotId);
-            log.info("preparing mzxid {}", mzxid);
-            replicaMaps.prepare(indexedMap);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            prepare(snapshotId, prepareStat.getMzxid());
         }
     }
 
-    private void actOnActive(byte[] bytes, long mzxid) {
-        try {
-            var snapshotId = objectMapper.readValue(bytes, SnapshotId.class);
-            log.info("activating mzxid {}", mzxid);
-            if (snapshotId.compareTo(replicaMaps.getPrepared().get().getSnapshotId()) == 0) {
-                replicaMaps.activate();
-            } else {
-                final List<SnapshotMongoDocument> docs;
-                try {
-                    docs = snapshotMongoRepo.findBySnapshotId(snapshotId.getValue().toHexString());
-                } catch (DataAccessResourceFailureException | TransientDataAccessResourceException ex) { //TODO: prove the exact exceptions
-                    // TODO: handle MongoDB exception
-                    subscriptionRepositoryManager.switchToHazelcast();
-                    return;
-                }
-
-                var indexedMap = new IndexedMap(docs, snapshotId);
-                replicaMaps.activate(indexedMap);
+    private void watchActivated(WatchedEvent event) throws Exception {
+        if (event.getType() == Watcher.Event.EventType.NodeDataChanged) {
+            var activeStat = new Stat();
+            var activeBytes = getAndWatch(activeStat, SnapshotId.ZNODE_ACTIVATED, this::watchActivated);
+            final SnapshotId snapshotId;
+            try {
+                snapshotId = objectMapper.readValue(activeBytes, SnapshotId.class);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+
+            activate(snapshotId, activeStat.getMzxid());
+        }
+    }
+
+    private void prepare(SnapshotId snapshotId, long mzxid) {
+        final List<SnapshotMongoDocument> docs;
+        try {
+            docs = snapshotMongoRepo.findBySnapshotId(snapshotId.getValue().toHexString());
+        } catch (DataAccessResourceFailureException | TransientDataAccessResourceException ex) { //TODO: prove the exact exceptions
+            // TODO: handle MongoDB exception
+            subscriptionRepositoryManager.switchToHazelcast();
+            return;
+        }
+
+        var indexedMap = new IndexedMap(docs, snapshotId);
+        log.info("preparing mzxid {}", mzxid);
+        replicaMaps.prepare(indexedMap);
+    }
+
+    private void activate(SnapshotId snapshotId, long mzxid) {
+        log.info("activating mzxid {}", mzxid);
+        if (snapshotId.compareTo(replicaMaps.getPrepared().get().getSnapshotId()) == 0) {
+            replicaMaps.activate();
+        } else {
+            prepare(snapshotId, mzxid);
+            replicaMaps.activate();
         }
     }
 }

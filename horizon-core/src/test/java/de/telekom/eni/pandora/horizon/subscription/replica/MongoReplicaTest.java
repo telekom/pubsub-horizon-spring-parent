@@ -14,12 +14,12 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class ReplicaTest {
+class MongoReplicaTest {
 
     @Test
     void readsFromActiveMapOnly() throws Exception {
-        var activeDoc = ReplicaServiceTest.document("sub-a");
-        var preparedDoc = ReplicaServiceTest.document("sub-b");
+        var activeDoc = MongoReplicaServiceTest.document("sub-a");
+        var preparedDoc = MongoReplicaServiceTest.document("sub-b");
         var maps = new ReplicaMaps();
         maps.prepare(new IndexedMap(List.of(preparedDoc), new ObjectId()));
         maps.activate(new IndexedMap(List.of(activeDoc), new ObjectId()));
@@ -27,7 +27,7 @@ class ReplicaTest {
         var service = mock(ReplicaService.class);
         when(service.initMaps()).thenReturn(maps);
 
-        var replica = new Replica(service);
+        var replica = new MongoReplica(service);
 
         assertSame(activeDoc.getResource(), replica.get("sub-a"));
         assertNull(replica.get("sub-b"));
@@ -37,12 +37,12 @@ class ReplicaTest {
 
     @Test
     void followsActivationAfterConstruction() throws Exception {
-        var doc = ReplicaServiceTest.document("sub-a");
+        var doc = MongoReplicaServiceTest.document("sub-a");
         var maps = new ReplicaMaps();
         var service = mock(ReplicaService.class);
         when(service.initMaps()).thenReturn(maps);
 
-        var replica = new Replica(service);
+        var replica = new MongoReplica(service);
         assertNull(replica.get("sub-a"));
 
         maps.activate(new IndexedMap(List.of(doc), new ObjectId()));
@@ -55,6 +55,6 @@ class ReplicaTest {
         var service = mock(ReplicaService.class);
         when(service.initMaps()).thenThrow(new IllegalStateException("boom"));
 
-        assertThrows(IllegalStateException.class, () -> new Replica(service));
+        assertThrows(IllegalStateException.class, () -> new MongoReplica(service));
     }
 }

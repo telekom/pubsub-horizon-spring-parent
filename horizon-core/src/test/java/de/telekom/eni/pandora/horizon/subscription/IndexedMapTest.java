@@ -24,7 +24,7 @@ class IndexedMapTest {
         var second = document("id-2", "prod", "event.v1");
         var snapshotId = new ObjectId();
 
-        var map = new IndexedMap(List.of(first, second), 42L, snapshotId);
+        var map = new IndexedMap(List.of(first, second), snapshotId);
 
         assertSame(first.getResource(), map.get("id-1"));
         assertSame(second.getResource(), map.get("id-2"));
@@ -41,7 +41,7 @@ class IndexedMapTest {
         var first = document("id-1", "playground", "event.v1");
         var second = document("id-2", "playground", "event.v1");
 
-        var map = new IndexedMap(List.of(first, second), 1L, new ObjectId());
+        var map = new IndexedMap(List.of(first, second), new ObjectId());
 
         assertEquals(List.of(first.getResource(), second.getResource()), map.get("playground", "event.v1"));
     }

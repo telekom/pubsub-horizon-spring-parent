@@ -14,7 +14,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import static org.mockito.Mockito.*;
 
-class ReplicaConnectionListenerTest {
+class MongoReplicaConnectionListenerTest {
 
     private final SubscriptionRepository repository = mock(SubscriptionRepository.class);
     private final SubscriptionProxy mongoReplica = mock(SubscriptionProxy.class);

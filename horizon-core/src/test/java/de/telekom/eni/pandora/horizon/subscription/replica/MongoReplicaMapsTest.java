@@ -12,7 +12,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class ReplicaMapsTest {
+class MongoReplicaMapsTest {
 
     private final ReplicaMaps maps = new ReplicaMaps();
 
