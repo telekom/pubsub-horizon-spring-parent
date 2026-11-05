@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 public class IndexedMap {
-    private static final IndexedMap EMPTY_INDEXED_MAP = new IndexedMap(List.of(), SnapshotId.EMPTY_SNAPSHOT_ID);
+    private static final IndexedMap EMPTY_INDEXED_MAP = new IndexedMap(List.of(), SnapshotId.empty());
 
     private final Map<String, SubscriptionResource> subscriptionsById;
     private final Map<String, List<SubscriptionResource>> subscriptionsByEnvironmentAndEventType;

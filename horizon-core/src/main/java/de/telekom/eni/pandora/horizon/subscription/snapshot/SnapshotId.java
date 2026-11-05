@@ -4,6 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.subscription.snapshot;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
@@ -24,8 +25,13 @@ public class SnapshotId implements Comparable<SnapshotId> {
 
     private final ObjectId value;
 
-    public SnapshotId(@JsonProperty("snapshotId") String snapshotId) {
-        this.value = new ObjectId(snapshotId);
+    public static SnapshotId empty() {
+        return EMPTY_SNAPSHOT_ID;
+    }
+
+    @JsonCreator
+    public SnapshotId(@JsonProperty("snapshotId") String objectIdHexString) {
+        this.value = new ObjectId(objectIdHexString);
     }
 
     @Override
