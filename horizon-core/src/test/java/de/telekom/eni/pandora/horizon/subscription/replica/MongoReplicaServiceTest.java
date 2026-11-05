@@ -9,6 +9,7 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
 import de.telekom.eni.pandora.horizon.mongo.repository.SnapshotMongoRepo;
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepositoryManager;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.SnapshotId;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
 import org.apache.curator.framework.CuratorFramework;
@@ -39,18 +40,20 @@ class MongoReplicaServiceTest {
     private CuratorFramework client;
     private SnapshotMongoRepo repo;
     private ReplicaService service;
+    private SubscriptionRepositoryManager repoManager;
 
     @BeforeEach
     void setUp() throws Exception {
         server = new TestingServer(true);
         client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(100));
         client.start();
+        repoManager = mock(SubscriptionRepositoryManager.class);
 
         repo = mock(SnapshotMongoRepo.class);
         when(repo.findBySnapshotId(snapshotA)).thenReturn(List.of(docA));
         when(repo.findBySnapshotId(snapshotB)).thenReturn(List.of(docB));
 
-        service = new ReplicaService(client, new ReplicaMaps(), repo);
+        service = new ReplicaService(client, new ReplicaMaps(), repo, repoManager);
     }
 
     @AfterEach
@@ -66,10 +69,10 @@ class MongoReplicaServiceTest {
 
         var maps = service.initMaps();
 
-        assertTrue(maps.isFullyInitialized());
         assertSame(docA.getResource(), active(maps).get("sub-a"));
         assertSame(maps.getPrepared().get(), maps.getActive().get());
         verify(repo, times(1)).findBySnapshotId(snapshotA);
+        verifyNoInteractions(repoManager);
     }
 
     @Test

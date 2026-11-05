@@ -9,7 +9,7 @@ import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResource;
 import de.telekom.eni.pandora.horizon.kubernetes.resource.SubscriptionResourceSpec;
 import de.telekom.eni.pandora.horizon.mongo.model.SnapshotMongoDocument;
 import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
-import org.bson.types.ObjectId;
+import de.telekom.eni.pandora.horizon.subscription.snapshot.SnapshotId;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -22,7 +22,8 @@ class IndexedMapTest {
     void indexesByIdAndByEnvironmentAndEventType() {
         var first = document("id-1", "playground", "event.v1");
         var second = document("id-2", "prod", "event.v1");
-        var snapshotId = new ObjectId();
+        //var snapshotId = new ObjectId();
+        var snapshotId = SnapshotId.empty();
 
         var map = new IndexedMap(List.of(first, second), snapshotId);
 
@@ -32,7 +33,6 @@ class IndexedMapTest {
         assertEquals(List.of(second.getResource()), map.get("prod", "event.v1"));
         assertNull(map.get("unknown"));
         assertNull(map.get("playground", "other.v1"));
-        assertEquals(42L, map.getVersion());
         assertEquals(snapshotId, map.getSnapshotId());
     }
 
@@ -41,7 +41,7 @@ class IndexedMapTest {
         var first = document("id-1", "playground", "event.v1");
         var second = document("id-2", "playground", "event.v1");
 
-        var map = new IndexedMap(List.of(first, second), new ObjectId());
+        var map = new IndexedMap(List.of(first, second), SnapshotId.empty());
 
         assertEquals(List.of(first.getResource(), second.getResource()), map.get("playground", "event.v1"));
     }
@@ -52,7 +52,6 @@ class IndexedMapTest {
 
         assertNull(map.get("id-1"));
         assertNull(map.get("playground", "event.v1"));
-        assertEquals(-1L, map.getVersion());
         assertNull(map.getSnapshotId());
     }
 

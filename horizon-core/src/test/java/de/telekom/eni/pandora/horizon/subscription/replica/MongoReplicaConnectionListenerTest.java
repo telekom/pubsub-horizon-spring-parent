@@ -4,8 +4,7 @@
 
 package de.telekom.eni.pandora.horizon.subscription.replica;
 
-import de.telekom.eni.pandora.horizon.subscription.SubscriptionProxy;
-import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepository;
+import de.telekom.eni.pandora.horizon.subscription.SubscriptionRepositoryManager;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.state.ConnectionState;
 import org.junit.jupiter.api.Test;
@@ -15,25 +14,22 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.mockito.Mockito.*;
 
 class MongoReplicaConnectionListenerTest {
-
-    private final SubscriptionRepository repository = mock(SubscriptionRepository.class);
-    private final SubscriptionProxy mongoReplica = mock(SubscriptionProxy.class);
-    private final SubscriptionProxy hazelcastCache = mock(SubscriptionProxy.class);
     private final CuratorFramework client = mock(CuratorFramework.class);
-    private final ReplicaConnectionListener listener = new ReplicaConnectionListener(repository, mongoReplica, hazelcastCache);
+    private final SubscriptionRepositoryManager subscriptionRepositoryManager = mock(SubscriptionRepositoryManager.class);
+    private final ReplicaConnectionListener listener = new ReplicaConnectionListener(subscriptionRepositoryManager);
 
     @Test
     void switchesToHazelcastWhenConnectionIsLost() {
         listener.stateChanged(client, ConnectionState.LOST);
 
-        verify(repository).changeProxy(hazelcastCache);
+        verify(subscriptionRepositoryManager).switchToHazelcast();
     }
 
     @Test
     void switchesToReplicaWhenConnected() {
         listener.stateChanged(client, ConnectionState.CONNECTED);
 
-        verify(repository).changeProxy(mongoReplica);
+        verify(subscriptionRepositoryManager).switchToMongo();
     }
 
     @ParameterizedTest
@@ -41,6 +37,6 @@ class MongoReplicaConnectionListenerTest {
     void ignoresOtherStates(ConnectionState state) {
         listener.stateChanged(client, state);
 
-        verifyNoInteractions(repository);
+        verifyNoInteractions(subscriptionRepositoryManager);
     }
 }

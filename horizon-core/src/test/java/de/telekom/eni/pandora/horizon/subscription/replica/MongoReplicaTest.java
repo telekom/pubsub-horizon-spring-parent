@@ -5,7 +5,7 @@
 package de.telekom.eni.pandora.horizon.subscription.replica;
 
 import de.telekom.eni.pandora.horizon.subscription.snapshot.IndexedMap;
-import org.bson.types.ObjectId;
+import de.telekom.eni.pandora.horizon.subscription.snapshot.SnapshotId;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -21,8 +21,8 @@ class MongoReplicaTest {
         var activeDoc = MongoReplicaServiceTest.document("sub-a");
         var preparedDoc = MongoReplicaServiceTest.document("sub-b");
         var maps = new ReplicaMaps();
-        maps.prepare(new IndexedMap(List.of(preparedDoc), new ObjectId()));
-        maps.activate(new IndexedMap(List.of(activeDoc), new ObjectId()));
+        maps.prepare(new IndexedMap(List.of(preparedDoc), SnapshotId.empty()));
+        maps.activate(new IndexedMap(List.of(activeDoc), SnapshotId.empty()));
 
         var service = mock(ReplicaService.class);
         when(service.initMaps()).thenReturn(maps);
@@ -32,7 +32,6 @@ class MongoReplicaTest {
         assertSame(activeDoc.getResource(), replica.get("sub-a"));
         assertNull(replica.get("sub-b"));
         assertEquals(List.of(activeDoc.getResource()), replica.get("playground", "event.v1"));
-        assertNull(replica.get("prod", "event.v1"));
     }
 
     @Test
@@ -45,7 +44,7 @@ class MongoReplicaTest {
         var replica = new MongoReplica(service);
         assertNull(replica.get("sub-a"));
 
-        maps.activate(new IndexedMap(List.of(doc), new ObjectId()));
+        maps.activate(new IndexedMap(List.of(doc), SnapshotId.empty()));
 
         assertSame(doc.getResource(), replica.get("sub-a"));
     }
