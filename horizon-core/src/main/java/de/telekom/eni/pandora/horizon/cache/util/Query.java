@@ -62,6 +62,16 @@ public class Query {
         return null;
     }
 
+    public String getEnvironment() {
+        if (matchers.containsKey("spec.environment")) {
+            List<Object> values = matchers.get("spec.environment");
+            if (!values.isEmpty()) {
+                return values.get(0).toString();
+            }
+        }
+        return null;
+    }
+
     public static QueryBuilder builder(Class<?> type) {
         return new QueryBuilder().type(type).matchers(new HashMap<>());
     }

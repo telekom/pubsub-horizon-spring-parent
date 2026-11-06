@@ -11,6 +11,10 @@ import java.util.Optional;
 
 public interface JsonCacheFallback<T> {
 
+    default boolean isReady() {
+        return false;
+    }
+
     Optional<T> getByKey(String key);
 
     List<T> getQuery(Query query);

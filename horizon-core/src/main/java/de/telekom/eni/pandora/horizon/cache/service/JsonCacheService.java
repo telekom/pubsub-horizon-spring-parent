@@ -77,7 +77,7 @@ public class JsonCacheService<T> {
         return Optional.empty();
     }
 
-     public List<T> getQuery(Query query) throws JsonCacheException {
+    public List<T> getQuery(Query query) throws JsonCacheException {
         IMap<String, HazelcastJsonValue> map = getCacheMap();
         Collection<HazelcastJsonValue> values;
 
@@ -128,6 +128,16 @@ public class JsonCacheService<T> {
         }
     }
 
+    /**
+     * Indicates whether this cache can serve reads from Hazelcast or its fallback.
+     *
+     * @return {@code true} if the Hazelcast map is available or the fallback is ready
+     */
+    public boolean isReady() {
+        return getCacheMap() != null
+                || jsonCacheFallback != null && jsonCacheFallback.isReady();
+    }
+
     private List<T> mapAll(Collection<HazelcastJsonValue> values) throws JsonCacheException {
         var mappedValues = new ArrayList<T>();
 
@@ -151,7 +161,7 @@ public class JsonCacheService<T> {
                 }
 
                 map = hazelcastInstance.getMap(cacheMapName);
-                int mapSize = map.size();
+                map.size();
 
                 if (!listenerAdded && jsonEntryMapEventBroadcaster != null) {
                     map.addEntryListener(jsonEntryMapEventBroadcaster, true);

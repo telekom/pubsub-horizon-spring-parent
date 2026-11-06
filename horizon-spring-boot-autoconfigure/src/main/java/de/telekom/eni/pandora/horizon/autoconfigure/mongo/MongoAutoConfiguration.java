@@ -35,7 +35,9 @@ public class MongoAutoConfiguration {
 
     @Bean
     public MongoClient mongoClient(MongoProperties properties) {
-        log.debug("Using status database: " + properties.getDatabases().getRunTimeDatabase());
+        if (properties.getDatabases().getRunTimeDatabase() != null) {
+            log.debug("Using status database: " + properties.getDatabases().getRunTimeDatabase());
+        }
         log.debug("Using config database: " + properties.getDatabases().getConfigTimeDatabase());
 
         var connectionString = new ConnectionString(properties.getUrl());
@@ -47,7 +49,6 @@ public class MongoAutoConfiguration {
 
         return MongoClients.create(clientSettings);
     }
-
 
     @Bean(name = "mongoStatusTemplate")
     //@ConditionalOnMissingBean(name = "mongoStatusTemplate")

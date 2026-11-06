@@ -22,21 +22,10 @@ public class CacheProperties {
 
     private boolean enabled = false;
 
+    private LocalSubscriptionCacheProperties localSubscriptionCache = new LocalSubscriptionCacheProperties();
+
     private DeDuplicationProperties deDuplication = new DeDuplicationProperties();
 
     private Map<String, String> attributes = new HashMap<>();
-
-    @Getter
-    @Setter
-    public static class DeDuplicationProperties {
-
-        private boolean enabled = false;
-
-        private String defaultCacheName = "deduplication";
-
-        private long ttlInSeconds = 0;
-
-        private long maxIdleInSeconds = 1800; // 30 minutes
-    }
 
 }
