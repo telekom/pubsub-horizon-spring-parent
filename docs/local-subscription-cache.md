@@ -74,7 +74,7 @@ are listed in the [configuration reference](#configuration-reference).
 | Term | Meaning |
 |---|---|
 | Snapshot | Complete set of subscription entries of one version in the MongoDB `snapshot-collection`. Each entry holds `snapshotId`, `subscriptionId` and the subscription custom resource in `resource`. |
-| Head | Small JSON document that identifies a snapshot version: `snapshotId`, `documentCount`, optional `revision` and `sourceHash`, `createdAt`. See [Snapshot identity](#snapshot-identity). |
+| Head | Small JSON document that identifies a snapshot version: `snapshotId`, `documentCount`, `created`. See [Snapshot identity](#snapshot-identity). |
 | PREPARED head | ZNode `prepared-path`. Announces the next version; pods may **preload** it. Never authorizes activation. |
 | ACTIVATED head | ZNode `activated-path`. The **only activation authority**. Pods activate the snapshot it references. |
 | Expected head | The last valid ACTIVATED head read by this pod. Cleared when ACTIVATED is missing, invalid or unreadable, or when the ZooKeeper connection is lost. |
@@ -95,26 +95,24 @@ are listed in the [configuration reference](#configuration-reference).
 
 ### Snapshot identity
 
-Two heads reference the "same snapshot" according to these rules (`SubscriptionSnapshotHeads`, used by
+Two heads reference the "same snapshot" if they have the same `snapshotId` (`SubscriptionSnapshotHeads`, used by
 `SnapshotVersion.matches`):
 
 | Field | Validation | Identity |
 |---|---|---|
-| `snapshotId` | required, not blank | always compared |
-| `documentCount` | required, `> 0`; must equal the number of loaded entries | always compared |
-| `revision` | optional, integer | compared only when set on both heads |
-| `sourceHash` | optional, string; not verified against the entries | compared only when set on both heads |
-| `createdAt` | required; ISO-8601 with offset (`Z`, `+02:00`); a timestamp without offset is rejected | not compared |
-| `id` and unknown fields | ignored | not compared |
+| `snapshotId` | required, not blank | compared |
+| `documentCount` | required, `> 0`; must equal the number of loaded entries | not compared |
+| `created` | required; ISO-8601 with offset (`Z`, `+02:00`) | not compared |
+| `id` and unknown fields (e.g. `resumeToken`, `history` written by Quasar) | ignored | not compared |
 
-A changed `revision` or `sourceHash` with an unchanged `snapshotId` triggers a reload only when the field is set on
-both heads; if either head omits it, the field is ignored. Publishers should therefore set `revision` and
-`sourceHash` consistently or not at all. Invalid heads raise `SubscriptionCacheSnapshotException`.
+A head with an unchanged `snapshotId` but a different `documentCount` or `created` is therefore treated as the
+already active or prepared snapshot: it is neither reloaded nor checked against the entries again. Publishers must
+never reuse a `snapshotId` for different content. Invalid heads raise `SubscriptionCacheSnapshotException`.
 
-Example head payload in ZooKeeper:
+Example head payload in ZooKeeper (unknown fields omitted):
 
 ```json
-{"snapshotId":"2026-10-09T08:00:00Z-42","documentCount":1234,"revision":42,"sourceHash":"9f2c...","createdAt":"2026-10-09T08:00:00Z"}
+{"snapshotId":"6b042980f19831b3aff6b668","documentCount":1234,"created":"2026-10-09T08:00:00Z"}
 ```
 
 ## Architecture
@@ -182,19 +180,14 @@ classDiagram
         <<record>>
         -String snapshotId
         -Long documentCount
-        -Long revision
-        -String sourceHash
-        -Instant createdAt
+        -Instant created
         ~from(snapshotHead)$
         ~matches(other)
     }
     class SubscriptionSnapshotHead {
-        +id
         +snapshotId
         +documentCount
-        +revision
-        +sourceHash
-        +createdAt
+        +created
     }
     class EnvironmentEventTypeKey {
         <<record>>
@@ -360,7 +353,7 @@ but it cannot repair a violated contract.
 | A `snapshotId` is never reused for different content, and entries of a published snapshot are never modified. Entries are loaded by `snapshotId` only. | No |
 | Entries are deleted only when neither PREPARED nor ACTIVATED references their snapshot. | No; deleted entries cause a count mismatch |
 | `snapshot-collection` has an index on `snapshotId`; otherwise every pod load scans the collection. | No |
-| Heads follow the format in [Snapshot identity](#snapshot-identity). `revision` and `sourceHash` only identify a version; the cache does not verify them against the entries. | Format yes, content no |
+| Heads follow the format in [Snapshot identity](#snapshot-identity). | Format yes |
 | Only the publisher may write the PREPARED and ACTIVATED ZNodes (ZooKeeper ACL). | No |
 
 Behavior when the contract is violated:
@@ -435,11 +428,11 @@ flowchart LR
 | Trigger | Behavior |
 |---|---|
 | Startup | Registers the connection listener, starts both watches and immediately reads both heads. Without a ZooKeeper connection, this first run waits for the first `CONNECTED` event and then runs without jitter. `getInitialReconciliation()` only signals that this first run finished; whether the cache is `FRESH` is decided by the [startup barrier](#startup-barrier). |
-| PREPARED changed | Delayed by `0..snapshot-sync-jitter`. A newer event replaces a pending one. A valid payload is only prepared, never activated. A removed ZNode discards the prepared candidate. |
-| ACTIVATED changed | Reconciled immediately; cancels a pending PREPARED task and a pending reconnect task. Reads both heads; if ACTIVATED is already active and `FRESH`, a different PREPARED head may be preloaded instead. |
-| Periodic | Every `reconcile-interval` (first run offset by up to `head-check-jitter`), re-reads only ACTIVATED while connected. Does nothing while disconnected. `0s` disables it. |
+| PREPARED changed | Delayed by `0..snapshot-sync-jitter`. A newer event replaces a pending one. A valid payload is only prepared, never activated. A removed ZNode discards the prepared candidate. Ignored while a reconnect reread is pending. |
+| ACTIVATED changed | Reconciled immediately; cancels a pending PREPARED task. Reads both heads; if ACTIVATED is already active and `FRESH`, a different PREPARED head may be preloaded instead. Ignored while a reconnect reread is pending, so the reconnect jitter also applies when the head changed during the outage. |
+| Periodic | Every `reconcile-interval` (first run offset by up to `head-check-jitter`), re-reads only ACTIVATED while connected. Does nothing while disconnected or while a reconnect reread is pending. `0s` disables it. |
 | `SUSPENDED` / `LOST` | Both handled identically: cancel pending tasks, advance the connection epoch (closes the commit gate) and, on the first transition from connected, mark the cache unconfirmed. No MongoDB I/O. |
-| `RECONNECTED` (or `CONNECTED` after a failed first connection) | Advances the epoch and schedules a full reread after `0..snapshot-sync-jitter`. A matching `FRESH` snapshot is kept; a matching `STALE` one is reactivated without reloading. |
+| `RECONNECTED` (or `CONNECTED` after a failed first connection) | Advances the epoch and schedules a full reread after `0..snapshot-sync-jitter`. Until that reread starts, head events and periodic checks are held back; the reread then reads both current heads. A matching `FRESH` snapshot is kept; a matching `STALE` one is reactivated without reloading. |
 | Shutdown | Stops accepting work, cancels delayed tasks, removes the listener, stops the executor and closes both Curator caches. Spring closes the Curator client separately. |
 
 `SUSPENDED` means the connection is interrupted while the ZooKeeper session may still be valid; `LOST` means Curator
@@ -486,8 +479,7 @@ candidate through one atomic reference update.
 | Operation | Scenario | Result | Active snapshot |
 |---|---|---|---|
 | `prepare` | Valid head and complete entries | Stored as `preparedSnapshot` | Unchanged |
-| `prepare` | Head matches the active or prepared snapshot | Skipped | Unchanged |
-| `prepare` | Same `snapshotId`, different identity (`documentCount`, or `revision`/`sourceHash` set on both heads) | Loaded and prepared again | Unchanged |
+| `prepare` | Head matches the active or prepared snapshot (same `snapshotId`, even if `documentCount` or `created` differ) | Skipped; no reload | Unchanged |
 | `prepare` | Invalid head or entry, duplicate ID, count mismatch, load timeout | Fails; existing cache state is unchanged | Unchanged |
 | `activate` | Prepared snapshot matches the head and is non-empty | Becomes active atomically | New snapshot |
 | `activate` | Head matches the already active snapshot | Idempotent; freshness re-evaluated | Unchanged |
