@@ -17,6 +17,8 @@ import de.telekom.eni.pandora.horizon.mongo.model.SubscriptionSnapshotHead;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
@@ -101,6 +103,60 @@ class MongoSubscriptionSnapshotLoaderTest {
 
         assertThrows(SubscriptionCacheSnapshotException.class, () -> loader.load(head));
         verify(mongoTemplate, never()).getCollection(anyString());
+    }
+
+    @Test
+    void shouldRejectEntryWithoutResource() {
+        var entry = snapshotEntry("snapshot-1", "subscription-1");
+        entry.remove("resource");
+        returnEntries(entry);
+
+        var exception = assertThrows(SubscriptionCacheSnapshotException.class,
+                () -> loader.load(snapshotHead("snapshot-1", 1L)));
+
+        assertEquals("Invalid subscription snapshot entry without resource", exception.getMessage());
+    }
+
+    @Test
+    void shouldRejectEntryWithoutSubscriptionData() {
+        var entry = snapshotEntry("snapshot-1", "subscription-1");
+        entry.get("resource", Document.class).get("spec", Document.class).remove("subscription");
+        returnEntries(entry);
+
+        var exception = assertThrows(SubscriptionCacheSnapshotException.class,
+                () -> loader.load(snapshotHead("snapshot-1", 1L)));
+
+        assertEquals("Invalid subscription document without subscription data", exception.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"spec.environment", "spec.subscription.subscriptionId", "spec.subscription.type"})
+    void shouldRejectEntryWithoutLookupField(String missingField) {
+        var entry = snapshotEntry("snapshot-1", "subscription-1");
+        var path = missingField.split("\\.");
+        var parent = entry.get("resource", Document.class);
+        for (int i = 0; i < path.length - 1; i++) {
+            parent = parent.get(path[i], Document.class);
+        }
+        parent.remove(path[path.length - 1]);
+        returnEntries(entry);
+
+        var exception = assertThrows(SubscriptionCacheSnapshotException.class,
+                () -> loader.load(snapshotHead("snapshot-1", 1L)));
+
+        assertEquals("Invalid subscription document without id, environment or event type", exception.getMessage());
+    }
+
+    @Test
+    void shouldRejectUnmappableEntry() {
+        var entry = snapshotEntry("snapshot-1", "subscription-1").append("_id", "entry-1");
+        entry.put("resource", "not-a-document");
+        returnEntries(entry);
+
+        var exception = assertThrows(SubscriptionCacheSnapshotException.class,
+                () -> loader.load(snapshotHead("snapshot-1", 1L)));
+
+        assertEquals("Invalid subscription snapshot entry entry-1", exception.getMessage());
     }
 
     private void returnEntries(Document... entries) {
